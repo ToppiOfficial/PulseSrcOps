@@ -1,7 +1,6 @@
 __all__ = [
     # items
     'ValveSource_FloatMapRemap',
-    'KitsuneResourceItem',
     'PrefabItem',
     'FlexControllerItem',
     'DmeFlexRuleItem',

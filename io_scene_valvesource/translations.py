@@ -202,6 +202,10 @@ _data = {
         'en': "Controller Source",
         'ja': "コントローラーのソースファイル",
     },
+    'exportables_group_bypass_suffix': {
+        'en': "(bypassed)",
+        'ja': "(バイパス)",
+    },
     'exportables_group_mute_suffix': {
         'en': "(suppressed)",
         'ja': "(ミュート)",
@@ -221,6 +225,27 @@ _data = {
     'exporter_err_bonelimit': {
         'en': "Exported {0} bones, but SMD only supports {1}!",
         'ja': "{0}ボーンをエクスポートしましたが、SMDは{1}ボーンまでしかサポートしていません",
+    },
+    'exporter_warn_procbone_no_action': {
+        'en': "Procedural bone '{0}' has no action; keeping it a plain joint.",
+    },
+    'exporter_warn_procbone_no_driver': {
+        'en': "Procedural bone '{0}' has no exportable driver bone; keeping it a plain joint.",
+    },
+    'exporter_warn_procbone_no_triggers': {
+        'en': "Procedural bone '{0}' produced no triggers; keeping it a plain joint.",
+    },
+    'exporter_warn_procbone_no_target': {
+        'en': "Procedural LookAt bone '{0}' has no target attachment; keeping it a plain joint.",
+    },
+    'exporter_warn_procbone_too_many': {
+        'en': "Procedural bone '{0}' has {1} triggers; Source clamps to 32.",
+    },
+    'exporter_warn_procbone_duplicate': {
+        'en': "Duplicate procedural entry for helper bone '{0}'; only the first is exported.",
+    },
+    'exporter_warn_procbone_jiggle_conflict': {
+        'en': "Bone '{0}' is both a jigglebone and a procedural helper; keeping the jigglebone and skipping the procedural entry.",
     },
     'exporter_err_dme_corrective_no_components': {
         'en': "'{0}': CORRECTIVE rule has no components",
@@ -289,6 +314,10 @@ _data = {
     'exporter_err_groupempty': {
         'en': "Group {0} has no active objects",
         'ja': "グループ{0}にアクティブなオブジェクトがありません",
+    },
+    'exporter_err_groupbypassed': {
+        'en': "Group {0} is bypassed into its parent group",
+        'ja': "グループ「{0}」は親グループにバイパスされています",
     },
     'exporter_err_groupmuted': {
         'en': "Group {0} is suppressed",
@@ -473,6 +502,14 @@ _data = {
     'gen_drivers_tip': {
         'en': "Adds Blender animation drivers to corrective Source engine shapes",
         'ja': "Source Engineの是正シェイプキーにドライバーを追加",
+    },
+    'group_bypass': {
+        'en': "Bypass",
+        'ja': "バイパス",
+    },
+    'group_bypass_tip': {
+        'en': "Fold this nested group's objects into its parent group instead of exporting it as a separate exportable. Has no effect on top-level groups",
+        'ja': "このネストされたグループを個別のエクスポート対象にせず、親グループにオブジェクトを統合します。トップレベルのグループには影響しません",
     },
     'group_merge_mech': {
         'en': "Merge mechanical parts",
@@ -1079,10 +1116,6 @@ _data = {
         'en': "Flex Controller Specials",
         'ja': "フレックスコントローラー特別メニュー",
     },
-    'menu_kitsune_compile_choice': {
-        'en': "KitsuneResource",
-        'ja': "KitsuneResource",
-    },
     'op_add_all_flex_controllers': {
         'en': "Add All Flex Controllers",
         'ja': "すべてのフレックスコントローラーを追加",
@@ -1130,14 +1163,6 @@ _data = {
     'op_copy_source_bone_props': {
         'en': "Copy Source Bone Properties",
         'ja': "Sourceボーンプロパティをコピー",
-    },
-    'op_kitsune_compile': {
-        'en': "KitsuneResource Compile",
-        'ja': "KitsuneResourceコンパイル",
-    },
-    'op_kitsune_load_entries': {
-        'en': "Reload Model Entries",
-        'ja': "モデルエントリーを再読み込み",
     },
     'op_move_flex_controller': {
         'en': "Move Flex Controller",
@@ -1207,6 +1232,14 @@ _data = {
         'en': "Optional - leave blank to configure later",
         'ja': "任意 — 後で設定する場合は空欄のままにしてください",
     },
+    'op_proc_bone_add_lookat': {
+        'en': "Add Selected as LookAt Helpers",
+        'ja': "選択ボーンをLookAtヘルパーとして追加",
+    },
+    'op_proc_bone_add_lookat_tip': {
+        'en': "Add each selected bone as a helper bone for new LookAt Procedural Bone entries, aiming at a chosen bone or attachment",
+        'ja': "選択した各ボーンを新しいLookAt Procedural Boneのエントリとして追加し、選択したボーンまたはアタッチメントを向かせます。",
+    },
     'op_remove_flex_controller': {
         'en': "Remove Flex Controller",
         'ja': "フレックスコントローラーを削除",
@@ -1234,10 +1267,6 @@ _data = {
     'panel_jigglebones': {
         'en': "Jigglebones",
         'ja': "ジグルボーン",
-    },
-    'panel_kitsune_resource': {
-        'en': "Kitsune Resource Compile",
-        'ja': "Kitsuneリソースコンパイル",
     },
     'panel_level_of_detail': {
         'en': "Level Of Detail",
@@ -1296,16 +1325,16 @@ _data = {
         'ja': "プレハブモード",
     },
     'prefab_export_mode_tip': {
-        'en': "How jigglebones, attachments and hitboxes are exported (Source 1 only). QCI writes them to .qci prefab files; DME encodes jigglebones and hitboxes into the model .dmx instead (procedural bones still export as .vrd)",
-        'ja': "ジグルボーン・アタッチメント・ヒットボックスのエクスポート方法 (Source 1 のみ)。QCI は .qci プレハブファイルに書き出し、DME はジグルボーンとヒットボックスをモデルの .dmx に埋め込みます (プロシージャルボーンは引き続き .vrd)",
+        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported (Source 1 only). QCI writes them to .qci/.vrd prefab files; DME encodes them into the model .dmx instead",
+        'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法 (Source 1 のみ)。QCI は .qci/.vrd プレハブファイルに書き出し、DME はそれらをモデルの .dmx に埋め込みます",
     },
     'prefab_export_mode_qci_tip': {
         'en': "Write jigglebones, attachments and hitboxes to separate .qci prefab files",
         'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones and hitboxes into the exported model .dmx (no .qci is written); attachments are embedded in the model .dmx. Procedural bones still export as .vrd. Requires a DME-capable Source 1 compiler (KitsuneMDL)",
-        'ja': "ジグルボーンとヒットボックスをエクスポートされるモデルの .dmx に埋め込みます (.qci は書き出されません)。アタッチメントもモデルの .dmx に埋め込まれます。プロシージャルボーンは引き続き .vrd。DME 対応の Source 1 コンパイラ (KitsuneMDL) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (KitsuneMDL)",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (KitsuneMDL) が必要です",
     },
     'prop_arm_items_view': {
         'en': "View",
@@ -2076,86 +2105,6 @@ _data = {
         'en': "Spring strength resisting yaw rotation",
         'ja': "ヨー回転に抵抗するばね力",
     },
-    'prop_kitsuneresource_active_entry': {
-        'en': "Active Entry",
-        'ja': "アクティブエントリー",
-    },
-    'prop_kitsuneresource_archive_old': {
-        'en': "Archive Previous Version",
-        'ja': "旧バージョンをアーカイブ",
-    },
-    'prop_kitsuneresource_archive_old_tip': {
-        'en': "Archive the previous compiled version before overwriting",
-        'ja': "上書き前に以前のコンパイル済みバージョンをアーカイブ",
-    },
-    'prop_kitsuneresource_args': {
-        'en': "Arguments",
-        'ja': "引数",
-    },
-    'prop_kitsuneresource_args_tip': {
-        'en': "Additional command-line arguments passed to KitsuneResource",
-        'ja': "KitsuneResourceに渡す追加のコマンドライン引数",
-    },
-    'prop_kitsuneresource_external_console_tip': {
-        'en': "Launch the compiler in a separate console window instead of streaming output into Blender. The window stays open after the compile and Blender does not wait for it to finish",
-        'ja': "コンパイラーをBlender内に出力する代わりに別のコンソールウィンドウで起動します。コンパイル後もウィンドウは開いたままで、Blenderは完了を待ちません",
-    },
-    'prop_kitsuneresource_config': {
-        'en': "Config",
-        'ja': "設定ファイル",
-    },
-    'prop_kitsuneresource_config_tip': {
-        'en': "Path to the KitsuneResource JSON config file",
-        'ja': "KitsuneResourceのJSON設定ファイルへのパス",
-    },
-    'prop_kitsuneresource_executable': {
-        'en': "Executable",
-        'ja': "実行ファイル",
-    },
-    'prop_kitsuneresource_app_path_tip': {
-        'en': "Path to the KitsuneResource executable",
-        'ja': "KitsuneResourceの実行ファイルへのパス",
-    },
-    'prop_kitsuneresource_game_or_package': {
-        'en': "Game or Package",
-        'ja': "ゲームまたはパッケージ",
-    },
-    'prop_kitsuneresource_game_or_package_tip': {
-        'en': "Compile targeting a game or a standalone package",
-        'ja': "ゲームまたはスタンドアロンパッケージを対象にコンパイル",
-    },
-    'prop_kitsuneresource_no_mat_local': {
-        'en': "No Mat Local",
-        'ja': "ローカルマテリアルなし",
-    },
-    'prop_kitsuneresource_no_mat_local_tip': {
-        'en': "Pass --no-mat-local to KitsuneResource",
-        'ja': "KitsuneResourceに--no-mat-localを渡す",
-    },
-    'prop_kitsuneresource_project_dir': {
-        'en': "Project Directory",
-        'ja': "プロジェクトディレクトリ",
-    },
-    'prop_kitsuneresource_project_path_tip': {
-        'en': "Root directory of the KitsuneResource project",
-        'ja': "KitsuneResourceプロジェクトのルートディレクトリ",
-    },
-    'prop_kitsuneresource_single_addon': {
-        'en': "Single Addon",
-        'ja': "シングルアドオン",
-    },
-    'prop_kitsuneresource_single_addon_tip': {
-        'en': "Pass --single-addon to KitsuneResource",
-        'ja': "KitsuneResourceに--single-addonを渡す",
-    },
-    'prop_kr_entry_export_tip': {
-        'en': "Include this entry in the next compile",
-        'ja': "次のコンパイルにこのエントリーを含める",
-    },
-    'prop_kr_entry_type_tip': {
-        'en': "Whether this is a model or data resource entry",
-        'ja': "これがモデルかデータのリソースエントリーかを指定",
-    },
     'prop_location_x': {
         'en': "Location X",
         'ja': "位置 X",
@@ -2440,6 +2389,26 @@ _data = {
     'prop_proc_bone_lookat_target_tip': {
         'en': "Bone whose head position this bone aims at",
         'ja': "このボーンが向くヘッド位置を持つボーン",
+    },
+    'prop_proc_bone_lookat_target_type': {
+        'en': "Target Type",
+        'ja': "ターゲットタイプ",
+    },
+    'prop_proc_bone_lookat_target_type_tip': {
+        'en': "Whether the LookAt target is a bone or an attachment (Empty parented to a bone)",
+        'ja': "LookAtターゲットがボーンか、アタッチメント（ボーンに親付けされたEmpty）かを指定します。",
+    },
+    'prop_proc_bone_lookat_target_attachment': {
+        'en': "Target Attachment",
+        'ja': "ターゲットアタッチメント",
+    },
+    'prop_proc_bone_lookat_target_attachment_tip': {
+        'en': "Empty object whose position this bone aims at. Must be parented to a bone on this armature",
+        'ja': "このボーンが向く位置を持つEmptyオブジェクト。このアーマチュアのボーンに親付けされている必要があります。",
+    },
+    'warn_lookat_attachment_invalid': {
+        'en': "Pick an Empty parented to a bone on this armature",
+        'ja': "このアーマチュアのボーンに親付けされたEmptyを選択してください",
     },
     'prop_proc_bone_lookat_up_axis': {
         'en': "Up Axis",

@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
-from ..export_smd import SmdExporter, PrefabExporter, KitsuneResourceCompile
+from ..export_smd import SmdExporter, PrefabExporter
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
@@ -85,11 +85,11 @@ class SMD_MT_ExportChoice(Menu):
                 if is_attachment:
                     allowed.add('ATTACHMENTS')
 
-            # In DME mode jigglebones/attachments/hitboxes are encoded into the model DMX,
-            # so their standalone .qci export buttons are dead-ends - hide them. Procedural
-            # bones still export as a .vrd, so they stay.
+            # In DME mode jigglebones/attachments/hitboxes AND procedural bones are all
+            # encoded into the model DMX, so their standalone .qci/.vrd export buttons are
+            # dead-ends - hide them.
             if prefab_mode_is_dme(context.scene):
-                allowed -= {'JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES'}
+                allowed -= {'JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES', 'PROCEDURAL'}
 
             entries = [(t, c) for t, c in available if t in allowed]
             if entries:
@@ -99,56 +99,6 @@ class SMD_MT_ExportChoice(Menu):
                     l.operator(PrefabExporter.bl_idname,
                                text=f"{label} ({count}) \"{arm.name}\"",
                                icon=icon).export_type = ptype
-
-
-class SMD_MT_KitsuneCompileChoice(Menu):
-    bl_label = "KitsuneResource"
-
-    def draw(self, context):
-        layout = self.layout
-        vs = context.scene.vs
-
-        layout.operator("smd.kitsuneresource_configure", text="Configure...", icon='SETTINGS')
-
-        has_valid_config = (
-            len(vs.kitsuneresource_app_path) > 0
-            and len(vs.kitsuneresource_config) > 0
-            and len(vs.kitsuneresource_project_path) > 0
-            and (len(vs.kitsuneresource_model_entries) > 0 or len(vs.kitsuneresource_data_entries) > 0)
-        )
-
-        if not has_valid_config:
-            return
-
-        layout.separator()
-        layout.operator_context = 'EXEC_DEFAULT'
-
-        checked_count = (
-            sum(1 for e in vs.kitsuneresource_model_entries if e.export)
-            + sum(1 for e in vs.kitsuneresource_data_entries if e.export)
-        )
-
-        op = layout.operator(KitsuneResourceCompile.bl_idname, text="Compile All", icon='WORLD')
-        op.export_choice = 'ALL'
-        op.entry_index   = -1
-
-        op = layout.operator(KitsuneResourceCompile.bl_idname, text=f"Compile ({checked_count})", icon='CHECKBOX_HLT')
-        op.export_choice = 'CHECKED'
-        op.entry_index   = -1
-
-        layout.separator()
-        for i, entry in enumerate(vs.kitsuneresource_model_entries):
-            op = layout.operator(KitsuneResourceCompile.bl_idname, text=entry.name, icon='MESH_DATA')
-            op.export_choice = 'ENTRY'
-            op.entry_index   = i
-            op.entry_type    = 'MODEL'
-
-        layout.separator()
-        for i, entry in enumerate(vs.kitsuneresource_data_entries):
-            op = layout.operator(KitsuneResourceCompile.bl_idname, text=entry.name, icon='FILE_CACHE')
-            op.export_choice = 'ENTRY'
-            op.entry_index   = i
-            op.entry_type    = 'DATA'
 
 
 class SMD_MT_ConfigureScene(Menu):

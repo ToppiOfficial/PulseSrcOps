@@ -752,26 +752,32 @@ def _axis_to_vec(axes) -> Vector:
 
 
 def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None:
+    """Mirror of the engine's DoAimAtBone (source-sdk-2013 bone_setup.cpp).
+
+    The orientation is built absolutely, not as a delta from the animated pose:
+    aimRotation takes the constant aim axis onto the world aim direction, then a
+    twist about that direction aligns the up axis with the helper's rest
+    orientation carried by the parent's animation (the engine's boneLocalToWorld
+    reference) - NOT world Z. The helper's own animated local rotation is
+    ignored, exactly like the engine.
+    """
     helper_pb = arm_ob.pose.bones.get(entry.helper_bone)
     driver_pb = arm_ob.pose.bones.get(entry.driver_bone)
     if not helper_pb or not driver_pb:
         return
 
+    # anim_world = parent chain @ rest local (engine: parentSpace @ basepos/quat);
+    # goal_world adds the export offset, making it the helper's Source-frame
+    # boneLocalToWorld - the frame the engine rotates userUpVector by.
     anim_world, goal_world = _get_animated_goal(arm_ob, helper_pb, arm_world_inv)
-    anim_rot      = anim_world.to_3x3()
-    goal_rot      = goal_world.to_3x3()
-    helper_base   = anim_world.to_translation()
+    goal_rot = goal_world.to_3x3()
+    aim_world_position = anim_world.to_translation()
 
-    # Aim and up vectors: local bone space -> world space, via goal_world so that
-    # the bone's export rotation offset is respected (mirrors the jiggle bone pattern
-    # which uses _col(goal_world, fwd_col) for the same reason).
-    aim_local     = _axis_to_vec(getattr(entry, 'lookat_aim_axis', '+X'))
-    up_local      = _axis_to_vec(getattr(entry, 'lookat_up_axis',  '+Z'))
-    aim_world_cur = (goal_rot @ aim_local).normalized()
-    up_world_cur  = (goal_rot @ up_local).normalized()
+    user_aim = _axis_to_vec(getattr(entry, 'lookat_aim_axis', '+X'))
+    user_up  = _axis_to_vec(getattr(entry, 'lookat_up_axis',  '+Z'))
 
-    # Driver bone: use pb.matrix (actual animated pose, not rest-pose reconstruction)
-    # then apply the same export rotation offset that _get_animated_goal would add.
+    # Aim target (engine: aimAtSpace) - the attachment sits on the driver bone
+    # with lookat_offset as its local translation.
     # NOTE: _get_animated_goal must NOT be used here it rebuilds from bone.matrix_local
     # (rest pose), giving wrong positions whenever the driver bone is animated/posed. too bad!
     driver_key = (arm_ob.name, entry.driver_bone)
@@ -780,35 +786,50 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
     else:
         driver_mat = arm_ob.matrix_world @ driver_pb.matrix @ _get_export_offset_mat(driver_pb)
 
-    off = getattr(entry, 'lookat_offset', None)
-    if off is not None:
-        target_pos = (driver_mat @ Vector((off[0], off[1], off[2], 1.0))).to_3d()
+    loff = getattr(entry, 'lookat_offset', None)
+    if loff is not None:
+        target_pos = (driver_mat @ Vector((loff[0], loff[1], loff[2], 1.0))).to_3d()
     else:
         target_pos = driver_mat.to_translation()
 
-    aim_dir = target_pos - helper_base
-    if aim_dir.length > 1e-6:
-        aim_dir = aim_dir.normalized()
+    aim_vector = target_pos - aim_world_position
+    if aim_vector.length > 1e-6:
+        aim_vector.normalize()
     else:
-        aim_dir = aim_world_cur.copy()
+        av = goal_rot @ user_aim
+        aim_vector = av.normalized() if av.length > 1e-9 else Vector((0.0, 0.0, 1.0))
 
-    # Primary rotation: align aim axis -> desired aim direction
-    r1          = aim_world_cur.rotation_difference(aim_dir)
-    up_after_r1 = (r1.to_matrix() @ up_world_cur).normalized()
+    # aimRotation: shortest arc taking the aim axis onto the aim direction.
+    aim_rotation = user_aim.rotation_difference(aim_vector)
 
-    # Secondary rotation: twist around aim_dir to keep up axis near world Z
-    world_up      = Vector((0.0, 0.0, 1.0))
-    up_proj       = up_after_r1 - aim_dir * up_after_r1.dot(aim_dir)
-    world_up_proj = world_up    - aim_dir * world_up.dot(aim_dir)
+    bone_rotation = aim_rotation
+    # Engine skips the up correction entirely when the user aim and up axes are
+    # parallel (degenerate configuration).
+    if 1.0 - abs(user_up.dot(user_aim)) > 1e-6:
+        # pUp: up axis after aimRotation, projected perpendicular to the aim.
+        tmp_up = aim_rotation @ user_up
+        p_up = tmp_up - aim_vector * aim_vector.dot(tmp_up)
 
-    if up_proj.length > 1e-6 and world_up_proj.length > 1e-6:
-        r2 = up_proj.normalized().rotation_difference(world_up_proj.normalized())
-    else:
-        r2 = Quaternion()
+        # pParentUp: reference up = userUpVector rotated by boneLocalToWorld,
+        # projected perpendicular to the aim.
+        tmp_parent_up = goal_rot @ user_up
+        p_parent_up = tmp_parent_up - aim_vector * aim_vector.dot(tmp_parent_up)
 
-    new_rot   = ((r2.to_matrix() @ r1.to_matrix()) @ anim_rot).normalized()
+        if p_up.length > 1e-6 and p_parent_up.length > 1e-6:
+            p_up.normalize()
+            p_parent_up.normalize()
+            # Engine quirk kept: zero twist when the projected ups are parallel
+            # OR anti-parallel (angle forced to 0, never a 180 degree flip).
+            if 1.0 - abs(p_up.dot(p_parent_up)) > 1e-7:
+                up_rotation = p_up.rotation_difference(p_parent_up)
+                bone_rotation = up_rotation @ aim_rotation
+
+    # bone_rotation is the Source-frame world orientation; strip the export
+    # offset to get back to the Blender bone frame (goal = anim @ offset).
+    off_rot   = _get_export_offset_mat(helper_pb).to_3x3()
+    new_rot   = bone_rotation.to_matrix() @ off_rot.inverted()
     new_world = new_rot.to_4x4()
-    new_world.translation = helper_base
+    new_world.translation = aim_world_position
 
     _tick_sim_world[(arm_ob.name, helper_pb.name)] = new_world
     pose_mat = arm_world_inv @ new_world

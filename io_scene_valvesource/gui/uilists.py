@@ -1,25 +1,6 @@
 import bpy
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
-from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, validate_flex_expression, validate_corrective_components, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_delta_override_conflicts, get_dme_renamed_delta_names, get_dme_split_delta_conflicts
-
-
-class SMD_UL_KitsuneResourceEntries(UIList):
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname): # pyright: ignore
-        if self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-
-        vs = data
-        if item.entry_type == 'MODEL':
-            source = next((e for e in vs.kitsuneresource_model_entries if e.name == item.name), None)
-            entry_icon = 'MESH_DATA'
-        else:
-            source = next((e for e in vs.kitsuneresource_data_entries if e.name == item.name), None)
-            entry_icon = 'FILE_CACHE'
-
-        target = source if source is not None else item
-        layout.prop(target, "export", text="",
-                    icon='CHECKBOX_HLT' if target.export else 'CHECKBOX_DEHLT', emboss=False)
-        layout.label(text=item.name, icon=entry_icon)
+from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, validate_flex_expression, validate_corrective_components, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_delta_override_conflicts, get_dme_renamed_delta_names, get_dme_split_delta_conflicts, is_bypassed_into_parent
 
 
 class SMD_UL_ExportItems(UIList):
@@ -30,7 +11,7 @@ class SMD_UL_ExportItems(UIList):
 
         obj = item.item
         is_collection = isinstance(obj, Collection)
-        enabled = not (is_collection and obj.vs.mute)
+        enabled = not (is_collection and (obj.vs.mute or is_bypassed_into_parent(obj)))
 
         col = layout.column()
         split1 = self._draw_header_row(col, obj, item, enabled, index, is_collection = is_collection)
@@ -349,7 +330,10 @@ class SMD_UL_ProcBones(UIList):
         row.label(text=item.helper_bone if item.helper_bone else "", icon='BONE_DATA')
         row.label(text=item.driver_bone if item.driver_bone else "", icon='DRIVER')
         if proc_type == 'TRIGGER':
-            row.label(text=item.action.name if item.action else "", icon='ACTION')
+            action_label = item.action.name if item.action else ""
+            if action_label and item.action_slot_name:
+                action_label = f"{item.action_slot_name} ({action_label})"
+            row.label(text=action_label)
 
 
 class SMD_UL_AttachmentDisplayMeshes(UIList):

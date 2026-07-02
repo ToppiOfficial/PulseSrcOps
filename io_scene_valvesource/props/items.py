@@ -1,6 +1,5 @@
 __all__ = [
     'ValveSource_FloatMapRemap',
-    'KitsuneResourceItem',
     'PrefabItem',
     'FlexControllerItem',
     'DmeFlexRuleItem',
@@ -51,16 +50,6 @@ class AttachmentDisplayMeshItem(bpy.types.PropertyGroup):
         description=get_id('prop_attachment_display_mesh_color_tip'),
         subtype='COLOR_GAMMA', size=4,
         default=(0.3, 0.9, 1.0, 0.45), min=0.0, max=1.0,
-    )
-
-
-class KitsuneResourceItem(bpy.types.PropertyGroup):
-    name       : StringProperty(name="Name")
-    export     : BoolProperty(name="Export", description=get_id("prop_kr_entry_export_tip"), default=True)
-    entry_type : EnumProperty(
-        description=get_id("prop_kr_entry_type_tip"),
-        items=[('MODEL', "Model", ""), ('DATA', "Data", "")],
-        default='MODEL'
     )
 
 

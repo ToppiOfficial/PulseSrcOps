@@ -28,7 +28,7 @@ from bpy.types import Collection
 from .utils import *
 from .keyvalues3 import *
 from . import datamodel, ordered_set, flex
-from .prefab_io import jigglebone as _jigglebone, hitbox as _hitbox
+from .prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 
 # -----------------------------------------------------------------------------
@@ -999,8 +999,14 @@ class ExportPlanner:
     # -- collection planning --------------------------------------------------
 
     def _plan_collection(self, col: Collection) -> list[ExportTask]:
+        # Objects folded in from 'bypass' child collections are exported as part of
+        # this group. Anything beyond col's own objects means we must route the
+        # export through a temp collection so the folded objects are actually linked.
+        export_objects = get_collection_export_objects(col)
+        has_folded = len(export_objects) > len(col.objects)
+
         plans: dict[bpy.types.Object, _MeshPlan] = {}
-        for ob in col.objects:
+        for ob in export_objects:
             if not ob.vs.export:
                 continue
             plans[ob] = self._plan_mesh_ob(ob, ob.name, for_collection=True)
@@ -1034,7 +1040,7 @@ class ExportPlanner:
                 if hasattr(mod, 'object') and mod.object and mod.object in effective_objects:
                     mod.object = effective_objects[mod.object]
 
-        needs_temp = any(p.target is not p.source for p in plans.values())
+        needs_temp = has_folded or any(p.target is not p.source for p in plans.values())
         if needs_temp:
             target_col = self._make_collection(col.name + "_temp_base", base_obs)
             self._copy_collection_export_settings(col, target_col)
@@ -1048,7 +1054,7 @@ class ExportPlanner:
         lod_buckets:  dict[int, list[bpy.types.Object]] = collections.defaultdict(list)
         edgeline_obs: list[bpy.types.Object] = []
 
-        for ob in col.objects:
+        for ob in export_objects:
             if not ob.vs.export or ob.session_uid not in State.exportableObjects:
                 continue
             if not is_mesh_compatible(ob) or ob.type not in modifier_compatible:
@@ -1858,6 +1864,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             col = bpy.data.collections[self.collection]
             if col.vs.mute:
                 self.error(get_id("exporter_err_groupmuted", True).format(col.name))
+            elif is_bypassed_into_parent(col):
+                self.error(get_id("exporter_err_groupbypassed", True).format(col.name))
             elif not col.objects:
                 self.error(get_id("exporter_err_groupempty", True).format(col.name))
             else:
@@ -1913,12 +1921,13 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         avs = getattr(arm.data, 'vs', None)
         prefab_items = {p.prefab_type: p for p in avs.prefab_items} if avs else {}
 
-        # In DME mode jigglebones/attachments/hitboxes are encoded into the model DMX, so we
-        # skip their .qci output here. Procedural bones always export as a .vrd.
+        # In DME mode jigglebones/attachments/hitboxes AND procedural bones are all encoded
+        # into the model DMX, so we skip their standalone .qci/.vrd output here to avoid a
+        # duplicate that would conflict with the embedded data.
         dme = prefab_mode_is_dme(context.scene)
 
         for export_type, _count in prefab_available_types(arm):
-            if dme and export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES'):
+            if dme and export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES', 'PROCEDURAL'):
                 print(f"  - {export_type}: skipped - encoded into model DMX (DME mode)")
                 continue
 
@@ -1968,7 +1977,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.error(get_id("exporter_err_makedirs", True).format(err))
                 return False
 
-        if isinstance(id, Collection) and not any(ob.vs.export for ob in id.objects):
+        if isinstance(id, Collection) and not any(ob.vs.export for ob in get_collection_export_objects(id)):
             self.error(get_id("exporter_err_nogroupitems", True).format(id.name))
             return False
 
@@ -1977,7 +1986,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if not ad:
                 return False
 
-        check_obs = id.objects if isinstance(id, Collection) else [id]
+        check_obs = get_collection_export_objects(id) if isinstance(id, Collection) else [id]
 
         if State.exportFormat != ExportFormat.DMX:
             for _ob in check_obs:
@@ -3035,29 +3044,63 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             avs = getattr(self.armature_src.data, 'vs', None)
             proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
 
-            lookat_by_driver: dict[str, list[tuple]] = {}
-            for entry in proc_bones_list:
-                if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
-                    continue
-                driver_name = entry.driver_bone
-                if not driver_name or driver_name not in bone_elements:
-                    continue
-                off = tuple(entry.lookat_offset)
-                lookat_by_driver.setdefault(driver_name, [])
-                if off not in lookat_by_driver[driver_name]:
-                    lookat_by_driver[driver_name].append(off)
+            # NOTE: DmeAimAtBone aims directly at the driver bone's skeleton joint
+            # (aimTarget = its DMX name below). The VRD path aims at a {base}_lookat
+            # attachment placed at lookat_offset, but attachment-input aim targets
+            # are not implemented for DMX export yet, so the offset is dropped and no
+            # _lookat attachment is written here.
 
-            for driver_name, offsets in lookat_by_driver.items():
-                if self.armature.pose.bones.get(driver_name) is None:
+            # --- Procedural bones: promote each helper's skeleton joint to a
+            #     DmeQuatInterpBone (TRIGGER) or DmeAimAtBone (LOOKAT) and populate
+            #     it. On failure the element stays a plain DmeJoint (its transform
+            #     was already written during the bone walk). Uses armature_src for
+            #     trigger sampling so the real drivers/constraints/action are live,
+            #     matching the VRD path.
+            seen_helpers: set[str] = set()
+            for entry_idx, entry in enumerate(proc_bones_list):
+                helper_name = entry.helper_bone
+                if not helper_name or helper_name not in bone_elements:
                     continue
-                
-                driver_export = self.exportable_boneNames.get(driver_name, driver_name)
-                attach_base   = driver_export.split('.', 1)[-1]
-                multiple      = len(offsets) > 1
+                if helper_name in seen_helpers:
+                    self.warning(get_id('exporter_warn_procbone_duplicate', True).format(helper_name))
+                    continue
+                seen_helpers.add(helper_name)
 
-                for idx, off in enumerate(offsets, start=1):
-                    attach_name = f"{attach_base}_lookat{idx}" if multiple else f"{attach_base}_lookat"
-                    _write_attach(attach_name, Matrix.Translation(Vector(off)), bone_elements[driver_name])
+                data_bone = self.armature.data.bones.get(helper_name)
+                if data_bone is not None and data_bone.vs.bone_is_jigglebone:
+                    self.warning(get_id('exporter_warn_procbone_jiggle_conflict', True).format(helper_name))
+                    continue
+
+                # Resolve the helper's nearest exportable (deform) ancestor. The
+                # DMX skeleton parents the helper joint there, so basePos (which is
+                # parent-relative) and the aim parentBone must both reference that
+                # bone. If the direct parent isn't a deform bone, walk up; fall back
+                # to the driver bone for an unparented helper.
+                helper_db = self.armature_src.data.bones.get(helper_name)
+                parent_db = helper_db.parent if helper_db else None
+                while parent_db and parent_db.name not in self.exportable_boneNames:
+                    parent_db = parent_db.parent
+                parent_bname = parent_db.name if parent_db else entry.driver_bone
+
+                bone_elem = bone_elements[helper_name]
+                proc_type = getattr(entry, 'proc_type', 'TRIGGER')
+                if proc_type == 'TRIGGER':
+                    control_bone = self.exportable_boneNames.get(entry.driver_bone) if entry.driver_bone else None
+                    if _proceduralbone.write_dme_quatinterp_attrs(
+                            bone_elem, self.armature_src, entry, entry_idx,
+                            bpy.context.scene, control_bone, armature_scale, self.warning,
+                            parent_bname):
+                        bone_elem.type = "DmeQuatInterpBone"
+                else:
+                    # Aim at the actual driver bone's DMX joint (attachment-input
+                    # targets aren't implemented for DMX yet, so the _lookat
+                    # attachment name is not used).
+                    aim_target = self.exportable_boneNames.get(entry.driver_bone, entry.driver_bone) if entry.driver_bone else None
+                    parent_control = self.exportable_boneNames.get(parent_bname, "")
+                    if _proceduralbone.write_dme_aimat_attrs(
+                            bone_elem, self.armature_src, entry, aim_target,
+                            armature_scale, self.warning, parent_control, parent_bname):
+                        bone_elem.type = "DmeAimAtBone"
 
         # Hitboxes are encoded into the model DMX in DME mode (root.hitboxSetList), matching
         # KitsuneMDL's LoadHitboxSetList. In QCI mode they are written to the .qci instead.
@@ -4028,7 +4071,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             # In DME mode these prefabs are embedded into the model DMX, not written to .qci.
             # Block file export (clipboard copy of the QC text stays allowed for convenience).
             if (not self.to_clipboard and prefab_mode_is_dme(context.scene)
-                    and self.export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES')):
+                    and self.export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES', 'PROCEDURAL')):
                 self.report({'ERROR'},
                     f"{self.export_type.title()} are embedded into the model DMX in DME mode. "
                     f"Export the model instead, or switch Prefab Mode to QCI.")
@@ -4360,57 +4403,19 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
 
     def _write_proc_vrd(self, arm, entries, scene):
-        from . import procbones_sim as _pbsim
-
-        _VRD_AXIS = {
-            '+X': (1, 0, 0), '-X': (-1, 0, 0),
-            '+Y': (0, 1, 0), '-Y': (0, -1, 0),
-            '+Z': (0, 0, 1), '-Z': (0, 0, -1),
-        }
-        def _axes_to_vec(axes):
-            x = y = z = 0.0
-            for a in (axes if isinstance(axes, set) else {axes}):
-                v = _VRD_AXIS.get(a, (0, 0, 0))
-                x += v[0]; y += v[1]; z += v[2]
-            L = (x*x + y*y + z*z) ** 0.5
-            return (x/L, y/L, z/L) if L > 1e-9 else (1.0, 0.0, 0.0)
-
         scale = scene.vs.world_scale * arm.matrix_world.to_scale().x
+
+        # axes / export-offset / trigger-transform math is shared with the DME
+        # writer (prefab_io.proceduralbone) so the VRD and DME paths never drift.
+        def _axes_to_vec(axes):
+            return _proceduralbone.axes_to_vec(axes)
 
         def _vrd_name(bone):
             return get_bone_exportname(bone).split('.', 1)[-1]
 
         def _basepos(helper_name, parent_name):
-            h_pb = arm.pose.bones.get(helper_name)
-            p_pb = arm.pose.bones.get(parent_name)
-            if not h_pb or not p_pb:
-                return 0.0, 0.0, 0.0
-            pos = (get_bone_matrix(p_pb, rest_space=True).inverted() @
-                   get_bone_matrix(h_pb, rest_space=True)).to_translation()
+            pos = _proceduralbone.basepos_local(arm, helper_name, parent_name)
             return pos.x * scale, pos.y * scale, pos.z * scale
-
-        # This is a stupid fix.
-        def _export_off_mat_rot_only(pb):
-            """Rotation-only export offset (no translation component)."""
-            bvs = pb.bone.vs
-            if bvs.ignore_rotation_offset:
-                return Matrix.Identity(4)
-            return (Matrix.Rotation(bvs.export_rotation_offset_z, 4, 'Z') @
-                    Matrix.Rotation(bvs.export_rotation_offset_y, 4, 'Y') @
-                    Matrix.Rotation(bvs.export_rotation_offset_x, 4, 'X'))
-
-        def _export_off_mat(pb):
-            bvs = pb.bone.vs
-            loc_x = 0.0 if bvs.ignore_location_offset else bvs.export_location_offset_x
-            loc_y = 0.0 if bvs.ignore_location_offset else bvs.export_location_offset_y
-            loc_z = 0.0 if bvs.ignore_location_offset else bvs.export_location_offset_z
-            rot_x = 0.0 if bvs.ignore_rotation_offset else bvs.export_rotation_offset_x
-            rot_y = 0.0 if bvs.ignore_rotation_offset else bvs.export_rotation_offset_y
-            rot_z = 0.0 if bvs.ignore_rotation_offset else bvs.export_rotation_offset_z
-            rot_mat = (Matrix.Rotation(rot_z, 4, 'Z') @
-                    Matrix.Rotation(rot_y, 4, 'Y') @
-                    Matrix.Rotation(rot_x, 4, 'X'))
-            return Matrix.Translation((loc_x, loc_y, loc_z)) @ rot_mat
 
         def _driver_parent_vrd(driver_bone_name):
             db = arm.data.bones.get(driver_bone_name)
@@ -4466,41 +4471,16 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 lines.append(f'<helper>  {helper_vrd}  {parent_vrd}  {drv_parent_vrd}  {driver_vrd}')
                 lines.append(f'<basepos>  {bx:.6f} {by:.6f} {bz:.6f}')
 
-                action = entry.action
-                if not action:
+                if not entry.action:
                     self.report({'WARNING'}, f"Procedural entry '{helper_name}' has no action; skipping triggers")
                     lines.append('')
                     continue
 
-                tol_deg  = degrees(arm.data.bones[driver_name].vs.proc_tolerance)
-                d_pb = arm.pose.bones.get(driver_name)
-                h_pb = arm.pose.bones.get(helper_name)
-
-                d_off        = _export_off_mat(d_pb)          if d_pb                  else Matrix.Identity(4)
-                h_off        = _export_off_mat(h_pb)          if h_pb                  else Matrix.Identity(4)
-                d_parent_off = _export_off_mat_rot_only(d_pb.parent) if d_pb and d_pb.parent else Matrix.Identity(4)
-                h_parent_off = _export_off_mat_rot_only(h_pb.parent) if h_pb and h_pb.parent else Matrix.Identity(4)
-
-                # _build_proc_triggers() stores matrix_basis (animation delta from rest).
-                # VRD expects the absolute local rotation, so bake the rest orientation in here.
-                d_rest_rot = Matrix.Identity(4)
-                _d_bone_data = arm.data.bones.get(driver_name)
-                if _d_bone_data:
-                    if _d_bone_data.parent:
-                        d_rest_rot = (
-                            _d_bone_data.parent.matrix_local.to_3x3().normalized().inverted() @
-                            _d_bone_data.matrix_local.to_3x3().normalized()
-                        ).to_4x4()
-                    else:
-                        d_rest_rot = _d_bone_data.matrix_local.to_3x3().normalized().to_4x4()
-
-                triggers = _pbsim._build_proc_triggers(arm, entry, entry_idx, scene, export_print=True)
-
-                #print(f"[VRD DEBUG] {len(triggers)} triggers for '{entry.helper_bone}'")
-                #for i, (dq, dloc, hloc, hq, tol) in enumerate(triggers):
-                #    print(f"  [{i}] dq={dq} dloc={dloc} hloc={hloc}")
-
-                if not triggers:
+                # Shared per-trigger transform build (also used by the DME writer).
+                # Returns absolute local (d_mat, h_export) plus the raw (dq, dloc)
+                # kept for the near-duplicate warning below.
+                transforms = _proceduralbone.build_trigger_transforms(arm, entry, entry_idx, scene)
+                if not transforms:
                     lines.append('')
                     continue
 
@@ -4512,10 +4492,10 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 # are close in rotation AND location are genuinely indistinguishable.
                 NEAR_TRIGGER_DEG  = 1.0
                 NEAR_TRIGGER_DIST = 0.001
-                for _ti in range(len(triggers)):
-                    for _tj in range(_ti + 1, len(triggers)):
-                        _dq_i,   _dloc_i = triggers[_ti][0], triggers[_ti][1]
-                        _dq_j,   _dloc_j = triggers[_tj][0], triggers[_tj][1]
+                for _ti in range(len(transforms)):
+                    for _tj in range(_ti + 1, len(transforms)):
+                        _dq_i,   _dloc_i = transforms[_ti][3], transforms[_ti][4]
+                        _dq_j,   _dloc_j = transforms[_tj][3], transforms[_tj][4]
                         _dot   = abs(_dq_i.dot(_dq_j))
                         _angle = degrees(2.0 * acos(min(_dot, 1.0)))
                         _pdist = (_dloc_i - _dloc_j).length
@@ -4528,19 +4508,12 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                                 f"- VRD may not distinguish them."
                             )
 
-                for dq, dloc, hloc, hq, tol in triggers:
+                for d_mat, h_export, tol, _dq, _dloc in transforms:
                     tol_deg = degrees(tol)
 
-                    # parent_off.inv @ rest_local @ delta @ own_off
-                    # mirrors how get_bone_matrix works: offset is post-multiplied,
-                    # so Source sees child relative to parent including both offsets.
-                    d_mat   = d_parent_off.inverted() @ d_rest_rot @ dq.to_matrix().to_4x4() @ d_off
                     d_euler = d_mat.to_euler('XYZ')
                     drx, dry, drz = degrees(d_euler.x), degrees(d_euler.y), degrees(d_euler.z)
 
-                    h_mat    = hq.to_matrix().to_4x4()
-                    h_mat.translation = hloc
-                    h_export = h_parent_off.inverted() @ h_mat @ h_off
                     h_pos    = h_export.to_translation()
                     h_euler  = h_export.to_euler('XYZ')
 
@@ -4597,63 +4570,3 @@ class _PrefabRunnerAdapter(ExportCheck):
     _run_procedural             = PrefabExporter._run_procedural
     _write_proc_vrd             = PrefabExporter._write_proc_vrd
     _collect_lookat_attachments = staticmethod(PrefabExporter._collect_lookat_attachments)
-
-# -----------------------------------------------------------------------------
-# KitsuneResource compile operator
-# -----------------------------------------------------------------------------
-
-class KitsuneResourceCompile(bpy.types.Operator):
-    bl_idname = "smd.kitsuneresource_compile"
-    bl_label  = "Compile"
-    bl_options = {'REGISTER'}
-
-    export_choice: bpy.props.EnumProperty(items=[
-        ('ALL',     'All',     ''),
-        ('CHECKED', 'Checked', ''),
-        ('ENTRY',   'Entry',   ''),
-    ], default='ALL')
-    entry_index: bpy.props.IntProperty(default=-1)
-    entry_type: bpy.props.StringProperty(default='MODEL')
-
-    @classmethod
-    def poll(cls, context):
-        vs = context.scene.vs
-        return (
-            len(vs.kitsuneresource_project_path) > 0
-            and len(vs.kitsuneresource_app_path) > 0
-            and len(vs.kitsuneresource_config) > 0
-            and (len(vs.kitsuneresource_model_entries) > 0 or len(vs.kitsuneresource_data_entries) > 0)
-        )
-
-    def invoke(self, context, event) -> set:
-        bpy.ops.wm.call_menu(name="SMD_MT_KitsuneCompileChoice")
-        return {'PASS_THROUGH'}
-
-    def execute(self, context) -> set:
-        vs          = context.scene.vs
-        app_path    = resolve_kitsuneresource_app(vs)
-        basedir     = resolve_kitsuneresource_project_basedir(vs)
-        config_path = bpy.path.abspath(vs.kitsuneresource_config.strip())
-        cmd         = build_base_cmd(vs, app_path, config_path)
-
-        if self.export_choice == 'ENTRY':
-            entries = vs.kitsuneresource_model_entries if self.entry_type == 'MODEL' else vs.kitsuneresource_data_entries
-            if 0 <= self.entry_index < len(entries):
-                cmd += ["--only", f"{entries[self.entry_index].name}"]
-            else:
-                self.report({'WARNING'}, "Invalid entry index.")
-                return {'CANCELLED'}
-
-        elif self.export_choice == 'CHECKED':
-            for e in vs.kitsuneresource_model_entries:
-                if e.export:
-                    cmd += ["--only", f"{e.name}"]
-            for e in vs.kitsuneresource_data_entries:
-                if e.export:
-                    cmd += ["--only", f"{e.name}"]
-
-            if len(cmd) == len(build_base_cmd(vs, app_path, config_path)):
-                self.report({'WARNING'}, "No entries checked for export.")
-                return {'CANCELLED'}
-
-        return run_and_report(self, cmd, basedir, external_console=vs.kitsuneresource_external_console)

@@ -6,7 +6,6 @@ from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
 from ..utils import (get_id, State, axes, axes_forward, dmx_versions_source1,
                      dmx_versions_source2, get_active_exportable)
 from .. import datamodel, procbones_sim as _procbones_sim
-from .items import KitsuneResourceItem
 
 
 encodings = []
@@ -127,23 +126,6 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     preview_export_pose : BoolProperty(name=get_id('prop_preview_export_pose'), description=get_id('prop_preview_export_pose_tip'), default=True)
     preview_jigglebone_constraints : BoolProperty(name=get_id('prop_preview_jigglebone_constraints'), description=get_id('prop_preview_jigglebone_constraints_tip'), default=True)
     preview_proc_bones : BoolProperty(name=get_id('prop_preview_proc_bones'), description=get_id('prop_preview_proc_bones_tip'), default=True)
-
-    kitsuneresource_app_path : StringProperty(name='Executable', description=get_id("prop_kitsuneresource_app_path_tip"), subtype='FILE_PATH', options={'PATH_SUPPORTS_BLEND_RELATIVE'}, default='kitsuneresource.exe')
-    kitsuneresource_config : StringProperty(name='Config', description=get_id("prop_kitsuneresource_config_tip"), subtype='FILE_PATH', options={'PATH_SUPPORTS_BLEND_RELATIVE'}, default='previewmodel.json')
-    kitsuneresource_project_path : StringProperty(name='Project Directory', description=get_id("prop_kitsuneresource_project_path_tip"), subtype='DIR_PATH', options={'PATH_SUPPORTS_BLEND_RELATIVE'})
-    kitsuneresource_args : StringProperty(name='Arguments', description=get_id("prop_kitsuneresource_args_tip"), default='-exportdir "compiled"')
-    kitsuneresource_external_console : BoolProperty(name="Run in External Console", description=get_id("prop_kitsuneresource_external_console_tip"), default=True)
-
-    kitsuneresource_model_entries: CollectionProperty(type=KitsuneResourceItem)
-    kitsuneresource_model_entry_index: IntProperty(name="Active Entry", default=0)
-    kitsuneresource_data_entries: CollectionProperty(type=KitsuneResourceItem)
-    kitsuneresource_data_entry_index: IntProperty(name="Active Entry", default=0)
-    kitsuneresource_entries: CollectionProperty(type=KitsuneResourceItem)
-    kitsuneresource_entry_index: IntProperty(name="Active Entry", default=0)
-    kitsuneresource_flag_single_addon: BoolProperty(name="Single Addon", description=get_id("prop_kitsuneresource_single_addon_tip"), default=True)
-    kitsuneresource_flag_no_mat_local: BoolProperty(name="No Mat Local", description=get_id("prop_kitsuneresource_no_mat_local_tip"), default=True)
-    kitsuneresource_flag_archive_old: BoolProperty(name="Archive Previous Version", description=get_id("prop_kitsuneresource_archive_old_tip"), default=True)
-    kitsuneresource_flag_game_or_package : EnumProperty(name="Game or Package", description=get_id("prop_kitsuneresource_game_or_package_tip"), items=[('GAME', 'Game', ''), ('PACKAGE', 'Package', '')], default='GAME')
 
     jiggle_sim_enabled : BoolProperty(name=get_id('prop_proc_sim_enabled'), description=get_id('prop_proc_sim_enabled_tip'), default=False, update=lambda self, ctx: _procbones_sim.on_sim_enabled_changed(self, ctx))
     jiggle_sim_rate : IntProperty(name=get_id('prop_jiggle_sim_rate'), description=get_id('prop_jiggle_sim_rate_tip'), default=60, min=12, max=240)

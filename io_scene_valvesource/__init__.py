@@ -54,9 +54,6 @@ def menu_func_import(self, context):
 def menu_func_export(self, context):
     self.layout.menu("SMD_MT_ExportChoice", text=get_id("export_menuitem"))
 
-def menu_func_kitsune_compile(self, context):
-    self.layout.menu("SMD_MT_KitsuneCompileChoice", text="Kitsune Resource Compile", icon='EXPORT')
-
 def menu_func_shapekeys(self,context):
     self.layout.operator(flex.ActiveDependencyShapes.bl_idname, text=get_id("activate_dependency_shapes",True), icon='SHAPEKEY_DATA')
 
@@ -90,7 +87,6 @@ _classes = (
     ProcBoneEntry,
     HitboxEntry,
     ArmatureItemEntry,
-    KitsuneResourceItem,
     PrefabItem,
     AttachmentDisplayMeshItem,
 
@@ -114,13 +110,6 @@ _classes = (
     # Exportable and Scene Classes
     ValveSource_Exportable,
     ValveSource_SceneProps,
-
-    # KitsuneResource
-    GUI.SMD_MT_KitsuneCompileChoice,
-    GUI.SMD_UL_KitsuneResourceEntries,
-    GUI.SMD_OT_KitsuneResourceLoadEntries,
-    GUI.SMD_OT_KitsuneResourceConfigure,
-    GUI.SMD_PT_KitsuneResource,
 
     # GUI - Scene
     GUI.SMD_MT_ExportChoice,
@@ -166,6 +155,7 @@ _classes = (
     GUI.SMD_OT_HitboxMirror,
     GUI.SMD_OT_ProcBoneAdd,
     GUI.SMD_OT_ProcBoneAddFromSelected,
+    GUI.SMD_OT_ProcBoneAddLookAt,
     GUI.SMD_OT_ProcBoneDuplicate,
     GUI.SMD_OT_ProcBoneRemove,
     GUI.SMD_OT_ProcBoneSetTolerance,
@@ -231,7 +221,6 @@ GUI.SMD_PT_Jigglebones,
     # Export and Import
     export_smd.SmdExporter,
     export_smd.PrefabExporter,
-    export_smd.KitsuneResourceCompile,
     import_smd.SmdImporter,
 )
 

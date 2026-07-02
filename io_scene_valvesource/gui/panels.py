@@ -9,13 +9,12 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      get_bone_exportname,
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
-                     get_dme_split_delta_conflicts)
-from ..export_smd import SmdExporter, PrefabExporter, KitsuneResourceCompile
+                     get_dme_split_delta_conflicts, get_collection_parent_collection)
+from ..export_smd import SmdExporter, PrefabExporter
 from ..import_smd import SmdImporter
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors
 from .operators import (
-    SMD_OT_KitsuneResourceLoadEntries,
     SMD_OT_AssignBoneRotExportOffset,
     SMD_OT_AddFlexController,
     SMD_OT_RemoveFlexController,
@@ -183,60 +182,6 @@ class SMD_PT_Scene(Panel):
             row.row().prop(scene.vs, "vertex_influence_limit", slider=True)
 
 
-class SMD_PT_KitsuneResource(Panel):
-    bl_label = 'Kitsune Resource Compile'
-    bl_space_type = 'PROPERTIES'
-    bl_region_type = 'WINDOW'
-    bl_context = 'scene'
-    bl_order = 2
-    bl_options = {'DEFAULT_CLOSED'}
-
-    def draw(self, context) -> None:
-        l = self.layout
-        l.use_property_split = True
-        l.use_property_decorate = False
-        scene = context.scene
-        vs = scene.vs
-
-        col = l.column(align=True).row(align=True)
-        col.scale_y = 1.2
-        col.operator(KitsuneResourceCompile.bl_idname)
-
-        box = l.box()
-
-        col = box.column()
-        col.alert = len(vs.kitsuneresource_app_path) == 0
-        col.prop(vs, 'kitsuneresource_app_path')
-
-        col = box.column()
-        col.enabled = len(vs.kitsuneresource_app_path) > 0
-        col.prop(vs, 'kitsuneresource_config')
-
-        col = box.column()
-        col.enabled = len(vs.kitsuneresource_config) > 0
-        col.prop(vs, 'kitsuneresource_project_path')
-
-        col = box.column()
-        col.enabled = len(vs.kitsuneresource_app_path) > 0
-        col.row(align=True).prop(vs, 'kitsuneresource_flag_game_or_package', expand=True)
-
-        if vs.kitsuneresource_flag_game_or_package == 'PACKAGE':
-            col.prop(vs, 'kitsuneresource_flag_single_addon')
-            col.prop(vs, 'kitsuneresource_flag_no_mat_local')
-            col.prop(vs, 'kitsuneresource_flag_archive_old')
-
-        col.prop(vs, 'kitsuneresource_args', text=get_id('label_extra_args', True))
-        col.prop(vs, 'kitsuneresource_external_console')
-
-        col = box.column()
-        col.enabled = len(vs.kitsuneresource_config) > 0
-        row = col.row()
-        col2 = row.column()
-        col2.template_list("SMD_UL_KitsuneResourceEntries", "", vs, "kitsuneresource_entries",
-                           vs, "kitsuneresource_entry_index", rows=6)
-        row.operator(SMD_OT_KitsuneResourceLoadEntries.bl_idname, text="", icon='FILE_REFRESH')
-
-
 class SMD_PT_Exportables(Panel):
     bl_label = get_id('exportables_title')
     bl_space_type = 'PROPERTIES'
@@ -298,6 +243,9 @@ class SMD_PT_Exportables(Panel):
             r = layout.row()
             r.alignment = 'CENTER'
             r.prop(vs, "mute")
+            # Bypass only applies to nested groups; folds them into the parent group.
+            if not vs.mute and get_collection_parent_collection(item) is not None:
+                r.prop(vs, "bypass")
             if vs.mute:
                 return
             elif State.exportFormat == ExportFormat.DMX:

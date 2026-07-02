@@ -18,7 +18,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, subprocess, sys, builtins, itertools, dataclasses, typing, mathutils, re, math, bmesh, ctypes
+import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math, bmesh
 from typing import Optional, Any
 from bpy.app.translations import pgettext
 from contextlib import contextmanager
@@ -105,24 +105,6 @@ exportname_shortcut_keywords = {
 }
 
 kitsune_data_keys: list[str] = []
-
-def _try_enable_vt_processing() -> bool:
-    if sys.platform != 'win32':
-        return True
-    try:
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
-        if handle in (0, -1):
-            return False
-        mode = ctypes.c_ulong()
-        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
-            return False
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
-        return bool(kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING))
-    except Exception:
-        return False
-
-_VT_SUPPORTED = _try_enable_vt_processing()
 
 class ExportFormat:
     SMD = 1
@@ -485,7 +467,7 @@ def count_exports(context):
         if exportable.prefab_type:
             continue
         item = exportable.item
-        if item and item.vs.export and (type(item) != bpy.types.Collection or not item.vs.mute):
+        if item and item.vs.export and (type(item) != bpy.types.Collection or (not item.vs.mute and not is_bypassed_into_parent(item))):
             num += 1
     return num
 
@@ -656,7 +638,7 @@ def hasShapes(id, valid_only = True):
         return bool(id_.type in shape_types and id_.data.shape_keys and len(id_.data.shape_keys.key_blocks))
     
     if type(id) == bpy.types.Collection:
-        for _ in [ob for ob in id.objects if ob.vs.export and (not valid_only or ob.session_uid in State.exportableObjects) and _test(ob)]:
+        for _ in [ob for ob in get_collection_export_objects(id) if ob.vs.export and (not valid_only or ob.session_uid in State.exportableObjects) and _test(ob)]:
             return True
         return False
     else:
@@ -669,7 +651,7 @@ def countShapes(*objects):
 
     for ob in objects:
         if isinstance(ob, bpy.types.Collection):
-            flattened_objects.extend(ob.objects)
+            flattened_objects.extend(get_collection_export_objects(ob))
         elif hasattr(ob, '__iter__'):
             flattened_objects.extend(ob)
         else:
@@ -694,7 +676,7 @@ def hasCurves(id):
         return id_.type in ['CURVE','SURFACE','FONT']
 
     if type(id) == bpy.types.Collection:
-        for _ in [ob for ob in id.objects if ob.vs.export and ob.session_uid in State.exportableObjects and _test(ob)]:
+        for _ in [ob for ob in get_collection_export_objects(id) if ob.vs.export and ob.session_uid in State.exportableObjects and _test(ob)]:
             return True
         return False
     else:
@@ -712,7 +694,7 @@ def valvesource_vertex_maps(id) -> set[str]:
             return set()
 
     if type(id) == bpy.types.Collection:
-        return set(itertools.chain(*(test(ob) for ob in id.objects)))
+        return set(itertools.chain(*(test(ob) for ob in get_collection_export_objects(id))))
     elif id.type == 'MESH':
         return test(id)
     else:
@@ -734,7 +716,30 @@ def actionSlotExportName(animData : bpy.types.AnimData):
     return animData.action.name if slot_name in State.legacySlotNames else slot_name
 
 def shouldExportGroup(group):
-    return group.vs.export and not group.vs.mute
+    return group.vs.export and not group.vs.mute and not is_bypassed_into_parent(group)
+
+def get_collection_parent_collection(col) -> bpy.types.Collection | None:
+    """Return the collection that directly contains `col`, or None if `col` is
+    only linked to the scene root (i.e. it is a top-level group)."""
+    for parent in bpy.data.collections:
+        if parent != col and col.name in parent.children:
+            return parent
+    return None
+
+def is_bypassed_into_parent(col) -> bool:
+    """True when `col` has 'bypass' enabled and there is a parent collection to
+    fold it into. Top-level bypassed collections behave as normal groups."""
+    return col.vs.bypass and get_collection_parent_collection(col) is not None
+
+def get_collection_export_objects(col) -> list[bpy.types.Object]:
+    """The objects that belong to `col` for export purposes: its own objects
+    plus, recursively, the objects of any child collections marked 'bypass'
+    (those fold into this group instead of exporting separately)."""
+    result = list(col.objects)
+    for child in col.children:
+        if child.vs.bypass:
+            result.extend(get_collection_export_objects(child))
+    return result
 
 def hasFlexControllerSource(source):
     return bpy.data.texts.get(source) or os.path.exists(bpy.path.abspath(source))
@@ -772,7 +777,7 @@ def getExportablesForObject(ob):
                 continue
             seen.add(exportable.session_uid)
 
-            if exportable.ob_type == 'COLLECTION' and not exportable.item.vs.mute and any(collection_item.session_uid == ob_session_uid for collection_item in exportable.item.objects):
+            if exportable.ob_type == 'COLLECTION' and not exportable.item.vs.mute and not is_bypassed_into_parent(exportable.item) and any(collection_item.session_uid == ob_session_uid for collection_item in get_collection_export_objects(exportable.item)):
                 yield exportable
                 break
 
@@ -832,7 +837,7 @@ def make_export_list(scene: bpy.types.Scene):
     scene_groups = []
     for group in sorted(bpy.data.collections, key=lambda g: g.name.lower()):
         valid = False
-        for obj in [obj for obj in group.objects if obj.session_uid in State.exportableObjects]:
+        for obj in [obj for obj in get_collection_export_objects(group) if obj.session_uid in State.exportableObjects]:
             if not group.vs.mute and obj.type != 'ARMATURE' and obj.session_uid in ungrouped_object_ids:
                 ungrouped_object_ids.remove(obj.session_uid)
             valid = True
@@ -840,7 +845,12 @@ def make_export_list(scene: bpy.types.Scene):
             scene_groups.append(group)
 
     for g in scene_groups:
-        label = "{} {}".format(g.name, pgettext(get_id("exportables_group_mute_suffix", True))) if g.vs.mute else makeDisplayName(g)
+        if g.vs.mute:
+            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_mute_suffix", True)))
+        elif is_bypassed_into_parent(g):
+            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_bypass_suffix", True)))
+        else:
+            label = makeDisplayName(g)
         pending.append((0, label, "COLLECTION", "GROUP", None, g))
 
     # Ungrouped objects
@@ -1101,98 +1111,6 @@ class KeyFrame:
         self.frame = None
         self.pos = self.rot = self.scale = False
         self.matrix = Matrix()
-
-#   ---------------------------------
-#
-#   ADDITIONAL FUNCTIONS (IMPORTED DIRECTLY FROM KITSUNETOOLS)
-#
-#   ---------------------------------
-
-
-def resolve_kitsuneresource_app(vs) -> str:
-    raw      = vs.kitsuneresource_app_path.strip()
-    resolved = bpy.path.abspath(raw)
-    return resolved if os.path.isfile(resolved) else raw
-
-def resolve_kitsuneresource_project_basedir(vs) -> str:
-    blend_dir    = os.path.dirname(bpy.data.filepath)
-    project_path = bpy.path.abspath(vs.kitsuneresource_project_path) if vs.kitsuneresource_project_path else ""
-    if project_path:
-        return os.path.normpath(
-            os.path.join(blend_dir, project_path) if not os.path.isabs(project_path) else project_path
-        )
-    return blend_dir
-
-def build_base_cmd(vs, app_path: str, config_path: str) -> list:
-    flags = []
-    flags.append('--log')
-    
-    if vs.kitsuneresource_flag_single_addon: flags.append('--single-addon')
-    if vs.kitsuneresource_flag_no_mat_local: flags.append('--no-mat-local')
-
-    if vs.kitsuneresource_flag_game_or_package == 'PACKAGE':
-        flags.append('--package-files')
-        if vs.kitsuneresource_flag_archive_old:
-            flags.append('--archive-old-ver')
-
-    elif vs.kitsuneresource_flag_game_or_package == 'GAME':
-        flags.append('--game')
-
-    free_tokens = vs.kitsuneresource_args.split()
-    return [app_path] + flags + free_tokens + [config_path]
-
-def run_and_report(operator, cmd: list, basedir: str, external_console: bool = False) -> set:
-    if external_console and sys.platform == 'win32':
-        inner = subprocess.list2cmdline(cmd)
-        try:
-            subprocess.Popen(
-                f'cmd /k "{inner}"',
-                cwd=basedir,
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
-            )
-        except Exception as e:
-            operator.report({'ERROR'}, str(e))
-            return {'CANCELLED'}
-        operator.report({'INFO'}, "Launched compile in external console")
-        return {'FINISHED'}
-
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            cwd=basedir,
-            env={**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8'},
-            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-        )
-    except FileNotFoundError:
-        operator.report({'ERROR'}, f"Executable not found: {cmd[0]}")
-        return {'CANCELLED'}
-    except Exception as e:
-        operator.report({'ERROR'}, str(e))
-        return {'CANCELLED'}
-
-    _ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    errors       = []
-
-    for raw_line in process.stdout:  # pyright: ignore
-        decoded = raw_line.decode('utf-8', errors='replace').rstrip()
-        plain   = _ansi_escape.sub('', decoded)
-        print(decoded if _VT_SUPPORTED else plain)
-        if '[ERROR]' in plain:
-            clean = re.sub(r'^\d{2}:\d{2}:\d{2} \| ', '', plain.strip())
-            clean = clean.encode('ascii', errors='replace').decode('ascii')
-            errors.append(clean)
-
-    process.wait()
-
-    if errors:
-        for err in errors:
-            operator.report({'WARNING'}, err)
-    else:
-        operator.report({'INFO'}, "Compile finished")
-
-    return {'FINISHED'}
 
 #
 #   SCENE

@@ -1,128 +1,10 @@
-import bpy, sys, os, subprocess, json, math, re as _re
+import bpy, math, re as _re
 from bpy.types import Operator, MeshLoopColorLayer, LoopColors
 from bpy.props import FloatProperty, BoolProperty, IntProperty, EnumProperty, StringProperty
 from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, vertex_float_maps,
                      get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta)
 from .. import procbones_sim as _procbones_sim
 from .helpers import _get_or_create_proc_tol_fcurve, _get_entry_proc_tol
-
-
-class SMD_OT_KitsuneResourceLoadEntries(Operator):
-    bl_idname = "smd.kitsuneresource_load_entries"
-    bl_label = "Reload Model Entries"
-    bl_options = {'REGISTER'}
-
-    @classmethod
-    def poll(cls, context):
-        return len(context.scene.vs.kitsuneresource_config) > 0
-
-    def execute(self, context) -> set:
-        vs = context.scene.vs
-
-        raw_app  = vs.kitsuneresource_app_path.strip()
-        resolved = bpy.path.abspath(raw_app)
-        app_path = resolved if os.path.isfile(resolved) else raw_app
-
-        config_path = bpy.path.abspath(vs.kitsuneresource_config.strip())
-
-        try:
-            result = subprocess.run(
-                [app_path, "--fetch", config_path],
-                capture_output=True, text=True, timeout=15,
-            )
-            print(result.stdout)
-            data = json.loads(result.stdout)
-        except Exception as e:
-            self.report({'ERROR'}, f"Failed to fetch entries: {e}")
-            return {'CANCELLED'}
-
-        if "error" in data:
-            self.report({'ERROR'}, data["error"])
-            return {'CANCELLED'}
-
-        previously_model = {e.name: e.export for e in vs.kitsuneresource_model_entries}
-        previously_data  = {e.name: e.export for e in vs.kitsuneresource_data_entries}
-
-        vs.kitsuneresource_model_entries.clear()
-        for k in data.get("model", []):
-            entry = vs.kitsuneresource_model_entries.add()
-            entry.name = k
-            entry.export = previously_model.get(k, True)
-        vs.kitsuneresource_model_entry_index = 0
-
-        vs.kitsuneresource_data_entries.clear()
-        for k in data.get("data", []):
-            entry = vs.kitsuneresource_data_entries.add()
-            entry.name = k
-            entry.export = previously_data.get(k, True)
-        vs.kitsuneresource_data_entry_index = 0
-
-        vs.kitsuneresource_entries.clear()
-        for e in vs.kitsuneresource_model_entries:
-            combined = vs.kitsuneresource_entries.add()
-            combined.name = e.name
-            combined.entry_type = 'MODEL'
-        for e in vs.kitsuneresource_data_entries:
-            combined = vs.kitsuneresource_entries.add()
-            combined.name = e.name
-            combined.entry_type = 'DATA'
-        vs.kitsuneresource_entry_index = 0
-
-        self.report({'INFO'}, f"Loaded {len(vs.kitsuneresource_model_entries)} models, {len(vs.kitsuneresource_data_entries)} data")
-        return {'FINISHED'}
-
-
-class SMD_OT_KitsuneResourceConfigure(Operator):
-    bl_idname = "smd.kitsuneresource_configure"
-    bl_label = "Configure Kitsune Resource"
-    bl_options = {'REGISTER'}
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_popup(self, width=420)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.use_property_decorate = False
-        vs = context.scene.vs
-
-        col = layout.column()
-        col.alert = len(vs.kitsuneresource_app_path) == 0
-        col.prop(vs, 'kitsuneresource_app_path')
-
-        col = layout.column()
-        col.enabled = len(vs.kitsuneresource_app_path) > 0
-        col.prop(vs, 'kitsuneresource_config')
-
-        col = layout.column()
-        col.enabled = len(vs.kitsuneresource_config) > 0
-        col.prop(vs, 'kitsuneresource_project_path')
-
-        col = layout.column()
-        col.enabled = len(vs.kitsuneresource_app_path) > 0
-        col.row(align=True).prop(vs, 'kitsuneresource_flag_game_or_package', expand=True)
-
-        if vs.kitsuneresource_flag_game_or_package == 'PACKAGE':
-            col.prop(vs, 'kitsuneresource_flag_single_addon')
-            col.prop(vs, 'kitsuneresource_flag_no_mat_local')
-            col.prop(vs, 'kitsuneresource_flag_archive_old')
-
-        col.prop(vs, 'kitsuneresource_args', text=get_id('label_extra_args', True))
-        col.prop(vs, 'kitsuneresource_external_console')
-
-        layout.separator()
-
-        row = layout.row()
-        col2 = row.column()
-        col2.enabled = len(vs.kitsuneresource_config) > 0
-        col2.template_list("SMD_UL_KitsuneResourceEntries", "", vs, "kitsuneresource_entries",
-                           vs, "kitsuneresource_entry_index", rows=6)
-        sub = row.column(align=True)
-        sub.enabled = len(vs.kitsuneresource_config) > 0
-        sub.operator("smd.kitsuneresource_load_entries", text="", icon='FILE_REFRESH')
-
-    def execute(self, context):
-        return {'FINISHED'}
 
 
 SMD_OT_CreateVertexMap_idname : str = "smd.vertex_map_create_"
@@ -1503,6 +1385,151 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
         avs.proc_bones_index = len(avs.proc_bones) - 1
         self.report({'INFO'},
                     f"Added {len(bones)} proc bone entr{'y' if len(bones) == 1 else 'ies'}")
+        return {'FINISHED'}
+
+
+_lookat_axis_items = [
+    ('+X', "+X", "Positive X",  1),
+    ('+Y', "+Y", "Positive Y",  2),
+    ('+Z', "+Z", "Positive Z",  4),
+    ('-X', "-X", "Negative X",  8),
+    ('-Y', "-Y", "Negative Y", 16),
+    ('-Z', "-Z", "Negative Z", 32),
+]
+
+
+class SMD_OT_ProcBoneAddLookAt(Operator):
+    bl_idname       = "smd.proc_bone_add_lookat"
+    bl_label        = get_id('op_proc_bone_add_lookat')
+    bl_description  = get_id('op_proc_bone_add_lookat_tip')
+    bl_options      = {'UNDO'}
+
+    target_type : EnumProperty(
+        name=get_id('prop_proc_bone_lookat_target_type'),
+        description=get_id('prop_proc_bone_lookat_target_type_tip'),
+        items=[
+            ('BONE',       "Bone",       "Aim at another bone",          'BONE_DATA',    0),
+            ('ATTACHMENT', "Attachment", "Aim at an attachment (Empty)", 'EMPTY_ARROWS', 1),
+        ],
+        default='BONE',
+    )
+    target_bone       : StringProperty(name=get_id('prop_proc_bone_lookat_target'))
+    target_attachment : StringProperty(name=get_id('prop_proc_bone_lookat_target_attachment'),
+                                       description=get_id('prop_proc_bone_lookat_target_attachment_tip'))
+    aim_axis : EnumProperty(
+        name=get_id('prop_proc_bone_lookat_aim_axis'),
+        description=get_id('prop_proc_bone_lookat_aim_axis_tip'),
+        items=_lookat_axis_items, default={'+X'}, options={'ENUM_FLAG'},
+    )
+    up_axis : EnumProperty(
+        name=get_id('prop_proc_bone_lookat_up_axis'),
+        description=get_id('prop_proc_bone_lookat_up_axis_tip'),
+        items=_lookat_axis_items, default={'+Z'}, options={'ENUM_FLAG'},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return (context.mode == 'POSE'
+                and bool(get_armature(context.object))
+                and bool(context.selected_pose_bones))
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=340)
+
+    def _attachment_object(self, arm_ob) -> bpy.types.Object | None:
+        ob = bpy.data.objects.get(self.target_attachment)
+        if (ob and ob.type == 'EMPTY' and ob.parent == arm_ob
+                and ob.parent_type == 'BONE' and ob.parent_bone.strip()
+                and ob.parent_bone in arm_ob.data.bones):
+            return ob
+        return None
+
+    def draw(self, context):
+        layout = self.layout
+        arm_ob   = get_armature(context.object)
+        arm_data = arm_ob.data if arm_ob else None
+        n = len(context.selected_pose_bones)
+
+        layout.label(
+            text=f"{n} bone{'s' if n != 1 else ''} will be added as LookAt helper{'s' if n != 1 else ''}",
+            icon='CON_TRACKTO')
+
+        col = layout.column(align=True)
+        col.prop(self, 'target_type', expand=True)
+
+        if self.target_type == 'BONE':
+            if arm_data:
+                col.prop_search(self, 'target_bone', arm_data, 'bones',
+                                text=get_id('prop_proc_bone_lookat_target'))
+            else:
+                col.prop(self, 'target_bone')
+        else:
+            col.prop_search(self, 'target_attachment', bpy.data, 'objects',
+                            text=get_id('prop_proc_bone_lookat_target_attachment'))
+            if self.target_attachment and arm_ob and not self._attachment_object(arm_ob):
+                col.label(text=get_id('warn_lookat_attachment_invalid'), icon='ERROR')
+
+        col.separator()
+
+        split = col.split(factor=0.22)
+        split.label(text=get_id('prop_proc_bone_lookat_aim_axis'))
+        split.row().prop(self, 'aim_axis', expand=True)
+
+        split = col.split(factor=0.22)
+        split.label(text=get_id('prop_proc_bone_lookat_up_axis'))
+        split.row().prop(self, 'up_axis', expand=True)
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        bones = context.selected_pose_bones
+        if not bones:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+
+        offset = None
+        if self.target_type == 'BONE':
+            target_bone_name = self.target_bone
+            if not target_bone_name or target_bone_name not in arm_ob.data.bones:
+                self.report({'ERROR'}, "Pick a valid target bone")
+                return {'CANCELLED'}
+        else:
+            att_ob = self._attachment_object(arm_ob)
+            if not att_ob:
+                self.report({'ERROR'}, get_id('warn_lookat_attachment_invalid'))
+                return {'CANCELLED'}
+            target_bone_name = att_ob.parent_bone
+            driver_pb  = arm_ob.pose.bones[target_bone_name]
+            driver_mat = (arm_ob.matrix_world @ driver_pb.matrix
+                         @ _procbones_sim._get_export_offset_mat(driver_pb))
+            from mathutils import Vector
+            world_t = att_ob.matrix_world.translation
+            local   = (driver_mat.inverted_safe()
+                      @ Vector((world_t.x, world_t.y, world_t.z, 1.0))).to_3d()
+            offset  = (local.x, local.y, local.z)
+
+        added = 0
+        for pb in bones:
+            if pb.name == target_bone_name:
+                continue
+            entry             = avs.proc_bones.add()
+            entry.proc_type   = 'LOOKAT'
+            entry.helper_bone = pb.name
+            entry.driver_bone = target_bone_name
+            entry.lookat_aim_axis = self.aim_axis
+            entry.lookat_up_axis  = self.up_axis
+            if offset is not None:
+                entry.lookat_offset = offset
+            added += 1
+
+        if added == 0:
+            self.report({'WARNING'}, "No entries added, target bone can't look at itself")
+            return {'CANCELLED'}
+
+        avs.proc_bones_index = len(avs.proc_bones) - 1
+        self.report({'INFO'},
+                    f"Added {added} LookAt proc bone entr{'y' if added == 1 else 'ies'}")
         return {'FINISHED'}
 
 
