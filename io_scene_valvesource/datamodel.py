@@ -289,7 +289,7 @@ class Element(collections.OrderedDict):
 	@property
 	def name(self): return self._name
 	@name.setter
-	def name(self,value): self._name = str(value) if value else None
+	def name(self,value): self._name = str(value) if value is not None else None
 
 	@property
 	def type(self): return self._type
@@ -507,14 +507,17 @@ class _StringDictionary(list):
 		if in_file:
 			num_strings = get_short(in_file, signed = True) if self.length_size == shortsize else get_int(in_file)
 			for _ in range(num_strings):
-				self.append(get_str(in_file))
+				# Dictionary entries are always real strings (null is encoded as index -1, never a
+				# dictionary slot), so an empty read is the empty string, not None. get_str returns
+				# None for an empty read, so coerce it back to "" to keep empty names/values intact.
+				self.append(get_str(in_file) or "")
 		
 		elif out_datamodel:
 			checked = set()
 			string_set = set()
 			def process_element(elem):
 				checked.add(elem)
-				if elem.name : string_set.add(elem.name)
+				if elem.name is not None : string_set.add(elem.name)
 				string_set.add(elem.type)
 				for name in elem:
 					attr = elem[name]
@@ -541,7 +544,7 @@ class _StringDictionary(list):
 			out_file.write( _encode_binary_string(string) )
 		else:
 			assert(string is None or string in self)
-			out_file.write( struct.pack("h" if self.indice_size == shortsize else "i", self.index(string) if string else -1 ) )
+			out_file.write( struct.pack("h" if self.indice_size == shortsize else "i", self.index(string) if string is not None else -1 ) )
 		
 	def write_dictionary(self,out_file):
 		if not self.dummy:
