@@ -613,6 +613,51 @@ def _temp_unmute_helper(arm_ob, bone_name: str) -> None:
                 fc.mute = False
 
 
+def _iter_layer_collections(layer_coll):
+    yield layer_coll
+    for child in layer_coll.children:
+        yield from _iter_layer_collections(child)
+
+
+def _force_evaluatable(obj):
+    """Temporarily pull ``obj`` into the active depsgraph even when it (or a
+    collection it belongs to) is disabled/excluded in the view layer, so
+    ``scene.frame_set`` drives its pose. Returns a ``restore()`` callable.
+
+    Only the settings that actually remove an object from depsgraph evaluation are
+    touched: object / collection "Disable in Viewports" (``hide_viewport``) and the
+    view-layer ``exclude`` checkbox. The eye icon (``hide_get`` / ``LayerCollection.
+    hide_viewport``) and ``hide_render`` leave the object evaluated, so they are left
+    alone. Needed because a reference armature is commonly kept hidden/excluded."""
+    restores = []
+
+    if obj.hide_viewport:
+        obj.hide_viewport = False
+        restores.append(lambda o=obj: setattr(o, 'hide_viewport', True))
+
+    obj_colls = list(obj.users_collection)
+    for coll in obj_colls:
+        if coll.hide_viewport:
+            coll.hide_viewport = False
+            restores.append(lambda c=coll: setattr(c, 'hide_viewport', True))
+
+    view_layer = getattr(bpy.context, 'view_layer', None)
+    if view_layer is not None:
+        coll_names = {c.name for c in obj_colls}
+        for lc in _iter_layer_collections(view_layer.layer_collection):
+            if lc.collection.name in coll_names and lc.exclude:
+                lc.exclude = False
+                restores.append(lambda l=lc: setattr(l, 'exclude', True))
+
+    def restore():
+        for fn in reversed(restores):
+            try:
+                fn()
+            except Exception:
+                pass
+    return restore
+
+
 def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = False) -> list:
     """Sample trigger-target pairs from the action by evaluating the scene at each
     driver bone keyframe frame. Returns list of (driver_quat, helper_quat)."""
@@ -624,12 +669,27 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
     if not action:
         return []
 
-    anim = arm_ob.animation_data
-    if anim is None:
-        return []
+    # A reference armature lets near-identical rigs (e.g. the same character with a
+    # different outfit / IK setup) reuse a base rig's computed triggers. When set,
+    # the action is sampled on the reference; only the trigger *deltas* come from it
+    # - the exported armature (arm_ob) still supplies rest orientation and basePos
+    # in build_trigger_transforms, so different rest positions are expected/fine.
+    sample_arm = arm_ob
+    ref = getattr(entry, 'reference_armature', None)
+    if ref is not None and ref is not arm_ob and getattr(ref, 'type', None) == 'ARMATURE':
+        if entry.driver_bone in ref.pose.bones and entry.helper_bone in ref.pose.bones:
+            sample_arm = ref
+        else:
+            print(f"[ProcBones] Reference armature '{ref.name}' is missing bone "
+                  f"'{entry.driver_bone}' or '{entry.helper_bone}' - sampling '{arm_ob.name}' instead")
 
-    # Determine frame range via shared helper (respects manual vs auto mode).
-    fs, fe, valid = _get_proc_trigger_frame_range(entry, arm_ob)
+    anim = sample_arm.animation_data
+    if anim is None:
+        anim = sample_arm.animation_data_create()
+
+    # Determine frame range via shared helper (respects manual vs auto mode). Auto
+    # mode scans for keyframes on bones that exist in the sampled armature.
+    fs, fe, valid = _get_proc_trigger_frame_range(entry, sample_arm)
     if not valid:
         print(f"[ProcBones] No valid frame range for '{entry.helper_bone}' "
               f"in action '{action.name}' : check action has bone keyframes")
@@ -652,18 +712,27 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
     orig_use_nla = anim.use_nla
     orig_slot_handle = getattr(anim, 'action_slot_handle', None)
 
-    was_overridden = (arm_ob.name, entry.helper_bone) in _overridden_helpers
+    was_overridden = (sample_arm.name, entry.helper_bone) in _overridden_helpers
     # Snapshot the current pose so it can be restored exactly after cache build.
     # The identity-then-frame_set approach in the finally block only restores
     # keyframed bones; this snapshot preserves manually posed (non-keyframed) bones.
-    saved_pose = {pb.name: pb.matrix_basis.copy() for pb in arm_ob.pose.bones}
+    # frame_set re-evaluates the whole scene, so when sampling from a reference
+    # armature the exported armature (arm_ob) must be snapshot/restored too.
+    restore_arms = [sample_arm] if sample_arm is arm_ob else [sample_arm, arm_ob]
+    saved_pose = {a.name: {pb.name: pb.matrix_basis.copy() for pb in a.pose.bones}
+                  for a in restore_arms}
+
+    # When sampling a reference armature it may be hidden/excluded from the view
+    # layer; force it evaluatable so frame_set actually drives its pose, else every
+    # trigger would collapse to the rest pose. Restored in the finally block.
+    restore_visibility = _force_evaluatable(sample_arm) if sample_arm is not arm_ob else None
 
     _building_proc_cache = True
     try:
         # Unmute constraints/drivers on the helper so frame_set captures their
         # effect. If sim was already running (was_overridden), saved states are
         # preserved in _helper_saved_mutes - _temp_unmute_helper doesn't touch them.
-        _temp_unmute_helper(arm_ob, entry.helper_bone)
+        _temp_unmute_helper(sample_arm, entry.helper_bone)
 
         anim.use_nla = False
         anim.action  = action
@@ -679,16 +748,16 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
         triggers = []
         for frame in frames:
             scene.frame_set(int(frame), subframe=frame - int(frame))
-            d_pb = arm_ob.pose.bones.get(entry.driver_bone)
-            h_pb = arm_ob.pose.bones.get(entry.helper_bone)
+            d_pb = sample_arm.pose.bones.get(entry.driver_bone)
+            h_pb = sample_arm.pose.bones.get(entry.helper_bone)
             if d_pb and h_pb:
-                d_local = arm_ob.convert_space(
+                d_local = sample_arm.convert_space(
                     pose_bone=d_pb, matrix=d_pb.matrix,
                     from_space='POSE', to_space='LOCAL')
                 dq   = d_local.to_quaternion().normalized()
                 dloc = d_local.to_translation()
                 # Read the full constraint/driver-evaluated pose in local space.
-                h_local = arm_ob.convert_space(
+                h_local = sample_arm.convert_space(
                     pose_bone=h_pb, matrix=h_pb.matrix,
                     from_space='POSE', to_space='LOCAL')
                 hloc = h_local.to_translation()
@@ -708,12 +777,15 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
         # and updates scene.frame_current; the snapshot then restores ALL bones
         # (including non-keyframed ones that frame_set would leave at identity).
         scene.frame_set(orig_frame)
-        for pb in arm_ob.pose.bones:
-            if pb.name in saved_pose:
-                pb.matrix_basis = saved_pose[pb.name]
+        for a in restore_arms:
+            for pb in a.pose.bones:
+                if pb.name in saved_pose[a.name]:
+                    pb.matrix_basis = saved_pose[a.name][pb.name]
         # Re-mute the helper if it was already overridden before this build.
         if was_overridden:
-            _set_helper_mute(arm_ob, entry.helper_bone, True)
+            _set_helper_mute(sample_arm, entry.helper_bone, True)
+        if restore_visibility is not None:
+            restore_visibility()
         _building_proc_cache = False
 
     if not export_print:

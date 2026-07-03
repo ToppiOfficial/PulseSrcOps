@@ -1548,11 +1548,12 @@ class SMD_OT_ProcBoneDuplicate(Operator):
             return {'CANCELLED'}
         src = avs.proc_bones[idx]
         dst = avs.proc_bones.add()
-        dst.proc_type        = src.proc_type
-        dst.helper_bone      = src.helper_bone
-        dst.driver_bone      = src.driver_bone
-        dst.action           = src.action
-        dst.action_slot_name = src.action_slot_name
+        dst.proc_type          = src.proc_type
+        dst.helper_bone        = src.helper_bone
+        dst.driver_bone        = src.driver_bone
+        dst.reference_armature = src.reference_armature
+        dst.action             = src.action
+        dst.action_slot_name   = src.action_slot_name
         dst.lookat_aim_axis  = src.lookat_aim_axis
         dst.lookat_up_axis   = src.lookat_up_axis
         dst.lookat_offset[:] = src.lookat_offset[:]
@@ -1749,11 +1750,12 @@ _proc_bone_clipboard: list[dict] | None = None
 
 def _proc_entry_to_dict(entry) -> dict:
     return {
-        'proc_type':        entry.proc_type,
-        'helper_bone':      entry.helper_bone,
-        'driver_bone':      entry.driver_bone,
-        'action':           entry.action.name if entry.action else '',
-        'action_slot_name': entry.action_slot_name,
+        'proc_type':          entry.proc_type,
+        'helper_bone':        entry.helper_bone,
+        'driver_bone':        entry.driver_bone,
+        'reference_armature': entry.reference_armature.name if entry.reference_armature else '',
+        'action':             entry.action.name if entry.action else '',
+        'action_slot_name':   entry.action_slot_name,
         'lookat_aim_axis':  set(entry.lookat_aim_axis),
         'lookat_up_axis':   set(entry.lookat_up_axis),
         'lookat_offset':    tuple(entry.lookat_offset),
@@ -1764,6 +1766,9 @@ def _proc_entry_from_dict(entry, d: dict):
     entry.proc_type        = d['proc_type']
     entry.helper_bone      = d['helper_bone']
     entry.driver_bone      = d['driver_bone']
+    ref_name = d.get('reference_armature', '')
+    if ref_name and ref_name in bpy.data.objects:
+        entry.reference_armature = bpy.data.objects[ref_name]
     action_name = d['action']
     if action_name and action_name in bpy.data.actions:
         entry.action = bpy.data.actions[action_name]

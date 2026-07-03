@@ -290,6 +290,13 @@ class ProcBoneEntry(bpy.types.PropertyGroup):
     )
     helper_bone : StringProperty(name=get_id('prop_proc_bone_helper'), description=get_id('prop_proc_bone_helper_tip'))
     driver_bone : StringProperty(name=get_id('prop_proc_bone_driver'), description=get_id('prop_proc_bone_driver_tip'))
+    reference_armature : PointerProperty(
+        name=get_id('prop_proc_bone_reference_armature'),
+        description=get_id('prop_proc_bone_reference_armature_tip'),
+        type=bpy.types.Object,
+        poll=lambda self, ob: ob.type == 'ARMATURE',
+        update=_proc_entry_invalidate_cache,
+    )
     action : PointerProperty(name=get_id('prop_proc_bone_action'), description=get_id('prop_proc_bone_action_tip'), type=bpy.types.Action, update=_proc_entry_invalidate_cache)
     action_slot_name : StringProperty(name=get_id('prop_proc_bone_slot'), description=get_id('prop_proc_bone_slot_tip'), update=_proc_entry_invalidate_cache)
     use_manual_frame_range : BoolProperty(

@@ -438,6 +438,7 @@ class SMD_PT_ProcBones(Properties_Panel):
             box.prop_search(entry, 'helper_bone', arm_data, 'bones')
             if entry.proc_type == 'TRIGGER':
                 box.prop_search(entry, 'driver_bone', arm_data, 'bones')
+                box.prop(entry, 'reference_armature')
                 box.prop(entry, 'action')
                 if entry.action and not getattr(entry.action, 'is_action_legacy', True):
                     box.prop_search(entry, 'action_slot_name', entry.action, 'slots',

@@ -2366,6 +2366,21 @@ _data = {
         'en': "Bone that is driven by the procedural simulation",
         'ja': "プロシージャルシミュレーションによって駆動されるボーン",
     },
+    'prop_proc_bone_reference_armature': {
+        'en': "Reference Armature",
+        'ja': "参照アーマチュア",
+    },
+    'prop_proc_bone_reference_armature_tip': {
+        'en': "Optional. Compute the action triggers on this armature instead of the "
+              "one being exported. Use it when two near-identical rigs (e.g. the same "
+              "character with a different outfit or IK setup) should share the base "
+              "rig's triggers. The driver and helper bones must exist on it by name; "
+              "rest position (basePos) still comes from the exported armature",
+        'ja': "任意。エクスポート対象ではなくこのアーマチュアでアクショントリガーを計算します。"
+              "ほぼ同一のリグ（衣装やIK構成だけが異なる同一キャラクターなど）でベースリグの"
+              "トリガーを共有したい場合に使用します。ドライバーボーンとヘルパーボーンが名前で"
+              "存在する必要があります。レスト位置（basePos）はエクスポート対象のアーマチュアから取得されます",
+    },
     'prop_proc_bone_lookat_aim_axis': {
         'en': "Aim Axis",
         'ja': "エイム軸",
