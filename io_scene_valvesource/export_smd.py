@@ -2883,6 +2883,15 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             DmeAxisSystem["forwardParity"] = 1
             DmeAxisSystem["coordSys"] = 0
 
+            # In Source 2 the DmeModel is itself the model-root joint (index 0 of jointList below),
+            # so it must carry its own DmeTransform. Without it, ModelDoc reads a null transform for
+            # the root joint and crashes when importing format-22 animations. This is Source 2 only:
+            # emitting it for Source 1 leaks a stray DmeTransform that studiomdl chokes on (see the
+            # "Fix null dmetransform on dmx writing" removal, which this restores in a source2-gated form).
+            # 
+            # TODO: Is this really the case??  The source 1 leaking element issue is due to string being none instead of empty ("")
+            DmeModel["transform"] = makeTransform("", Matrix(), (DmeModel.name or "") + "transform")
+
         keywords = getDmxKeywords(dm.format_ver)
 
         is_anim = bool(len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE")
