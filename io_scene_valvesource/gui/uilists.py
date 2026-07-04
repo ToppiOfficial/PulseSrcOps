@@ -285,7 +285,7 @@ _HBOX_GROUP_LABELS = {ident: label for ident, label, *_ in hitbox_group}
 class SMD_UL_Hitboxes(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
-        is_capsule = item.scale >= 0
+        is_capsule = item.scale > 0
         is_inverted = not is_capsule and any(item.vec_min[i] > item.vec_max[i] for i in range(3))
         shape_icon = 'META_CAPSULE' if is_capsule else 'MESH_CUBE'
         row.label(text='', icon=shape_icon)

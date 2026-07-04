@@ -3114,7 +3114,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
             if valid_hbox and hboxset_name:
                 inverted = [e.bone_name for e in valid_hbox
-                            if e.scale < 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
+                            if e.scale <= 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
                 if inverted:
                     self.warning(
                         f"Hitbox min/max are inverted on {len(inverted)} box hitbox(es): Source Engine "
@@ -4312,7 +4312,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             seen_bones[bone].append(e)
 
         inverted = [e.bone_name for e in valid
-                    if e.scale < 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
+                    if e.scale <= 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
         if inverted:
             self.report({'WARNING'},
                 f"Hitbox min/max are inverted on {len(inverted)} box hitbox(es) : Source Engine will "
@@ -4322,7 +4322,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         capsule_support = getattr(avs, 'hbox_capsule_support', False)
 
         if not capsule_support:
-            skipped_capsules  = [e.bone_name for e in valid if e.scale >= 0.0]
+            skipped_capsules  = [e.bone_name for e in valid if e.scale > 0.0]
             skipped_rotations = [e.bone_name for e in valid
                                  if any(abs(r) > 1e-6 for r in e.rotation)]
             if skipped_capsules:
@@ -4345,15 +4345,15 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
     def _hitboxes_vmdl(self, arm, valid, hboxset, export_path):
         # Source 2 / ModelDoc only supports capsule hitboxes. A hitbox is a capsule
-        # when its scale (capsule radius) is >= 0; scale < 0 means an oriented box.
-        capsules = [e for e in valid if e.scale >= 0.0]
-        boxes    = [e for e in valid if e.scale < 0.0]
+        # when its scale (capsule radius) is > 0; scale <= 0 means an oriented box.
+        capsules = [e for e in valid if e.scale > 0.0]
+        boxes    = [e for e in valid if e.scale <= 0.0]
 
         if boxes:
             bnames = ', '.join(sorted({e.bone_name for e in boxes}))
             self.report({'WARNING'},
                 f"Source 2 hitboxes only support capsules : skipping {len(boxes)} box hitbox(es) "
-                f"(bones: {bnames}). Give them a capsule radius (scale >= 0) to export them.")
+                f"(bones: {bnames}). Give them a capsule radius (scale > 0) to export them.")
 
         if not capsules:
             self.report({'WARNING'},

@@ -369,7 +369,7 @@ class SMD_PT_Hitboxes(Properties_Panel):
         if 0 <= idx < len(avs.hitboxes):
             entry = avs.hitboxes[idx]
             box = layout.box()
-            is_capsule = entry.scale >= 0
+            is_capsule = entry.scale > 0
 
             box.prop_search(entry, 'bone_name', arm_data, 'bones',
                             text=get_id('prop_hitbox_bone'))

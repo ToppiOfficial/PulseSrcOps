@@ -1674,8 +1674,8 @@ _data = {
         'ja': "スケール / 半径",
     },
     'prop_hitbox_scale_tip': {
-        'en': "-1 = oriented box (OBB), 0 or positive = capsule with this radius",
-        'ja': "-1 = 方向付きボックス (OBB)、0以上 = この半径のカプセル",
+        'en': "0 or negative = oriented box (OBB), positive = capsule with this radius",
+        'ja': "0以下 = 方向付きボックス (OBB)、正の値 = この半径のカプセル",
     },
     'prop_hitbox_vec_max': {
         'en': "Max / P2",

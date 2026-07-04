@@ -7,7 +7,7 @@ Converts between the armature's ``vs.hitboxes`` collection entries and:
 * **KV3** - ``HitboxCapsule`` KVNodes (Source 2 / ModelDoc .vmdl)
 
 A hitbox entry stores ``vec_min`` / ``vec_max`` (bone-local box), ``rotation``
-(radians) and ``scale`` (capsule radius, ``-1`` = oriented box). Each format's
+(radians) and ``scale`` (capsule radius; ``0`` or negative = oriented box). Each format's
 writer (called by ``export_smd.PrefabExporter``) sits next to its reader so the
 two halves stay in sync.
 """
@@ -36,8 +36,9 @@ def write_dme_attrs(hb, entry, bone_export: str) -> None:
     hb["groupId"]    = _group_id(entry.group)
     hb["minBounds"]  = datamodel.Vector3(entry.vec_min)
     hb["maxBounds"]  = datamodel.Vector3(entry.vec_max)
-    # scale: -1 = OBB box, >= 0 = capsule radius (matches flCapsuleRadius).
-    hb["radius"]     = float(entry.scale)
+    # scale: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius). The raw
+    # value is written as-is (0 stays 0), only truly negative values clamp to -1.
+    hb["radius"]     = float(entry.scale) if entry.scale >= 0.0 else -1.0
     # orientation is a plain vector3 of Euler degrees (pitch, yaw, roll), read
     # into angOffsetOrientation on the compiler. Vector3 (not Angle) avoids the
     # "angle" vs "qangle" DMX type-name mismatch with KitsuneMDL.

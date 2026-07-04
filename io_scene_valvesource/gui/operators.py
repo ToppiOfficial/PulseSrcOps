@@ -1285,7 +1285,7 @@ class SMD_OT_HitboxMirror(Operator):
         mn = list(entry.vec_min)
         mx = list(entry.vec_max)
         i  = 'XYZ'.index(self.axis)
-        if entry.scale < 0:
+        if entry.scale <= 0:
             # Box: swap negated extents on the chosen axis to preserve min/max convention
             mn[i], mx[i] = -mx[i], -mn[i]
         else:
@@ -1324,6 +1324,8 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
 
     driver_bone      : StringProperty(name=get_id('prop_proc_bone_driver'),
                                       description=get_id('prop_proc_bone_driver_tip'))
+    reference_armature : StringProperty(name=get_id('prop_proc_bone_reference_armature'),
+                                        description=get_id('prop_proc_bone_reference_armature_tip'))
     action_name      : StringProperty(name=get_id('prop_proc_bone_action'),
                                       description=get_id('prop_proc_bone_action_tip'))
     action_slot_name : StringProperty(name=get_id('prop_proc_bone_slot'),
@@ -1356,6 +1358,9 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
         else:
             col.prop(self, 'driver_bone')
 
+        col.prop_search(self, 'reference_armature', bpy.data, 'objects',
+                        text=get_id('prop_proc_bone_reference_armature'))
+
         col.prop_search(self, 'action_name', bpy.data, 'actions')
 
         action = bpy.data.actions.get(self.action_name)
@@ -1374,10 +1379,17 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
 
         action = bpy.data.actions.get(self.action_name) if self.action_name else None
 
+        ref_arm = bpy.data.objects.get(self.reference_armature) if self.reference_armature else None
+        if self.reference_armature and (ref_arm is None or ref_arm.type != 'ARMATURE'):
+            self.report({'ERROR'}, "Reference armature must be an armature object")
+            return {'CANCELLED'}
+
         for pb in bones:
             entry                  = avs.proc_bones.add()
             entry.helper_bone      = pb.name
             entry.driver_bone      = self.driver_bone
+            if ref_arm:
+                entry.reference_armature = ref_arm
             if action:
                 entry.action       = action
             entry.action_slot_name = self.action_slot_name

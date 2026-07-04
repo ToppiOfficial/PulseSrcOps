@@ -241,7 +241,7 @@ class HitboxEntry(bpy.types.PropertyGroup):
                                     update=lambda s, c: _hb_propagate(s, c, 'vec_max',  True))
     rotation  : FloatVectorProperty(name=get_id('prop_hitbox_rotation'), description=get_id('prop_hitbox_rotation_tip'), size=3, default=(0.0, 0.0, 0.0), subtype='EULER', unit='ROTATION', precision=4,
                                     update=lambda s, c: _hb_propagate(s, c, 'rotation', True))
-    scale     : FloatProperty(name=get_id('prop_hitbox_scale'), description=get_id('prop_hitbox_scale_tip'), default=-1.0, min=-1.0, precision=4,
+    scale     : FloatProperty(name=get_id('prop_hitbox_scale'), description=get_id('prop_hitbox_scale_tip'), default=0, min=-1.0, precision=4,
                               update=lambda s, c: _hb_propagate(s, c, 'scale',    False))
 
 

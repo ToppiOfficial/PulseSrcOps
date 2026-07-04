@@ -426,7 +426,7 @@ def _draw_hitbox_for_bone(shader, ob, pb, hb):
     mx = Vector(hb.vec_max)
     ctr_local = (mn + mx) * 0.5
 
-    if hb.scale < 0:
+    if hb.scale <= 0:
         # Oriented Box
         center_w = (bone_mat @ Vector((*ctr_local, 1.0))).to_3d()
         hx = abs(mx[0] - mn[0]) * 0.5
