@@ -1530,7 +1530,12 @@ class SmdImporter(bpy.types.Operator, Logger):
                 self._ensureSceneDmxVersion(dmx_version(9, 22, compiler=Compiler.MODELDOC))
 
             if not smd_type:
-                smd.jobType = REF if dm.root.get("model") else ANIM
+                if dm.root.get("model"):
+                    smd.jobType = REF
+                elif dm.root.get("animationList") or dm.root.get("channels"):
+                    smd.jobType = ANIM
+                else:
+                    smd.jobType = REF
             self.createCollection()
             self.ensureAnimationBonesValidated()
 

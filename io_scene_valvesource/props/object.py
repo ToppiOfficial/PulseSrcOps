@@ -9,7 +9,7 @@ __all__ = [
 import bpy
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
                        CollectionProperty, FloatProperty, FloatVectorProperty, PointerProperty)
-from ..utils import get_id, hitbox_group
+from ..utils import get_id, hitbox_group, on_delta_override_index_changed
 from .items import FlexControllerItem, DmeFlexRuleItem, DmeDeltaNameOverride, VertexAnimation, ValveSource_FloatMapRemap, AttachmentDisplayMeshItem
 from .mixins import ShapeTypeProps, CurveTypeProps, ExportableProps
 from .scene import on_flexcontroller_index_changed
@@ -51,7 +51,7 @@ class ValveSource_ObjectProps(ExportableProps, bpy.types.PropertyGroup):
     dme_flex_rules : CollectionProperty(name='Flex Rules', type=DmeFlexRuleItem)
     dme_flex_rules_index : IntProperty(default=-1)
     dme_delta_overrides : CollectionProperty(name='Delta Name Overrides', type=DmeDeltaNameOverride)
-    dme_delta_overrides_index : IntProperty(default=-1)
+    dme_delta_overrides_index : IntProperty(default=-1, update=on_delta_override_index_changed)
 
     dmx_attachment : BoolProperty(name=get_id('prop_dmx_attachment'), description=get_id('prop_dmx_attachment_tip'), default=False)
     attachment_display_meshes : CollectionProperty(type=AttachmentDisplayMeshItem)

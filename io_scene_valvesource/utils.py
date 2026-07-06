@@ -1632,6 +1632,31 @@ def get_dme_delta_override_conflicts(ob) -> set:
 
     return conflicts
 
+def on_delta_override_index_changed(self, context):
+    """Sync the mesh's active shape key to the selected Delta Map entry's source shapekey."""
+    ob = context.active_object
+    if not ob:
+        return
+
+    mesh : bpy.types.Object = ob if ob.type == 'MESH' else next(
+        (child for child in ob.children if child.type == 'MESH'), None
+    )
+    if not mesh or not mesh.data.shape_keys:
+        return
+
+    items = ob.vs.dme_delta_overrides
+    idx = ob.vs.dme_delta_overrides_index
+    if idx < 0 or idx >= len(items):
+        return
+
+    shapekey_name = items[idx].shapekey
+    if not shapekey_name:
+        return
+
+    sk_idx = mesh.data.shape_keys.key_blocks.find(shapekey_name)
+    if sk_idx != -1:
+        mesh.active_shape_key_index = sk_idx
+
 _FLEX_MATH_KEYWORDS = frozenset({
     'min', 'max', 'sqrt', 'abs', 'pow', 'clamp', 'atan2', 'log', 'sin', 'cos',
 })

@@ -745,6 +745,17 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
                 except Exception:
                     pass
 
+        # Sample from REST pose + the action, not the user's current pose. Zero
+        # every bone's local transform so non-keyframed bones sit at rest during
+        # sampling; frame_set re-applies the action on top each frame, overriding
+        # only the keyframed channels. Without this, any bone the user has posed
+        # (but the action doesn't key) leaks into the constraint/driver evaluation
+        # that produces the helper pose, silently distorting the exported triggers.
+        # The pre-build pose is restored from saved_pose in the finally block.
+        for a in restore_arms:
+            for pb in a.pose.bones:
+                pb.matrix_basis = Matrix.Identity(4)
+
         triggers = []
         for frame in frames:
             scene.frame_set(int(frame), subframe=frame - int(frame))
