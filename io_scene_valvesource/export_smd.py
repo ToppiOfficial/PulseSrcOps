@@ -1248,6 +1248,17 @@ class Baker:
         if uid in self._cache:
             return self._cache[uid]
 
+        # Reuse an armature already baked by an earlier task within this same export id
+        # (a collection's base / LOD / edgeline / split tasks all reference one skeleton).
+        # The baked armature's pose was reset to identity and mesh export never mutates it,
+        # so sharing it avoids re-copying the whole armature for every task.
+        arm_cache = getattr(self._exporter, "_armature_bake_cache", None)
+        if ob.type == "ARMATURE" and arm_cache is not None:
+            shared = arm_cache.get(uid)
+            if shared is not None and shared.object and shared.object.name in bpy.data.objects:
+                self._cache[uid] = shared
+                return shared
+
         result = BakeResult(ob.name)
         result.src = ob
         self._cache[uid] = result
@@ -1317,6 +1328,8 @@ class Baker:
                 pb.matrix_basis.identity()
             result.armature = result
             result.object = ob
+            if arm_cache is not None:
+                arm_cache[uid] = result
             return result
 
         if ob.type == "CURVE":
@@ -1812,6 +1825,14 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if context.scene.rigidbody_world:
                 context.scene.frame_set(context.scene.rigidbody_world.point_cache.frame_start)
 
+            # Baseline frame every bake starts from. Animation export and vertex-animation
+            # baking sweep the timeline and leave the scene parked on their last frame; a
+            # subsequent reference-model bake would otherwise capture that stale frame
+            # (frame-driven shape keys, geometry nodes, driven modifiers). Reset to this
+            # baseline before each task so bakes are deterministic regardless of export
+            # order. Falls back to the sim start above when a rigidbody world exists.
+            self._bake_frame = context.scene.frame_current
+
             for view_layer in bpy.context.scene.view_layers:
                 unhide_all(view_layer.layer_collection)
 
@@ -1965,6 +1986,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
     def _export_one(self, context, id) -> bool:
         self.attemptedExports += 1
         self._last_bake_results = []
+        # Baked-armature cache shared by every task of this one export id (reset per id so
+        # a mutated animation armature can't leak into an unrelated export). See Baker.bake.
+        self._armature_bake_cache = {}
         bench = BenchMarker()
         subdir = id.vs.subdir.lstrip("/")
         print(f"\nPulseSrcOps exporting {id.name}")
@@ -2036,6 +2060,13 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 element.hide = True
 
         # -- bake -------------------------------------------------------------
+        # Reset to the baseline frame so this task's bake is deterministic and never
+        # inherits a stale frame left behind by a previous animation / vertex-animation
+        # export in the same run (see self._bake_frame in execute()).
+        baseline_frame = getattr(self, "_bake_frame", None)
+        if baseline_frame is not None and context.scene.frame_current != baseline_frame:
+            context.scene.frame_set(baseline_frame)
+
         baker = Baker(self)
         bake_results = []
 
@@ -2200,24 +2231,37 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         if skipped:
             print(f"- Skipping {skipped} non-deforming bones")
 
-        original_pose = self.armature_src.data.pose_position
-        self.armature_src.data.pose_position = "REST"
-        bpy.context.view_layer.update()
-
-        self.exportable_empties = [
-            (e, e.matrix_world.copy())
+        # Snapshot bone-parented attachment empties at REST pose. Gather the candidates
+        # first (a set membership test instead of rebuilding the bone-name list per empty),
+        # and only pay for the pose_position toggle + the two view_layer.update() flushes
+        # when there is actually something to capture and the armature isn't already at REST.
+        bone_names = {pb.name for pb in self.armature.pose.bones}
+        candidate_empties = [
+            e
             for e in bpy.data.objects
             if e.type == "EMPTY"
             and e.parent == self.armature_src
             and e.parent_type == "BONE"
-            and e.parent_bone in [pb.name for pb in self.armature.pose.bones]
+            and e.parent_bone in bone_names
             and isinstance(getattr(e.vs, "dmx_attachment", None), bool)
             and e.vs.dmx_attachment
         ]
 
-        self.armature_src.data.pose_position = original_pose
-        bpy.context.view_layer.update()
-        
+        if candidate_empties:
+            original_pose = self.armature_src.data.pose_position
+            toggle_rest = original_pose != "REST"
+            if toggle_rest:
+                self.armature_src.data.pose_position = "REST"
+                bpy.context.view_layer.update()
+
+            self.exportable_empties = [(e, e.matrix_world.copy()) for e in candidate_empties]
+
+            if toggle_rest:
+                self.armature_src.data.pose_position = original_pose
+                bpy.context.view_layer.update()
+        else:
+            self.exportable_empties = []
+
         return True
 
     def _process_vertex_animations(self, source, bake_results: list[BakeResult], bench: BenchMarker) -> None:
@@ -2504,6 +2548,69 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         assert isinstance(evaluated, bpy.types.Object) and evaluated.pose
         return [evaluated.pose.bones[b.name] for b in self.exportable_bones]
 
+    def _keyframedBoneNames(self) -> set:
+        # Bone names that have at least one fcurve in the armature's current action/slot.
+        # These are the bones the animation actually drives; anything else that is posed
+        # will be wiped by the reset_pose_per_anim pass below.
+        ad = self.armature.animation_data
+        if not ad or not ad.action:
+            return set()
+        try:
+            channelbag = ad.action.layers[0].strips[0].channelbag(ad.action_slot)
+        except (IndexError, AttributeError):
+            return set()
+        if channelbag is None:
+            return set()
+        names = set()
+        for fcurve in channelbag.fcurves:
+            m = re.match(r'pose\.bones\["(.+?)"\]', fcurve.data_path)
+            if m:
+                names.add(m.group(1))
+        return names
+
+    def warnUnkeyframedPose(self, anim_name: str):
+        # reset_pose_per_anim zeroes every pose bone's matrix_basis before sampling, so a
+        # bone the user posed but never keyframed silently snaps back to rest - a common
+        # cause of "broken" exported animations. Warn about those bones so the user can
+        # keyframe them (or disable the reset) instead of losing the pose.
+        #
+        # NB: the baked armature (self.armature) has already had every matrix_basis reset
+        # to identity in Baker.bake(), so the manual pose only survives on the untouched
+        # source armature - check that for the posed transforms.
+        src = self.armature_src
+        if not src:
+            return
+        keyframed = self._keyframedBoneNames()
+        posed = []
+        for pb in self.exportable_bones:
+            if pb.name in keyframed:
+                continue
+            src_pb = src.pose.bones.get(pb.name)
+            if src_pb is None:
+                continue
+            mb = src_pb.matrix_basis
+            if any(abs(mb[r][c] - (1.0 if r == c else 0.0)) > 1e-5 for r in range(4) for c in range(4)):
+                posed.append(self.exportable_boneNames.get(pb.name, pb.name))
+        if not posed:
+            return
+        shown = ", ".join(posed[:8]) + (f", +{len(posed) - 8} more" if len(posed) > 8 else "")
+        self.warning(get_id("exporter_warn_unkeyframed_pose", True).format(anim_name, len(posed), shown))
+
+    def applyUnkeyframedSourcePose(self):
+        # Counterpart to the reset_pose_per_anim reset. Baker.bake() UNCONDITIONALLY
+        # zeroes every matrix_basis on the baked armature (needed so meshes bind at rest
+        # pose), which means that with reset_pose_per_anim disabled the user's manual pose
+        # would still be silently lost. Copy matrix_basis back from the untouched source
+        # armature so posed-but-un-keyframed bones keep their pose; frame_set() still
+        # overrides any bone the action actually keyframes during sampling.
+        src = self.armature_src
+        if not src:
+            return
+        for pb in self.armature.pose.bones:
+            src_pb = src.pose.bones.get(pb.name)
+            if src_pb is not None:
+                pb.matrix_basis = src_pb.matrix_basis.copy()
+
     def get_delta_shapekeys(self, ob: bpy.types.Object) -> list[tuple[str, str]]:
         if not hasattr(ob, "vs") or not hasattr(ob.vs, "dme_flexcontrollers"):
             return []
@@ -2587,14 +2694,21 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.smd_file.write("time 0\n0 0 0 0 0 0 0\nend\n")
             else:
                 is_anim = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
-                anim_len = animationLength(self.armature.animation_data) + 1 if is_anim else 1
+                # first_frame lets actions that don't start on frame 0 export their real
+                # motion: we sample scene frames first_frame..first_frame+span but keep the
+                # SMD "time" 0-based so the compiled sequence still starts at time 0.
+                first_frame, span = animationFrameRange(self.armature.animation_data) if is_anim else (0, 0)
+                anim_len = span + 1 if is_anim else 1
 
                 if not is_anim:
                     for pb in self.armature.pose.bones:
                         pb.matrix_basis.identity()
                 elif self.armature.data.vs.reset_pose_per_anim:
+                    self.warnUnkeyframedPose(name)
                     for pb in self.armature.pose.bones:
                         pb.matrix_basis.identity()
+                else:
+                    self.applyUnkeyframedSourcePose()
 
                 for i in range(anim_len):
                     bpy.context.window_manager.progress_update(i / anim_len)
@@ -2602,7 +2716,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     if self.armature.data.vs.implicit_zero_bone:
                         self.smd_file.write("0  0 0 0  0 0 0\n")
                     if is_anim:
-                        bpy.context.scene.frame_set(i)
+                        bpy.context.scene.frame_set(first_frame + i)
 
                     evaluated = self.getEvaluatedPoseBones()
                     for pb in evaluated:
@@ -2895,8 +3009,12 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         if self.armature:
             if self.armature.data.vs.reset_pose_per_anim:
+                if is_anim:
+                    self.warnUnkeyframedPose(name)
                 for pb in self.armature.pose.bones:
                     pb.matrix_basis.identity()
+            elif is_anim:
+                self.applyUnkeyframedSourcePose()
             bpy.context.view_layer.update()
 
         root["skeleton"] = DmeModel
@@ -3805,7 +3923,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         if is_anim:
             ad = self.armature.animation_data
-            anim_len = animationLength(ad) if ad else 0
+            # first_frame offsets sampling so actions that don't start on frame 0 export
+            # their real motion; the DmeChannelsClip timeline stays 0-based (keyframe_time
+            # uses the loop index, not the scene frame). See animationFrameRange.
+            first_frame, anim_len = animationFrameRange(ad) if ad else (0, 0)
             fps = bpy.context.scene.render.fps * bpy.context.scene.render.fps_base
 
             DmeChannelsClip = dm.add_element(name, "DmeChannelsClip", id=name + "clip")
@@ -3865,7 +3986,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
             for frame in range(num_frames):
                 bpy.context.window_manager.progress_update(frame / num_frames)
-                bpy.context.scene.frame_set(frame)
+                bpy.context.scene.frame_set(first_frame + frame)
                 keyframe_time = datamodel.Time(frame / fps) if dm.format_ver > 11 else int(frame / fps * 10000)
                 evaluated = self.getEvaluatedPoseBones()
 

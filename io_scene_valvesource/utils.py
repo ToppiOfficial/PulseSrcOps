@@ -24,7 +24,7 @@ from bpy.app.translations import pgettext
 from contextlib import contextmanager
 from bpy.app.handlers import depsgraph_update_post, load_post, persistent
 from mathutils import Matrix, Vector
-from math import radians, pi, ceil
+from math import radians, pi, ceil, floor
 from io import TextIOWrapper
 from . import datamodel
 from . import keyvalues3
@@ -471,19 +471,31 @@ def count_exports(context):
             num += 1
     return num
 
+def _iter_action_keyframe_times(ad : bpy.types.AnimData):
+    if not ad or not ad.action:
+        return []
+    try:
+        channelbag = ad.action.layers[0].strips[0].channelbag(ad.action_slot)
+    except (IndexError, AttributeError):
+        return []
+    if channelbag is None:
+        return []
+    return [kf.co.x for fcurve in channelbag.fcurves for kf in fcurve.keyframe_points]
+
+def animationFrameRange(ad : bpy.types.AnimData):
+    # (first_frame, length) for the current action/slot. `first_frame` is the frame the
+    # action's earliest keyframe sits on; `length` is the whole-frame span from first to
+    # last keyframe. Callers must sample scene frames first_frame .. first_frame+length
+    # (NOT 0 .. length) so actions that don't start on frame 0 export their real motion
+    # instead of a held first frame. Returns (0, 0) when there are no keyframes.
+    times = _iter_action_keyframe_times(ad)
+    if not times:
+        return 0, 0
+    first = floor(min(times))
+    return first, ceil(max(times)) - first
+
 def animationLength(ad : bpy.types.AnimData):
-    if ad.action:
-        def iter_keyframes(channelbag : bpy.types.ActionChannelbag):
-            if channelbag is None:
-                return
-            for fcurve in channelbag.fcurves:
-                for keyframe in fcurve.keyframe_points:
-                    yield keyframe
-
-        keyframeTimes = [kf.co.x for kf in iter_keyframes(ad.action.layers[0].strips[0].channelbag(ad.action_slot))]
-        return ceil(max(keyframeTimes) - min(keyframeTimes)) if keyframeTimes else 0
-
-    return 0
+    return animationFrameRange(ad)[1]
     
 def getFileExt(flex=False):
     if State.datamodelEncoding != 0 and bpy.context.scene.vs.export_format == 'DMX':

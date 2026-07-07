@@ -407,6 +407,10 @@ _data = {
         'en': "Multiple armatures detected",
         'ja': "複数のアーマチュアが検出されました",
     },
+    'exporter_warn_unkeyframed_pose': {
+        'en': "Animation \"{0}\": {1} posed but un-keyframed bone(s) will be reset to rest ({2}). Keyframe them, or disable 'Reset Pose Per Anim' to keep the pose.",
+        'ja': "アニメーション「{0}」: ポーズ済みだがキーフレーム未設定のボーン{1}個がレストに戻されます（{2}）。キーフレームを設定するか、'Reset Pose Per Anim' を無効にしてポーズを保持してください。",
+    },
     'exporter_warn_sanitised_filename': {
         'en': "Sanitised exportable name \"{0}\" to \"{1}\"",
         'ja': "エクスポート名「{0}」を「{1}」にサニタイズしました",
