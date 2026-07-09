@@ -147,8 +147,8 @@ _data = {
         'ja': "暗黙の静止ボーン",
     },
     'dummy_bone_tip': {
-        'en': "Create a dummy bone for vertices which don't move. Emulates Blender's behaviour in Source, but may break compatibility with existing files (SMD only)",
-        'ja': "動かない頂点用のダミーボーンを作成（SMDのみ）",
+        'en': "Create a dummy bone for vertices which don't move. Emulates Blender's behaviour in Source, but may break compatibility with existing files (SMD and Source 1 DMX)",
+        'ja': "動かない頂点用のダミーボーンを作成（SMDおよびSource 1 DMX）",
     },
     'engine_path': {
         'en': "Engine Path",

@@ -3095,7 +3095,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         if self.armature:
             num_bones = len(self.exportable_bones)
-            add_implicit = not source2
+            add_implicit = not source2 and self.armature.data.vs.implicit_zero_bone
             if add_implicit:
                 DmeModel_children.extend(writeBone(implicit_bone_name))
             for root_elems in [writeBone(b) for b in self.armature.pose.bones if not b.parent and not (add_implicit and b.name == implicit_bone_name)]:
@@ -3163,11 +3163,40 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             avs = getattr(self.armature_src.data, 'vs', None)
             proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
 
-            # NOTE: DmeAimAtBone aims directly at the driver bone's skeleton joint
-            # (aimTarget = its DMX name below). The VRD path aims at a {base}_lookat
-            # attachment placed at lookat_offset, but attachment-input aim targets
-            # are not implemented for DMX export yet, so the offset is dropped and no
-            # _lookat attachment is written here.
+            # --- LOOKAT aim targets: a zero offset aims the DmeAimAtBone directly at
+            #     the driver joint (Source supports a bone target, so no attachment is
+            #     needed). Only a non-zero offset gets a {base}_lookat[idx]
+            #     DmeAttachment placed at lookat_offset in the driver bone's local
+            #     space - parity with the QC $attachment / VRD <aimconstraint> path.
+            #     Naming + dedup mirror PrefabExporter._collect_lookat_attachments so
+            #     the QCI and DME paths produce the same attachment names.
+            lookat_by_driver: dict[str, list[tuple]] = {}
+            for entry in proc_bones_list:
+                if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
+                    continue
+                dn = entry.driver_bone
+                if not dn or dn not in bone_elements:
+                    continue
+                off = tuple(entry.lookat_offset)
+                if off == (0.0, 0.0, 0.0):
+                    continue
+                lookat_by_driver.setdefault(dn, [])
+                if off not in lookat_by_driver[dn]:
+                    lookat_by_driver[dn].append(off)
+
+            lookat_name_map: dict[tuple, str] = {}
+            for dn, offsets in lookat_by_driver.items():
+                db = self.armature_src.data.bones.get(dn)
+                if not db:
+                    continue
+                attach_base = get_bone_exportname(db).split('.', 1)[-1]
+                multiple    = len(offsets) > 1
+                for idx, off in enumerate(offsets, start=1):
+                    attach_name = f"{attach_base}_lookat{idx}" if multiple else f"{attach_base}_lookat"
+                    lookat_name_map[(dn, off)] = attach_name
+                    # relMat is driver-bone-local; _write_attach scales it by
+                    # armature_scale, matching how basePos is scaled.
+                    _write_attach(attach_name, Matrix.Translation(Vector(off)), bone_elements[dn])
 
             # --- Procedural bones: promote each helper's skeleton joint to a
             #     DmeQuatInterpBone (TRIGGER) or DmeAimAtBone (LOOKAT) and populate
@@ -3211,10 +3240,14 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                             parent_bname):
                         bone_elem.type = "DmeQuatInterpBone"
                 else:
-                    # Aim at the actual driver bone's DMX joint (attachment-input
-                    # targets aren't implemented for DMX yet, so the _lookat
-                    # attachment name is not used).
-                    aim_target = self.exportable_boneNames.get(entry.driver_bone, entry.driver_bone) if entry.driver_bone else None
+                    # Aim at the {base}_lookat attachment written above when the
+                    # offset is non-zero. A zero offset (or a non-exportable driver,
+                    # which has no attachment) aims directly at the driver joint by
+                    # name - Source supports a bone aim target.
+                    off = tuple(entry.lookat_offset)
+                    aim_target = lookat_name_map.get((entry.driver_bone, off))
+                    if aim_target is None:
+                        aim_target = self.exportable_boneNames.get(entry.driver_bone, entry.driver_bone) if entry.driver_bone else None
                     parent_control = self.exportable_boneNames.get(parent_bname, "")
                     if _proceduralbone.write_dme_aimat_attrs(
                             bone_elem, self.armature_src, entry, aim_target,

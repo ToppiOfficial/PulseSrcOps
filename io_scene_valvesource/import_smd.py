@@ -1572,7 +1572,12 @@ class SmdImporter(bpy.types.Operator, Logger):
                 return out
 
             def isBone(elem) -> bool:
-                return elem.type in ["DmeDag", "DmeJoint", "DmeJiggleBone"]
+                # DmeQuatInterpBone (TRIGGER) and DmeAimAtBone (LOOKAT) are the
+                # procedural-bone joint types the DME exporter promotes helper
+                # joints to; they are DmeJoint subclasses, so treat them as bones
+                # or their joints (and any children) are skipped on import.
+                return elem.type in ["DmeDag", "DmeJoint", "DmeJiggleBone",
+                                     "DmeQuatInterpBone", "DmeAimAtBone"]
 
             def getBoneForElement(elem) -> bpy.types.EditBone:
                 return smd.a.data.edit_bones[smd.boneIDs[elem.id]]
@@ -1749,11 +1754,13 @@ class SmdImporter(bpy.types.Operator, Logger):
             imported_meshes: list[bpy.types.Object] = []
 
             def parseModel(elem, matrix=Matrix(), last_bone=None):
-                if elem.type in ["DmeModel", "DmeDag", "DmeJoint", "DmeJiggleBone"]:
+                if elem.type in ["DmeModel", "DmeDag", "DmeJoint", "DmeJiggleBone",
+                                 "DmeQuatInterpBone", "DmeAimAtBone"]:
                     if elem.type == "DmeDag":
                         matrix = matrix @ get_transform_matrix(elem)
                     if elem.get("children") and elem["children"]:
-                        if elem.type in ["DmeJoint", "DmeJiggleBone"]:
+                        if elem.type in ["DmeJoint", "DmeJiggleBone",
+                                         "DmeQuatInterpBone", "DmeAimAtBone"]:
                             last_bone = elem
                         subelems = elem["children"]
                     elif elem.get("shape"):

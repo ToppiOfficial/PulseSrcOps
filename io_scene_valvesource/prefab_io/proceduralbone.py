@@ -212,7 +212,10 @@ def write_dme_quatinterp_attrs(elem, arm, entry, entry_idx, scene, control_bone,
 def write_dme_aimat_attrs(elem, arm, entry, aim_target_name, armature_scale, warn,
                           parent_control="", parent_name=None) -> bool:
     """Populate a DmeAimAtBone element (proc_type LOOKAT). ``aim_target_name`` is
-    the ``{base}_lookat[idx]`` DmeAttachment name written alongside the skeleton.
+    the ``{base}_lookat[idx]`` DmeAttachment name the caller embeds at a non-zero
+    ``lookat_offset`` in the driver bone's local space; for a zero offset (or a
+    non-exportable driver) it is the driver joint name and the bone is aimed at
+    directly.
     ``parent_control`` is the *DMX joint name* of the helper's skeleton parent
     (the nearest exportable ancestor) and ``parent_name`` its data-bone name - the
     compiler transforms ``basePos`` by this bone's matrix to place the aim bone, so

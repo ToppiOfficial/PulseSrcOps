@@ -1,11 +1,11 @@
 schema_version = "1.0.0"
 
 # Basic Add-on Info
-id = "kitsune_source_tools"
+id = "pulse_src_ops"
 name = "PulseSrcOps"
-version = "0.9.96"
+version = "0.9.97"
 tagline = "A forked of BlenderSourceTools, an Importer and exporter for Valve Software's Source Engine Models"
-maintainer = "Toppi (PulseSrcOps)"
+maintainer = "Toppi"
 type = "add-on"
 
 # Blender Compatibility

@@ -202,7 +202,7 @@ class ValveSource_BoneProps(JiggleBoneProps, bpy.types.PropertyGroup):
 
 
 class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
-    implicit_zero_bone : BoolProperty(name=get_id("dummy_bone"), default=True, description=get_id("dummy_bone_tip"))
+    implicit_zero_bone : BoolProperty(name=get_id("dummy_bone"), default=False, description=get_id("dummy_bone_tip"))
     arm_modes = (
         ('CURRENT', get_id("action_slot_current"), get_id("action_slot_selection_current_tip")),
         ('FILTERED', get_id("slot_filter"), get_id("slot_filter_tip")),

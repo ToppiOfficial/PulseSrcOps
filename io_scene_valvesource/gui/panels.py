@@ -288,7 +288,6 @@ class SMD_PT_ArmatureData(Properties_Panel):
 
         box = layout.box()
         col = box.column()
-        col.enabled = bool(State.exportFormat == ExportFormat.SMD)
         col.prop(active_armature.data.vs,"implicit_zero_bone")
 
         box = layout.box()
