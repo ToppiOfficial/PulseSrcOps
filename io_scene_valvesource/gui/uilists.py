@@ -69,36 +69,35 @@ class SMD_UL_ExportItems(UIList):
             row.label(text=f"{subdir}/")
 
 
-class FilterCache:
-    def __init__(self):
-        self.state_objects = State.exportableObjects
-
-    fname = None
-    filter = None
-    order = None
-
-
-gui_cache = {}
-
-
 class SMD_UL_GroupItems(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_property, index, flt_flag):
+        ob = item.obj
+        if not ob:
+            return
         r = layout.row(align=True)
-        r.prop(item.vs,"export",text="",icon='CHECKBOX_HLT' if item.vs.export else 'CHECKBOX_DEHLT',emboss=False)
-        r.label(text=item.name,translate=False,icon=MakeObjectIcon(item,suffix="_DATA"))
+        r.prop(ob.vs,"export",text="",icon='CHECKBOX_HLT' if ob.vs.export else 'CHECKBOX_DEHLT',emboss=False)
+        r.label(text=ob.name,translate=False,icon=MakeObjectIcon(ob,suffix="_DATA"))
 
     def filter_items(self, context, data, propname): # pyright: ignore
+        # Entries (own objects plus those folded in from bypassed child groups)
+        # are kept deduplicated in State.update_scene; here we hide non-exportable
+        # objects, apply the search box, and sort by name.
         fname = self.filter_name.lower()
-        cache = gui_cache.get(data)
-
-        if not (cache and cache.fname == fname and cache.state_objects is State.exportableObjects):
-            cache = FilterCache()
-            cache.filter = [self.bitflag_filter_item if ob.session_uid in State.exportableObjects and (not fname or fname in ob.name.lower()) else 0 for ob in data.objects]
-            cache.order = UI_UL_list.sort_items_by_name(data.objects)
-            cache.fname = fname
-            gui_cache[data] = cache
-
-        return cache.filter, cache.order if self.use_filter_sort_alpha else []
+        entries = getattr(data, propname)
+        flt = [
+            self.bitflag_filter_item
+            if e.obj and e.obj.session_uid in State.exportableObjects and (not fname or fname in e.obj.name.lower())
+            else 0
+            for e in entries
+        ]
+        if self.use_filter_sort_alpha:
+            order = UI_UL_list.sort_items_helper(
+                [(i, e.obj.name.lower() if e.obj else "") for i, e in enumerate(entries)],
+                key=lambda t: t[1],
+            )
+        else:
+            order = []
+        return flt, order
 
 
 class SMD_UL_DmeFlexControllers(UIList):
@@ -334,6 +333,13 @@ class SMD_UL_ProcBones(UIList):
             if action_label and item.action_slot_name:
                 action_label = f"{item.action_slot_name} ({action_label})"
             row.label(text=action_label)
+
+
+class SMD_UL_BoneNamePrefixes(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        split = layout.split(factor=0.6, align=True)
+        split.prop(item, "prefix", text="", emboss=True)
+        split.prop(item, "shortcut", text="", emboss=True, icon='SYNTAX_OFF')
 
 
 class SMD_UL_AttachmentDisplayMeshes(UIList):

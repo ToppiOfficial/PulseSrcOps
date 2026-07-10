@@ -36,12 +36,10 @@ def write_dme_attrs(hb, entry, bone_export: str) -> None:
     hb["groupId"]    = _group_id(entry.group)
     hb["minBounds"]  = datamodel.Vector3(entry.vec_min)
     hb["maxBounds"]  = datamodel.Vector3(entry.vec_max)
-    # scale: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius). The raw
-    # value is written as-is (0 stays 0), only truly negative values clamp to -1.
+    # radius: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius).
     hb["radius"]     = float(entry.scale) if entry.scale >= 0.0 else -1.0
-    # orientation is a plain vector3 of Euler degrees (pitch, yaw, roll), read
-    # into angOffsetOrientation on the compiler. Vector3 (not Angle) avoids the
-    # "angle" vs "qangle" DMX type-name mismatch with KitsuneMDL.
+    # Euler degrees (pitch, yaw, roll). Vector3 not Angle, to avoid the
+    # "angle"/"qangle" DMX type-name mismatch with KitsuneMDL.
     hb["orientation"] = datamodel.Vector3((
         math.degrees(entry.rotation[0]),
         math.degrees(entry.rotation[1]),
@@ -200,11 +198,8 @@ def kv3_capsule_kwargs(entry, parent_bone: str) -> dict:
 def import_hitboxes_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, int, list]':
     """Import Source 2 capsule hitboxes from a parsed VMDL KV3 document.
 
-    Source 2 only supports capsule hitboxes, defined by two bone-local endpoints
-    and a radius. The PulseSrcOps hitbox entry stores the same data as
-    vec_min/vec_max with an identity rotation and scale=radius, which round-trips
-    back to the exact same capsule on export.
-
+    Source 2 capsules are two bone-local endpoints + radius, stored as
+    vec_min/vec_max with identity rotation and scale=radius (round-trips exactly).
     Returns (created_count, skipped_count, skipped_bones list).
     """
     avs = getattr(armature.data, 'vs', None)
@@ -233,9 +228,7 @@ def import_hitboxes_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, int, lis
     if not hitbox_sets:
         return (0, 0, [])
 
-    # Source bone names are case-insensitive; Blender lookups are not. Build both
-    # an export-name map and a lowercase fallback so e.g. "leg_upper_l" in a hitbox
-    # resolves to a "leg_upper_L" bone.
+    # Source bone names are case-insensitive; keep a lowercase fallback map.
     bone_map = {utils.get_bone_exportname(b): b for b in armature.data.bones}
     bone_map_lower = {utils.get_bone_exportname(b).lower(): b for b in armature.data.bones}
     for b in armature.data.bones:
@@ -281,8 +274,7 @@ def import_hitboxes_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, int, lis
             avs.hitboxes_index = len(avs.hitboxes) - 1
             created += 1
 
-    # Source 2 hitboxes are always capsules; enable capsule support so the
-    # imported entries display and export correctly.
+    # Source 2 hitboxes are always capsules; enable capsule support.
     if created:
         avs.hbox_capsule_support = True
 

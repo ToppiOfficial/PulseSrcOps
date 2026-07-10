@@ -9,6 +9,7 @@ __all__ = [
     'HitboxEntry',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
+    'BoneNamePrefixItem',
 ]
 
 import bpy, re, math as _math
@@ -51,6 +52,25 @@ class AttachmentDisplayMeshItem(bpy.types.PropertyGroup):
         subtype='COLOR_GAMMA', size=4,
         default=(0.3, 0.9, 1.0, 0.45), min=0.0, max=1.0,
     )
+
+
+def _update_bone_prefix(self, context):
+    # Users enter the bare prefix (e.g. "ValveBiped"); the trailing dot is implied.
+    cleaned = self.prefix.strip().rstrip('.').strip()
+    if cleaned != self.prefix:
+        self.prefix = cleaned
+
+
+def _update_bone_shortcut(self, context):
+    # Users type just the token (e.g. "vbip"); the enclosing ! ! are implied.
+    cleaned = re.sub(r'\W', '', self.shortcut.strip().strip('!'))
+    if cleaned != self.shortcut:
+        self.shortcut = cleaned
+
+
+class BoneNamePrefixItem(bpy.types.PropertyGroup):
+    prefix : StringProperty(name=get_id("bone_name_prefix"), description=get_id("bone_name_prefix_tip"), default="", update=_update_bone_prefix)
+    shortcut : StringProperty(name=get_id("bone_name_shortcut"), description=get_id("bone_name_shortcut_tip"), default="", update=_update_bone_shortcut)
 
 
 # Prefab types that can be auto-exported alongside an armature. The order here is

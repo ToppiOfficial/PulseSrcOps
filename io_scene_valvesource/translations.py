@@ -206,6 +206,9 @@ _data = {
         'en': "(bypassed)",
         'ja': "(バイパス)",
     },
+    'exportables_group_bypass_hint': {
+        'en': "Bypassed - objects are listed under the parent group",
+    },
     'exportables_group_mute_suffix': {
         'en': "(suppressed)",
         'ja': "(ミュート)",
@@ -1339,6 +1342,46 @@ _data = {
     'prefab_export_mode_dme_tip': {
         'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (KitsuneMDL)",
         'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (KitsuneMDL) が必要です",
+    },
+    'bone_naming_label': {
+        'en': "Bone Naming",
+        'ja': "ボーン命名",
+    },
+    'force_source2_bone_sanitize': {
+        'en': "Force Source 2 Bone Names",
+        'ja': "Source 2 ボーン名を強制",
+    },
+    'force_source2_bone_sanitize_tip': {
+        'en': "Apply Source 2 (ModelDoc) bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",
+        'ja': "Source 1 へのエクスポート時でも Source 2 (ModelDoc) のボーン名サニタイズを適用します。ドットや非 ASCII 文字を除去し (下記の保持プレフィックスを除く)、例として 'Bone.001' は 'Bone_001' になります",
+    },
+    'bone_name_prefixes_title': {
+        'en': "Preserved Bone Name Prefixes",
+        'ja': "保持するボーン名プレフィックス",
+    },
+    'bone_name_prefixes_desc': {
+        'en': "Prefixes kept verbatim during Source 2 sanitization. The trailing dot is added automatically.",
+        'ja': "Source 2 サニタイズ時にそのまま保持されるプレフィックス。末尾のドットは自動で付きます。",
+    },
+    'bone_name_prefixes_desc2': {
+        'en': "Shortcut: type !name! in a bone export name to insert the prefix (leave empty to disable).",
+        'ja': "ショートカット: ボーンのエクスポート名に !name! と入力するとプレフィックスに展開されます (空欄で無効)。",
+    },
+    'bone_name_prefix': {
+        'en': "Prefix",
+        'ja': "プレフィックス",
+    },
+    'bone_name_prefix_tip': {
+        'en': "Bone name prefix kept verbatim during Source 2 sanitization (the trailing dot is added automatically)",
+        'ja': "Source 2 サニタイズ時にそのまま保持されるボーン名プレフィックス (末尾のドットは自動追加)",
+    },
+    'bone_name_shortcut': {
+        'en': "Shortcut",
+        'ja': "ショートカット",
+    },
+    'bone_name_shortcut_tip': {
+        'en': "Optional shortcut token. Type !token! in a bone export name to insert this prefix (e.g. !vbip! -> ValveBiped.). The enclosing ! ! are added automatically; leave empty for no shortcut",
+        'ja': "任意のショートカットトークン。ボーンのエクスポート名に !token! と入力するとこのプレフィックスに展開されます (例: !vbip! -> ValveBiped.)。囲みの ! ! は自動付与。空欄でショートカットなし",
     },
     'prop_arm_items_view': {
         'en': "View",

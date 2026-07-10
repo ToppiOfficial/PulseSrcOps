@@ -9,7 +9,8 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      get_bone_exportname,
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
-                     get_dme_split_delta_conflicts, get_collection_parent_collection)
+                     get_dme_split_delta_conflicts, get_collection_parent_collection,
+                     is_bypassed_into_parent)
 from ..export_smd import SmdExporter, PrefabExporter
 from ..import_smd import SmdImporter
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
@@ -149,6 +150,11 @@ class SMD_PT_Scene(Panel):
             row.label(text=get_id("smd_format", True) + ":")
             row.row().prop(scene.vs, "smd_format", expand=True)
 
+        if State.compiler != Compiler.MODELDOC:
+            row = box.row().split(factor=0.33)
+            row.label(text=get_id("bone_naming_label", True) + ":")
+            row.row().prop(scene.vs, "force_source2_bone_sanitize", toggle=True)
+
         #Scene
 
         row = box.row().split(factor=0.33)
@@ -251,8 +257,12 @@ class SMD_PT_Exportables(Panel):
             elif State.exportFormat == ExportFormat.DMX:
                 r.prop(vs, "automerge")
 
-            if not vs.mute:
-                layout.template_list("SMD_UL_GroupItems", item.name, item, "objects", vs, "selected_item", columns=2, rows=2, maxrows=10)
+            # Bypassed groups fold into their parent; their objects are listed
+            # under the parent group instead of here.
+            if is_bypassed_into_parent(item):
+                layout.label(text=get_id("exportables_group_bypass_hint"), icon='INFO')
+            else:
+                layout.template_list("SMD_UL_GroupItems", item.name, vs, "export_object_entries", vs, "selected_item", columns=2, rows=2, maxrows=10)
 
 
 class SMD_PT_Armature(Properties_Panel):

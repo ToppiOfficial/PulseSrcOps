@@ -256,6 +256,7 @@ class SmdImporter(bpy.types.Operator, Logger):
         self.num_files_imported = 0
         self.imported_jigglebones = 0
         self.imported_hitboxes = 0
+        self.imported_procbones = 0
 
         for filepath in [os.path.join(self.directory, file.name) for file in self.files] if self.files else [self.filepath]:
             filepath_lc = filepath.lower()
@@ -282,6 +283,8 @@ class SmdImporter(bpy.types.Operator, Logger):
             details.append(f"{self.imported_hitboxes} hitboxes")
         if self.imported_jigglebones > 0:
             details.append(f"{self.imported_jigglebones} jigglebones")
+        if self.imported_procbones > 0:
+            details.append(f"{self.imported_procbones} procedural bones")
         if details:
             report_message += f" ({', '.join(details)})"
 
@@ -1184,6 +1187,38 @@ class SmdImporter(bpy.types.Operator, Logger):
                     print(f"  Warning: Skipped {skipped} hitbox(es) with missing bones: {', '.join(bones)}")
                 continue
 
+            if line[0] in ["$proceduralbones", "$procbones"]:
+                if len(line) < 2:
+                    continue
+                if not qc.a:
+                    qc.a = self.findArmature()
+                if not qc.a:
+                    self.warning(f"$proceduralbones in {filename} but no armature to bind to")
+                    continue
+                vrd_path = os.path.join(qc.cd(), normalisePath(line[1]))
+                if not os.path.splitext(vrd_path)[1]:
+                    vrd_path = appendExt(vrd_path, "vrd")
+                try:
+                    with open(vrd_path, 'r') as vf:
+                        vrd_content = vf.read()
+                except IOError:
+                    self.warning(f"Could not read procedural bone file '{vrd_path}'")
+                    continue
+                prev_pose_position = qc.a.data.pose_position
+                qc.a.data.pose_position = 'REST'
+                bpy.context.view_layer.update()
+                pb_count, pb_missing = import_proc_bones_from_vrd_content(
+                    vrd_content, qc.a, bpy.context.scene)
+                qc.a.data.pose_position = prev_pose_position
+                bpy.context.view_layer.update()
+                if pb_count > 0:
+                    self.imported_procbones += pb_count
+                    print(f"- Imported {pb_count} procedural bone(s) from {os.path.basename(vrd_path)}")
+                if pb_missing:
+                    self.warning(f"Could not find bones for {len(pb_missing)} procedural entr(y/ies) "
+                                 f"in {os.path.basename(vrd_path)}: {', '.join(pb_missing)}")
+                continue
+
             def import_file(word_index, default_ext, smd_type, append='APPEND', layer=0, in_file_recursion=False):
                 path = os.path.join(qc.cd(), appendExt(normalisePath(line[word_index]), default_ext))
                 if not in_file_recursion and not os.path.exists(path):
@@ -1744,6 +1779,27 @@ class SmdImporter(bpy.types.Operator, Logger):
                         self.warning(
                             f"DMX hitboxes: {hb_skipped} skipped, bone(s) not found on "
                             f"'{smd.a.name}': {', '.join(hb_bones)}")
+
+                # Procedural (helper) bones: DmeQuatInterpBone (TRIGGER) /
+                # DmeAimAtBone (LOOKAT) joints promoted on export. Rebuild each as a
+                # vs.proc_bones entry (with a reconstructed slot action for triggers).
+                proc_elems = []
+                proc_attachments: dict[str, tuple] = {}
+                for (elem, parent) in enumerateBonesAndAttachments(DmeModel):
+                    if elem.type in ("DmeQuatInterpBone", "DmeAimAtBone"):
+                        proc_elems.append((elem, smd.boneIDs.get(elem.id)))
+                    elif elem.type == "DmeAttachment":
+                        parent_name = smd.boneIDs.get(parent.id) if parent else None
+                        proc_attachments[elem.name] = (
+                            parent_name, get_transform_matrix(elem).to_translation())
+                if proc_elems:
+                    pb_count, pb_missing = import_proc_bones_from_dmx_elements(
+                        proc_elems, smd.a, bpy.context.scene, proc_attachments)
+                    print(f"- Imported {pb_count} procedural bone(s) from DMX")
+                    if pb_missing:
+                        self.warning(
+                            f"DMX procedural bones: {len(pb_missing)} entr(y/ies) skipped, "
+                            f"bone(s) not found on '{smd.a.name}': {', '.join(pb_missing)}")
 
             # -----------------------------------------------------------------
             # Mesh parser (nested helper)

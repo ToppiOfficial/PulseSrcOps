@@ -247,6 +247,15 @@ class State(metaclass=_StateMeta):
                 avs.arm_attachment_index = min(avs.arm_attachment_index, len(avs.arm_attachment_entries) - 1)
             if _sync_bone_entries(avs.arm_jigglebone_entries, get_jigglebones(arm_obj)):
                 avs.arm_jigglebone_index = min(avs.arm_jigglebone_index, len(avs.arm_jigglebone_entries) - 1)
+        for col in bpy.data.collections:
+            seen = set()
+            members = []
+            for ob in get_collection_export_objects(col):
+                if ob and ob.session_uid not in seen:
+                    seen.add(ob.session_uid)
+                    members.append(ob)
+            members.sort(key=lambda o: o.name.lower())
+            _sync_object_entries(col.vs.export_object_entries, members)
         cls.last_export_refresh = time.time()
     
     @staticmethod
@@ -1474,16 +1483,51 @@ def get_valid_vertexanimation_object(ob : bpy.types.Object | None) -> bpy.types.
 #   DATA
 #
 
-def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False) -> typing.Union[str, list]:
+def get_addon_prefs():
+    """Return this add-on's AddonPreferences, or None if it can't be resolved."""
+    try:
+        return bpy.context.preferences.addons[__package__].preferences
+    except (KeyError, AttributeError):
+        return None
+
+def get_preserved_bone_prefixes() -> list:
+    """Bone-name prefixes (with trailing '.') kept verbatim during Source 2 sanitization.
+    'ValveBiped' is always present; users add more in the add-on preferences."""
+    prefixes = ["ValveBiped."]
+    prefs = get_addon_prefs()
+    if prefs:
+        for item in prefs.bone_name_prefixes:
+            p = item.prefix.strip().rstrip('.').strip()
+            if p and (p + ".") not in prefixes:
+                prefixes.append(p + ".")
+    return prefixes
+
+def get_prefix_shortcut_map() -> dict:
+    """Map of shortcut token -> 'Prefix.' expansion for the !shortcut! export-name syntax.
+    ValveBiped is always available; its shortcut and any custom prefixes come from prefs."""
+    result = {}
+    prefs = get_addon_prefs()
+    vb_sc = re.sub(r'\W', '', (prefs.valvebiped_shortcut if prefs else 'vbip').strip())
+    if vb_sc:
+        result[vb_sc] = "ValveBiped."
+    if prefs:
+        for item in prefs.bone_name_prefixes:
+            p = item.prefix.strip().rstrip('.').strip()
+            sc = re.sub(r'\W', '', item.shortcut.strip())
+            if p and sc and sc not in result:
+                result[sc] = p + "."
+    return result
+
+def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_modeldoc: bool = False) -> typing.Union[str, list]:
     if isinstance(data, list):
-        return [sanitize_string(item, allow_unicode) for item in data]
+        return [sanitize_string(item, allow_unicode, force_modeldoc) for item in data]
 
     _data = data.strip()
 
-    if State.compiler == Compiler.MODELDOC and not allow_unicode:
-        _VALVEBIPED = "ValveBiped."
-        if _data.startswith(_VALVEBIPED):
-            _data = _VALVEBIPED + re.sub(r'[^a-zA-Z0-9_]+', '_', _data[len(_VALVEBIPED):])
+    if (State.compiler == Compiler.MODELDOC or force_modeldoc) and not allow_unicode:
+        matched = next((p for p in get_preserved_bone_prefixes() if _data.startswith(p)), None)
+        if matched:
+            _data = matched + re.sub(r'[^a-zA-Z0-9_]+', '_', _data[len(matched):])
         else:
             _data = re.sub(r'[^a-zA-Z0-9_]+', '_', _data)
     else:
@@ -1842,6 +1886,10 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         return (arm_prop.bone_direction_naming_right if bone_x < 0 
                 else arm_prop.bone_direction_naming_left)
 
+    scene = bpy.context.scene
+    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
+    prefix_shortcuts = get_prefix_shortcut_map()
+
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
     name_count = collections.defaultdict(lambda: arm_prop.bone_name_startcount)
     export_names = {}
@@ -1851,11 +1899,10 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         raw_name = b.vs.export_name.strip() or b.name
         raw_name = raw_name.replace("*", b_side)
 
-        shortcut_pattern = re.compile(r"!(\w+)")
-        raw_name = shortcut_pattern.sub(
-            lambda match: exportname_shortcut_keywords.get(match.group(1), match.group(0)),
-            raw_name
-        )
+        # Prefix shortcuts: !name! expands to the assigned prefix (e.g. !vbip! -> ValveBiped.)
+        raw_name = re.sub(r'!(\w+)!', lambda m: prefix_shortcuts.get(m.group(1), m.group(0)), raw_name)
+
+        raw_name = re.sub(r'!(\w+)', lambda m: exportname_shortcut_keywords.get(m.group(1), m.group(0)), raw_name)
 
         if "$" in raw_name:
             key = (raw_name, b_side)
@@ -1864,7 +1911,7 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         else:
             final_name = raw_name
 
-        final_name = sanitize_string(final_name)
+        final_name = sanitize_string(final_name, force_modeldoc=force_s2)
         export_names[b.name] = final_name
 
     return export_names[data_bone.name]
@@ -1985,4 +2032,6 @@ from .prefab_io import (
     import_hitboxes_from_dmx_root,
     import_hitboxes_from_content,
     import_hitboxes_from_kv3,
+    import_proc_bones_from_dmx_elements,
+    import_proc_bones_from_vrd_content,
 )

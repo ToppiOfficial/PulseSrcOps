@@ -6,9 +6,10 @@ no longer drift apart across files. ``export_smd`` calls the ``*_kwargs`` /
 ``qc_*`` / ``write_dme_*`` builders; ``import_smd`` (via ``utils``) calls the
 ``import_*`` entry points.
 
-``proceduralbone`` is export-only for now (DME model-DMX): it shares its trigger
-transform math with ``export_smd.PrefabExporter._write_proc_vrd`` so the VRD and
-DME procedural-bone paths can't drift.
+``proceduralbone`` shares its trigger transform math with
+``export_smd.PrefabExporter._write_proc_vrd`` so the VRD and DME procedural-bone
+export paths can't drift; its ``import_*`` readers invert that same math to
+rebuild ``vs.proc_bones`` entries + slot actions from a DME or VRD source.
 """
 
 from . import jigglebone, hitbox, proceduralbone
@@ -22,4 +23,8 @@ from .hitbox import (
     import_hitboxes_from_dmx_root,
     import_hitboxes_from_content,
     import_hitboxes_from_kv3,
+)
+from .proceduralbone import (
+    import_proc_bones_from_dmx_elements,
+    import_proc_bones_from_vrd_content,
 )

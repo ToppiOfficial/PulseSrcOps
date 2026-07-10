@@ -2,7 +2,8 @@ import bpy, math, re as _re
 from bpy.types import Operator, MeshLoopColorLayer, LoopColors
 from bpy.props import FloatProperty, BoolProperty, IntProperty, EnumProperty, StringProperty
 from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, vertex_float_maps,
-                     get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta)
+                     get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta,
+                     get_addon_prefs)
 from .. import procbones_sim as _procbones_sim
 from .helpers import _get_or_create_proc_tol_fcurve, _get_entry_proc_tol
 
@@ -1892,11 +1893,11 @@ class SMD_OT_CopySourceBoneProps(Operator):
     bl_label = "Copy Source Bone Properties"
     bl_options = {"REGISTER", "UNDO"}
 
-    copy_name: BoolProperty(name="Export Name", default=False)
-    copy_rotation: BoolProperty(name="Export Rotation Offset", default=True)
-    copy_location: BoolProperty(name="Export Location Offset", default=True)
-    copy_jigglebone: BoolProperty(name="Jigglebone", default=False)
-    to_invoke : BoolProperty(default=True)
+    copy_name: BoolProperty(name="Export Name", default=False, options={'SKIP_SAVE'})
+    copy_rotation: BoolProperty(name="Export Rotation Offset", default=True, options={'SKIP_SAVE'})
+    copy_location: BoolProperty(name="Export Location Offset", default=True, options={'SKIP_SAVE'})
+    copy_jigglebone: BoolProperty(name="Jigglebone", default=False, options={'SKIP_SAVE'})
+    to_invoke : BoolProperty(default=True, options={'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
@@ -1978,7 +1979,6 @@ class SMD_OT_CopySourceBoneProps(Operator):
 
     def execute(self, context) -> set:
         src = context.active_pose_bone.bone.vs
-        arm_ob = context.active_object
 
         props = []
         if self.copy_name:
@@ -2045,7 +2045,9 @@ class SMD_OT_CopySourceBoneProps(Operator):
                 except AttributeError:
                     continue
             if self.copy_rotation:
-                self._copy_rotation(src, pb, arm_ob)
+                # pb.id_data is the target's own armature object, which may differ
+                # from the active one when several armatures are in pose mode.
+                self._copy_rotation(src, pb, pb.id_data)
             if self.copy_location:
                 self._copy_location(src, pb)
 
@@ -2133,4 +2135,38 @@ class SMD_OT_SetAttachmentMeshRender(Operator):
             vs.attachment_display_mesh_render_index = -1
         else:
             vs.attachment_display_mesh_render_index = self.index
+        return {'FINISHED'}
+
+
+class SMD_OT_BoneNamePrefixAdd(Operator):
+    bl_idname = 'smd.bone_name_prefix_add'
+    bl_label = "Add Prefix"
+    bl_description = "Add a bone name prefix preserved during Source 2 name sanitization"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    def execute(self, context):
+        prefs = get_addon_prefs()
+        if prefs is None:
+            return {'CANCELLED'}
+        prefs.bone_name_prefixes.add()
+        prefs.bone_name_prefixes_index = len(prefs.bone_name_prefixes) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_BoneNamePrefixRemove(Operator):
+    bl_idname = 'smd.bone_name_prefix_remove'
+    bl_label = "Remove Prefix"
+    bl_description = "Remove the selected bone name prefix"
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        prefs = get_addon_prefs()
+        return prefs is not None and 0 <= prefs.bone_name_prefixes_index < len(prefs.bone_name_prefixes)
+
+    def execute(self, context):
+        prefs = get_addon_prefs()
+        idx = prefs.bone_name_prefixes_index
+        prefs.bone_name_prefixes.remove(idx)
+        prefs.bone_name_prefixes_index = min(idx, len(prefs.bone_name_prefixes) - 1)
         return {'FINISHED'}

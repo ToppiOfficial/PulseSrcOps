@@ -120,6 +120,8 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     vertex_influence_limit_mode : EnumProperty(name=get_id("vertex_influence_limit_mode"), items=[('AUTO', 'AUTO', get_id("vertex_influence_limit_mode_auto_tip")), ('MANUAL', 'MANUAL', get_id("vertex_influence_limit_mode_manual_tip"))], default='AUTO')
     vertex_influence_limit : IntProperty(name=get_id("vertex_influence_limit"), description=get_id("vertex_influence_limit_tip"), default=3, max=32, soft_max=8, min=1)
 
+    force_source2_bone_sanitize : BoolProperty(name=get_id("force_source2_bone_sanitize"), description=get_id("force_source2_bone_sanitize_tip"), default=False)
+
     prefab_to_clipboard : BoolProperty(name=get_id("prefab_to_clipboard"), description=get_id("prefab_to_clipboard_tip"), default=False)
     prefab_export_mode : EnumProperty(name=get_id("prefab_export_mode"), description=get_id("prefab_export_mode_tip"), items=[('QCI', "FILE", get_id("prefab_export_mode_qci_tip")), ('DME', "DME", get_id("prefab_export_mode_dme_tip"))], default='QCI')
 

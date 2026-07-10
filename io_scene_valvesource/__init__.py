@@ -19,7 +19,7 @@
 # ##### END GPL LICENSE BLOCK #####
 
 import bpy, math, os
-from bpy.props import PointerProperty
+from bpy.props import PointerProperty, BoolProperty, CollectionProperty, IntProperty, StringProperty
 
 # Python doesn't reload package sub-modules at the same time as __init__.py!
 import importlib, sys
@@ -69,6 +69,42 @@ def draw_copy_bone_props(self, context):
     copyop.copy_location = False
     copyop.copy_jigglebone = True
 
+class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
+    bl_idname = __package__
+
+    bone_name_prefixes : CollectionProperty(type=BoneNamePrefixItem)
+    bone_name_prefixes_index : IntProperty(default=0)
+    valvebiped_shortcut : StringProperty(
+        name=get_id("bone_name_shortcut"),
+        description=get_id("bone_name_shortcut_tip"),
+        default="vbip")
+
+    def draw(self, context):
+        layout = self.layout
+
+        layout.label(text=get_id("bone_name_prefixes_title"), icon='BONE_DATA')
+
+        head = layout.split(factor=0.6, align=True)
+        head.label(text=get_id("bone_name_prefix"))
+        head.label(text=get_id("bone_name_shortcut"))
+
+        # ValveBiped is always preserved; its name is locked but its shortcut is editable.
+        vb = layout.split(factor=0.6, align=True)
+        name = vb.row()
+        name.enabled = False
+        name.label(text="ValveBiped.", icon='LOCKED')
+        vb.prop(self, "valvebiped_shortcut", text="", icon='SYNTAX_OFF')
+
+        row = layout.row()
+        row.template_list("SMD_UL_BoneNamePrefixes", "", self, "bone_name_prefixes", self, "bone_name_prefixes_index", rows=3)
+        col = row.column(align=True)
+        col.operator(GUI.SMD_OT_BoneNamePrefixAdd.bl_idname, text="", icon='ADD')
+        col.operator(GUI.SMD_OT_BoneNamePrefixRemove.bl_idname, text="", icon='REMOVE')
+
+        info = layout.column(align=True)
+        info.label(text=get_id("bone_name_prefixes_desc"), icon='INFO')
+        info.label(text=get_id("bone_name_prefixes_desc2"), icon='BLANK1')
+
 # -------------------------------------------------------------------------------------
 # Register
 # -------------------------------------------------------------------------------------
@@ -89,6 +125,7 @@ _classes = (
     ArmatureItemEntry,
     PrefabItem,
     AttachmentDisplayMeshItem,
+    BoneNamePrefixItem,
 
     # Material Classes
     ValveSource_MaterialProps,
@@ -209,6 +246,9 @@ GUI.SMD_PT_Jigglebones,
     GUI.SMD_OT_AddAttachmentDisplayMesh,
     GUI.SMD_OT_RemoveAttachmentDisplayMesh,
     GUI.SMD_OT_SetAttachmentMeshRender,
+    GUI.SMD_UL_BoneNamePrefixes,
+    GUI.SMD_OT_BoneNamePrefixAdd,
+    GUI.SMD_OT_BoneNamePrefixRemove,
     GUI.SMD_MT_BoneToolsPie,
 
     # Flex
@@ -222,6 +262,9 @@ GUI.SMD_PT_Jigglebones,
     export_smd.SmdExporter,
     export_smd.PrefabExporter,
     import_smd.SmdImporter,
+
+    # Add-on preferences
+    ValveSource_AddonPreferences,
 )
 
 def register():

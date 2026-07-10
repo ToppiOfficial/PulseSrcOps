@@ -26,6 +26,29 @@ _EDGELINE_THICK_CLAMP = 3.5   # mirrors solid.thickness_clamp in EdgelineBuilder
 _label_queue: list       = []
 _proc_label_queue: list  = []
 
+_polyline_shader = None
+
+
+def _get_polyline_shader():
+    global _polyline_shader
+    if _polyline_shader is None:
+        _polyline_shader = gpu.shader.from_builtin('POLYLINE_UNIFORM_COLOR')
+    return _polyline_shader
+
+
+def _draw_lines(coords, color, width=1.0):
+    """Draw LINES via POLYLINE_UNIFORM_COLOR. Replaces wide-line drawing with
+    UNIFORM_COLOR + line_width_set, which Blender 4.5 deprecates."""
+    if not coords:
+        return
+    shader = _get_polyline_shader()
+    shader.bind()
+    vp = gpu.state.viewport_get()
+    shader.uniform_float('viewportSize', (vp[2], vp[3]))
+    shader.uniform_float('lineWidth', width)
+    shader.uniform_float('color', color)
+    batch_for_shader(shader, 'LINES', {'pos': coords}).draw(shader)
+
 
 def _is_source2(context):
     try:
@@ -456,9 +479,7 @@ def _draw_hitbox_for_bone(shader, ob, pb, hb):
     shader.uniform_float('color', (r, g, b, 0.12))
     batch_for_shader(shader, 'TRIS', {'pos': tris}).draw(shader)
     gpu.state.depth_mask_set(True)
-    gpu.state.line_width_set(1.5)
-    shader.uniform_float('color', (r, g, b, 0.70))
-    batch_for_shader(shader, 'LINES', {'pos': lines}).draw(shader)
+    _draw_lines(lines, (r, g, b, 0.70), 1.5)
 
 
 def _draw_jigglebone_collider(shader, pb, ghost_mat, scale_fac=1.0):
@@ -486,9 +507,7 @@ def _draw_jigglebone_collider(shader, pb, ghost_mat, scale_fac=1.0):
 
     r, g, b = _COLOR_COLLIDER
     lines = _tapered_capsule_lines(p0, p1, perp1, perp2, fwd, r0, r1)
-    gpu.state.line_width_set(1.5)
-    shader.uniform_float('color', (r, g, b, 0.85))
-    batch_for_shader(shader, 'LINES', {'pos': lines}).draw(shader)
+    _draw_lines(lines, (r, g, b, 0.85), 1.5)
 
 
 def _draw_jigglebone(shader, pb, ghost_mat, cr, cg, cb, s2, scale_fac=1.0):
@@ -582,9 +601,7 @@ def _draw_jigglebone(shader, pb, ghost_mat, cr, cg, cb, s2, scale_fac=1.0):
     if has_length:
         cap_r = pb.bone.length * scale_fac * 0.06
         lines = _capsule_lines(tip, fwd, perp1, perp2, display_len, cap_r)
-        gpu.state.line_width_set(1.5)
-        shader.uniform_float('color', (cr, cg, cb, 0.85))
-        batch_for_shader(shader, 'LINES', {'pos': lines}).draw(shader)
+        _draw_lines(lines, (cr, cg, cb, 0.85), 1.5)
 
 
 _AXIS_COLORS = (
@@ -601,11 +618,9 @@ def _draw_ghost_axes(shader, context, ghost_mat, bone_length):
     region = context.region
     rv3d   = context.region_data
 
-    gpu.state.line_width_set(2.0)
     for ax, ((r, g, b), label) in zip(axes, _AXIS_COLORS):
         end = tip + ax * scale
-        shader.uniform_float('color', (r, g, b, 1.0))
-        batch_for_shader(shader, 'LINES', {'pos': [tip, end]}).draw(shader)
+        _draw_lines([tip, end], (r, g, b, 1.0), 2.0)
         pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, end)
         if pos_2d:
             _label_queue.append((pos_2d.x + 3, pos_2d.y + 3, r, g, b, label))
@@ -690,9 +705,7 @@ def _draw_active_proc_bone_preview(shader, context, ob):
     if has_offset:
         aim_target  = (driver_mat @ Vector((off[0], off[1], off[2], 1.0))).to_3d()
         driver_head = driver_mat.to_translation()
-        gpu.state.line_width_set(1.5)
-        shader.uniform_float('color', (tr, tg, tb, 0.6))
-        batch_for_shader(shader, 'LINES', {'pos': [driver_head, aim_target]}).draw(shader)
+        _draw_lines([driver_head, aim_target], (tr, tg, tb, 0.6), 1.5)
     else:
         aim_target = driver_mat.to_translation()
 
@@ -700,20 +713,16 @@ def _draw_active_proc_bone_preview(shader, context, ob):
     if helper_pb:
         helper_mat  = ob.matrix_world @ helper_pb.matrix
         helper_head = helper_mat.to_translation()
-        gpu.state.line_width_set(1.0)
-        shader.uniform_float('color', (0.9, 0.9, 0.9, 0.35))
-        batch_for_shader(shader, 'LINES', {'pos': [helper_head, aim_target]}).draw(shader)
+        _draw_lines([helper_head, aim_target], (0.9, 0.9, 0.9, 0.35), 1.0)
 
         # Cyan crosshair at helper bone head
         h_scale = Vector((helper_mat[0][0], helper_mat[1][0], helper_mat[2][0])).length
         hs = helper_pb.bone.length * h_scale * 0.07
-        gpu.state.line_width_set(2.0)
-        shader.uniform_float('color', (hr, hg, hb, 0.9))
-        batch_for_shader(shader, 'LINES', {'pos': [
+        _draw_lines([
             helper_head + Vector(( hs,   0,   0)), helper_head + Vector((-hs,   0,   0)),
             helper_head + Vector((  0,  hs,   0)), helper_head + Vector((  0, -hs,   0)),
             helper_head + Vector((  0,   0,  hs)), helper_head + Vector((  0,   0, -hs)),
-        ]}).draw(shader)
+        ], (hr, hg, hb, 0.9), 2.0)
 
         pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, helper_head)
         if pos_2d:
@@ -721,13 +730,11 @@ def _draw_active_proc_bone_preview(shader, context, ob):
 
     # Orange crosshair at aim target
     s = driver_pb.bone.length * arm_scale * 0.09
-    gpu.state.line_width_set(2.0)
-    shader.uniform_float('color', (tr, tg, tb, 1.0))
-    batch_for_shader(shader, 'LINES', {'pos': [
+    _draw_lines([
         aim_target + Vector(( s,  0,  0)), aim_target + Vector((-s,  0,  0)),
         aim_target + Vector(( 0,  s,  0)), aim_target + Vector(( 0, -s,  0)),
         aim_target + Vector(( 0,  0,  s)), aim_target + Vector(( 0,  0, -s)),
-    ]}).draw(shader)
+    ], (tr, tg, tb, 1.0), 2.0)
 
     pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, aim_target)
     if pos_2d:
@@ -914,9 +921,7 @@ def _draw_export_pose_preview():
                 curr_y     = Vector((curr_mat[0][1], curr_mat[1][1], curr_mat[2][1])).normalized()
                 ghost_tail = ghost_head + ghost_y * world_bl
                 curr_tail  = curr_mat.to_translation() + curr_y * world_bl
-                gpu.state.line_width_set(1.5)
-                shader.uniform_float('color', (0.6, 0.85, 1.0, 0.55))
-                batch_for_shader(shader, 'LINES', {'pos': [curr_tail, ghost_tail]}).draw(shader)
+                _draw_lines([curr_tail, ghost_tail], (0.6, 0.85, 1.0, 0.55), 1.5)
 
                 # Blender-style joint caps: solid translucent sphere + wireframe, at the tip
                 # and (only when there's a location offset) at the head, so the head cap

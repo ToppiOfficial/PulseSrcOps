@@ -1,17 +1,14 @@
 """Jigglebone serialization - import + export for all three prefab formats.
 
-This module is the single home for converting between a bone's ``jiggle_*``
-properties (``bone.vs``) and the three on-disk representations:
+Converts between a bone's ``jiggle_*`` properties (``bone.vs``) and:
 
 * **QC text** - ``$jigglebone`` blocks (Source 1 / studiomdl)
-* **DME** - ``DmeJiggleBone`` element attributes (model-DMX / KitsuneMDL)
+* **DME** - ``DmeJiggleBone`` element attributes (model-DMX)
 * **KV3** - ``JiggleBone`` KVNodes (Source 2 / ModelDoc .vmdl)
 
-Each format keeps its writer (used by ``export_smd.PrefabExporter``) next to its
-reader (the ``import_jigglebones_from_*`` entry points used by ``import_smd``),
-so the two halves can no longer drift apart across files. The KV3 format is fully
-driven by ``_KV3_FIELDS`` in both directions; QC and DME keep structured codecs
-because their formats are nested / flag-gated rather than flat.
+Each format's writer sits next to its reader. KV3 is fully driven by
+``_KV3_FIELDS`` both directions; QC and DME keep structured codecs (nested /
+flag-gated formats).
 """
 
 import math
@@ -25,18 +22,9 @@ from ..keyvalues3 import KVBool, KVVector3
 # KV3 (Source 2 / ModelDoc) - schema-driven both directions
 # -----------------------------------------------------------------------------
 
-# (kv3_key, vs_attr, kind) in the exact order the exporter emits them - KVNode
-# serializes properties in insertion order, so this order is part of the output.
-#   kind:
-#     'rootbone'       - jiggle_root_bone (set by the exporter, write-only)
-#     'type'           - jiggle_type int <-> jiggle_flex_type enum
-#     'basespringbool' - has_base_spring <-> jiggle_base_type == 'BASESPRING'
-#     'length'         - length (computed by the exporter, write-only)
-#     'bool'           - KVBool round-trip
-#     'deg'            - stored radians, serialized degrees
-#     'int'            - integer
-#     'raw'            - float passthrough
-#     'coll*'          - jiggle collision (write-only; not read back on import)
+# (kv3_key, vs_attr, kind). Order matters - KVNode serializes in insertion order.
+# kinds: rootbone/type/basespringbool/length/coll* are write-only (set by the
+# exporter or not read back); bool=KVBool, deg=radians<->degrees, int, raw=float.
 _KV3_FIELDS = [
     ('jiggle_root_bone',     None,                            'rootbone'),
     ('jiggle_type',          None,                            'type'),
@@ -134,7 +122,7 @@ def _read_kv3_props(vs, props) -> None:
 
     for key, attr, kind in _KV3_FIELDS:
         if attr is None:
-            continue  # rootbone / type / basespring / length / collision handled above or write-only
+            continue  # handled above, or write-only
         if kind == 'bool':
             setattr(vs, attr, props.get(key, False))
         elif kind == 'deg':
@@ -202,15 +190,11 @@ def import_jigglebones_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, list]
 # -----------------------------------------------------------------------------
 
 def write_dme_attrs(elem, bone) -> None:
-    """Populate a DmeJiggleBone element's attributes from a bone's jiggle_* properties.
+    """Populate a DmeJiggleBone element from a bone's jiggle_* properties.
 
     Mirrors the flag-gating and unit conversions of ``qc_block_lines`` so the DME
-    (model-DMX) encoding matches the .qci output. Attribute names and degree units
-    match KitsuneMDL's CDmeJiggleBone (libs/mdlobjects/dmejigglebone.cpp) /
-    HandleDmeJiggleBone (studiomdl/dmxsupport.cpp). The loader only reads constraint
-    values when the corresponding *Constrained flag is set, but we mirror the QCI
-    gating for clarity. The inverse reader is ``import_jigglebones_from_dmx_elements``
-    directly below.
+    encoding matches the .qci output. Attribute names/units match KitsuneMDL's
+    CDmeJiggleBone. Inverse of ``import_jigglebones_from_dmx_elements`` below.
     """
     bvs = bone.vs
     jiggle_length = bone.length if bvs.use_bone_length_for_jigglebone_length else bvs.jiggle_length
@@ -241,9 +225,8 @@ def write_dme_attrs(elem, bone) -> None:
             elem["pitchMax"]      =  abs(math.degrees(bvs.jiggle_pitch_constraint_max))
             elem["pitchFriction"] = float(bvs.jiggle_pitch_friction)
 
-        # Flexible jigglebones constrain length by DEFAULT; "allow length flex" RELEASES it.
-        # The QC parser sets JIGGLE_HAS_LENGTH_CONSTRAINT on entry and clears it on
-        # "allow_length_flex", so lengthConstrained is the inverse of jiggle_allow_length_flex.
+        # Flexible jigglebones constrain length by default; allow_length_flex releases
+        # it, so lengthConstrained is the inverse.
         elem["lengthConstrained"] = not bvs.jiggle_allow_length_flex
         if bvs.jiggle_allow_length_flex:
             elem["alongStiffness"] = float(bvs.jiggle_along_stiffness)
@@ -333,8 +316,7 @@ def import_jigglebones_from_dmx_elements(elements, armature: 'object') -> 'tuple
                 vs_bone.jiggle_pitch_constraint_max = abs(math.radians(float(elem.get("pitchMax", 0.0))))
                 vs_bone.jiggle_pitch_friction = float(elem.get("pitchFriction", 0.0))
 
-            # Flexible jigglebones constrain length by default; export writes lengthConstrained,
-            # so "allow length flex" is its inverse.
+            # Inverse of the lengthConstrained flag written on export.
             vs_bone.jiggle_allow_length_flex = not bool(elem.get("lengthConstrained", True))
             if vs_bone.jiggle_allow_length_flex:
                 vs_bone.jiggle_along_stiffness = float(elem.get("alongStiffness", 0.0))
@@ -389,11 +371,9 @@ def import_jigglebones_from_dmx_elements(elements, armature: 'object') -> 'tuple
 # -----------------------------------------------------------------------------
 
 def qc_block_lines(bone) -> list:
-    """Return the QC text lines for one ``$jigglebone`` block.
-
-    The inverse reader is ``import_jigglebones_from_content`` directly below.
-    NOTE: QC intentionally omits ``along_damping`` (DME/KV3 write it); preserved
-    here to keep .qci output byte-identical.
+    """Return the QC text lines for one ``$jigglebone`` block. Inverse of
+    ``import_jigglebones_from_content`` below. QC intentionally omits
+    ``along_damping`` (DME/KV3 write it) to keep .qci output byte-identical.
     """
     d = []
     d.append(f'$jigglebone "{utils.get_bone_exportname(bone)}"')
@@ -466,8 +446,7 @@ def import_jigglebones_from_content(content: str, armature: 'object') -> 'tuple[
 
     bone_map = {utils.get_bone_exportname(b): b for b in armature.data.bones}
 
-    # A simple recursive descent parser for the QC-like key-value format.
-    # It handles nested blocks and values.
+    # Recursive descent parser for the QC-like key-value format (nested blocks).
     def parse_from_tokens(token_stream):
         result = {}
         tokens = list(token_stream)
@@ -523,17 +502,15 @@ def import_jigglebones_from_content(content: str, armature: 'object') -> 'tuple[
                 result[key] = " ".join(values)
         return result
 
-    # Iterate through all matches of `$jigglebone "bone_name"` to find each definition.
     for match in re.finditer(r'\$jigglebone\s+"([^"]+)"', content, re.IGNORECASE):
         current_bone_name = match.group(1)
 
-        # Find the start of the block for this jigglebone
         block_start_index = content.find('{', match.end())
         if block_start_index == -1:
             print(f"- Missing '{{' for jigglebone '{current_bone_name}'.")
             continue
 
-        # Manually find the matching closing brace to extract the block content
+        # Find the matching closing brace to extract the block content.
         brace_depth = 1
         block_end_index = -1
         for i in range(block_start_index + 1, len(content)):
@@ -552,7 +529,6 @@ def import_jigglebones_from_content(content: str, armature: 'object') -> 'tuple[
 
         block_content = content[block_start_index + 1 : block_end_index]
 
-        # Tokenize and parse the extracted block
         tokens = iter(re.findall(r'"[^"]+"|\S+', block_content))
         current_jigglebone_data = parse_from_tokens(tokens)
 
@@ -569,7 +545,6 @@ def import_jigglebones_from_content(content: str, armature: 'object') -> 'tuple[
         vs_bone.bone_is_jigglebone = True
         imported_count += 1
 
-        # Apply parsed properties
         if 'is_flexible' in current_jigglebone_data:
             vs_bone.jiggle_flex_type = 'FLEXIBLE'
             flex_data = current_jigglebone_data['is_flexible']

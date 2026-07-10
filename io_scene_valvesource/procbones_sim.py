@@ -799,12 +799,17 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
             restore_visibility()
         _building_proc_cache = False
 
+    slot_label = ""
+    if target_slot is not None:
+        slot_name = getattr(target_slot, 'name_display', '') or getattr(target_slot, 'name', '')
+        if slot_name:
+            slot_label = f" [slot '{slot_name}']"
     if not export_print:
         print(f"[ProcBones] Cached {len(triggers)} triggers for '{entry.helper_bone}' "
-            f"driven by '{entry.driver_bone}' via '{action.name}'")
+            f"driven by '{entry.driver_bone}' via '{action.name}'{slot_label}")
     else:
         print(f"  - Cached {len(triggers)} triggers for '{entry.helper_bone}' "
-            f"driven by '{entry.driver_bone}' via '{action.name}'")
+            f"driven by '{entry.driver_bone}' via '{action.name}'{slot_label}")
     return triggers
 
 

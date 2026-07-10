@@ -10,6 +10,7 @@ __all__ = [
     'HitboxEntry',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
+    'BoneNamePrefixItem',
     # mixins
     'ShapeTypeProps',
     'CurveTypeProps',
