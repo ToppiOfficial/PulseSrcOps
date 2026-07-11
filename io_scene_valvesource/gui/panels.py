@@ -79,8 +79,8 @@ class SMD_PT_ViewportSimulation(Panel):
         box2.prop(vs, 'preview_export_pose')
         box2.prop(vs, 'preview_jigglebone_constraints')
         box2.prop(vs, 'preview_proc_bones')
-        box2.prop(vs, 'preview_hitboxes')
         box2.prop(vs, 'preview_edgeline')
+        box2.prop(vs, 'preview_hitboxes')
         box2.prop(vs, 'preview_attachment_mesh')
         if vs.preview_edgeline:
             if vs.jiggle_sim_enabled:

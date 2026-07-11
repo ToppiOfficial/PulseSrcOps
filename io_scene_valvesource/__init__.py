@@ -78,11 +78,22 @@ class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
         name=get_id("bone_name_shortcut"),
         description=get_id("bone_name_shortcut_tip"),
         default="vbip")
+    show_bone_name_prefixes : BoolProperty(
+        name=get_id("bone_name_prefixes_title"),
+        description=get_id("bone_name_prefixes_title_tip"),
+        default=False)
 
     def draw(self, context):
         layout = self.layout
 
-        layout.label(text=get_id("bone_name_prefixes_title"), icon='BONE_DATA')
+        header = layout.row(align=True)
+        header.prop(self, "show_bone_name_prefixes",
+            text=get_id("bone_name_prefixes_title"),
+            icon='DISCLOSURE_TRI_DOWN' if self.show_bone_name_prefixes else 'DISCLOSURE_TRI_RIGHT',
+            emboss=False)
+
+        if not self.show_bone_name_prefixes:
+            return
 
         head = layout.split(factor=0.6, align=True)
         head.label(text=get_id("bone_name_prefix"))

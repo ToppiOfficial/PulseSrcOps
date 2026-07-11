@@ -54,4 +54,5 @@ Based on [BlenderSourceTools](https://github.com/Artfunkel/BlenderSourceTools) b
 
 - [compucolor/BlenderSourceTools](https://github.com/compucolor/BlenderSourceTools)
 - [Rectus/BlenderSourceTools](https://github.com/Rectus/BlenderSourceTools)
+- [FellOffFuji/BlenderSource2Tools](https://github.com/FellOffFuji/BlenderSource2Tools) - some export code was adapted from this fork.
 - The jigglebone physics algorithm in `procbones_sim.py` is adapted from [srcprocbones](https://github.com/NameIsJakob/srcprocbones) by NameIsJakob.

@@ -54,10 +54,11 @@ jobs:
           # Collect commit bodies since the previous release: %b drops each
           # commit's subject line (the title shown on the repo), then filter
           # out "bump version" lines and squeeze blank runs.
-          NOTES=$(git log --reverse --pretty=format:'%b' "$RANGE" \
+          NOTES=$(git log --pretty=format:'%b' "$RANGE" \
             | grep -viE 'bump version' \
             | sed -e 's/[[:space:]]*$//' \
-            | sed -e '/^[[:space:]]*$/d')
+            | sed -e '/^[[:space:]]*$/d' \
+            | sort -f)
           if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
             NOTES="Release $TAG"
           fi

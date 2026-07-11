@@ -1359,6 +1359,10 @@ _data = {
         'en': "Preserved Bone Name Prefixes",
         'ja': "保持するボーン名プレフィックス",
     },
+    'bone_name_prefixes_title_tip': {
+        'en': "Show settings for bone name prefixes kept verbatim during Source 2 sanitization",
+        'ja': "Source 2 サニタイズ時にそのまま保持するボーン名プレフィックスの設定を表示",
+    },
     'bone_name_prefixes_desc': {
         'en': "Prefixes kept verbatim during Source 2 sanitization. The trailing dot is added automatically.",
         'ja': "Source 2 サニタイズ時にそのまま保持されるプレフィックス。末尾のドットは自動で付きます。",
