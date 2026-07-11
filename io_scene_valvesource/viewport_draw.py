@@ -662,6 +662,17 @@ _COLOR_LOOKAT_HELPER = (0.2, 0.75, 1.0)   # cyan  - the bone doing the aiming
 _COLOR_LOOKAT_TARGET = (1.0, 0.55, 0.1)   # orange - the aim target point
 
 
+def _bone_visible(bone) -> bool:
+    """A bone is drawable if it isn't hidden and at least one of its bone
+    collections is visible (a bone in no collection is always visible)."""
+    if bone.hide:
+        return False
+    colls = bone.collections
+    if not colls:
+        return True
+    return any(getattr(c, 'is_visible_effectively', c.is_visible) for c in colls)
+
+
 def _draw_active_proc_bone_preview(shader, context, ob):
     avs = getattr(ob.data, 'vs', None)
     if avs is None:
@@ -677,6 +688,9 @@ def _draw_active_proc_bone_preview(shader, context, ob):
     helper_pb = ob.pose.bones.get(entry.helper_bone)
     driver_pb = ob.pose.bones.get(entry.driver_bone)
     if not driver_pb:
+        return
+
+    if helper_pb is not None and not _bone_visible(helper_pb.bone):
         return
 
     if getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT':

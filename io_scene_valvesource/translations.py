@@ -1259,6 +1259,21 @@ _data = {
         'en': "Clear all jiggle and procedural bone simulation states, snapping bones back to their animated pose. Also clears the procedural bone trigger cache so actions are re-sampled on the next tick",
         'ja': "すべてのジグルおよびProcedural Boneのシミュレーション状態をクリアし、ボーンを元のアニメーションポーズに戻します。また、Procedural Boneのトリガーキャッシュもクリアされ、次のティックでアクションが再サンプリングされます。",
     },
+    'op_copy_jigglebones_from_armature': {
+        'en': "Copy Jigglebones From Armature",
+    },
+    'op_copy_jigglebones_from_armature_tip': {
+        'en': "Copy jigglebone settings from another armature onto this armature's bones, matched by bone name (and optionally export name)",
+    },
+    'op_copy_jigglebones_source_armature': {
+        'en': "Source Armature",
+    },
+    'op_copy_jigglebones_only_selected': {
+        'en': "Only Selected Bones",
+    },
+    'op_copy_jigglebones_only_selected_tip': {
+        'en': "Only copy onto the currently selected bones instead of every matching bone in this armature",
+    },
     'op_sort_flex_controllers': {
         'en': "Sort Flex Controllers",
         'ja': "フレックスコントローラーをソート",
@@ -1514,6 +1529,10 @@ _data = {
     'prop_export_edgeline_separately_tip': {
         'en': "Write the edge shell as a separate DMX/SMD file instead of appending to the model",
         'ja': "エッジシェルをモデルに追加せず別個のDMX/SMDファイルとして書き出す",
+    },
+    'prop_edgeline_weld_tip': {
+        'en': "Merge doubles (weld coincident verts) on the edgeline copy before solidifying. Disable to keep the mesh unwelded",
+        'ja': "ソリッド化の前にエッジラインコピーの重複頂点を結合する。無効にするとメッシュを結合しない",
     },
     'prop_export_mesh_split_separately': {
         'en': "Export Mesh Split Separately",

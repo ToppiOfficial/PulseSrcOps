@@ -1,6 +1,6 @@
 import bpy
 from ..utils import get_id
-from .operators import SMD_OT_AssignBoneRotExportOffset, SMD_OT_CopySourceBoneProps
+from .operators import SMD_OT_AssignBoneRotExportOffset, SMD_OT_CopySourceBoneProps, SMD_OT_CopyJigglebonesFromArmature
 
 
 class SMD_MT_BoneToolsPie(bpy.types.Menu):
@@ -23,6 +23,7 @@ class SMD_MT_BoneToolsPie(bpy.types.Menu):
         op.copy_rotation = False
         op.copy_location = False
         op.to_invoke = False
+        box.operator(SMD_OT_CopyJigglebonesFromArmature.bl_idname, icon='ARMATURE_DATA')
 
         # E - Preview box
         box = pie.box().column()

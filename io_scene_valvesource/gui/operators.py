@@ -12,6 +12,53 @@ SMD_OT_CreateVertexMap_idname : str = "smd.vertex_map_create_"
 SMD_OT_SelectVertexMap_idname : str = "smd.vertex_map_select_"
 SMD_OT_RemoveVertexMap_idname : str = "smd.vertex_map_remove_"
 
+# All bone.vs properties that define a jigglebone; shared by the copy operators.
+_JIGGLE_PROPS : tuple = (
+    'bone_is_jigglebone',
+    'jiggle_flex_type',
+    'jiggle_base_type',
+    'use_bone_length_for_jigglebone_length',
+    'jiggle_length',
+    'jiggle_tip_mass',
+    'jiggle_yaw_stiffness',
+    'jiggle_yaw_damping',
+    'jiggle_pitch_stiffness',
+    'jiggle_pitch_damping',
+    'jiggle_allow_length_flex',
+    'jiggle_along_stiffness',
+    'jiggle_along_damping',
+    'jiggle_has_angle_constraint',
+    'jiggle_has_yaw_constraint',
+    'jiggle_has_pitch_constraint',
+    'jiggle_angle_constraint',
+    'jiggle_yaw_constraint_min',
+    'jiggle_yaw_constraint_max',
+    'jiggle_yaw_friction',
+    'jiggle_pitch_constraint_min',
+    'jiggle_pitch_constraint_max',
+    'jiggle_pitch_friction',
+    'jiggle_base_stiffness',
+    'jiggle_base_damping',
+    'jiggle_base_mass',
+    'jiggle_has_left_constraint',
+    'jiggle_has_up_constraint',
+    'jiggle_has_forward_constraint',
+    'jiggle_left_constraint_min',
+    'jiggle_left_constraint_max',
+    'jiggle_left_friction',
+    'jiggle_up_constraint_min',
+    'jiggle_up_constraint_max',
+    'jiggle_up_friction',
+    'jiggle_forward_constraint_min',
+    'jiggle_forward_constraint_max',
+    'jiggle_forward_friction',
+    'jiggle_impact_speed',
+    'jiggle_impact_angle',
+    'jiggle_damping_rate',
+    'jiggle_frequency',
+    'jiggle_amplitude',
+)
+
 for map_name in vertex_maps:
 
     class SelectVertexColorMap(Operator):
@@ -1989,51 +2036,7 @@ class SMD_OT_CopySourceBoneProps(Operator):
             if not src.bone_is_jigglebone:
                 self.report({'WARNING'}, "Active bone is not a jigglebone")
                 return {'CANCELLED'}
-            props += [
-                'bone_is_jigglebone',
-                'jiggle_flex_type',
-                'jiggle_base_type',
-                'use_bone_length_for_jigglebone_length',
-                'jiggle_length',
-                'jiggle_tip_mass',
-                'jiggle_yaw_stiffness',
-                'jiggle_yaw_damping',
-                'jiggle_pitch_stiffness',
-                'jiggle_pitch_damping',
-                'jiggle_allow_length_flex',
-                'jiggle_along_stiffness',
-                'jiggle_along_damping',
-                'jiggle_has_angle_constraint',
-                'jiggle_has_yaw_constraint',
-                'jiggle_has_pitch_constraint',
-                'jiggle_angle_constraint',
-                'jiggle_yaw_constraint_min',
-                'jiggle_yaw_constraint_max',
-                'jiggle_yaw_friction',
-                'jiggle_pitch_constraint_min',
-                'jiggle_pitch_constraint_max',
-                'jiggle_pitch_friction',
-                'jiggle_base_stiffness',
-                'jiggle_base_damping',
-                'jiggle_base_mass',
-                'jiggle_has_left_constraint',
-                'jiggle_has_up_constraint',
-                'jiggle_has_forward_constraint',
-                'jiggle_left_constraint_min',
-                'jiggle_left_constraint_max',
-                'jiggle_left_friction',
-                'jiggle_up_constraint_min',
-                'jiggle_up_constraint_max',
-                'jiggle_up_friction',
-                'jiggle_forward_constraint_min',
-                'jiggle_forward_constraint_max',
-                'jiggle_forward_friction',
-                'jiggle_impact_speed',
-                'jiggle_impact_angle',
-                'jiggle_damping_rate',
-                'jiggle_frequency',
-                'jiggle_amplitude',
-            ]
+            props += list(_JIGGLE_PROPS)
 
         if not props and not self.copy_rotation and not self.copy_location:
             self.report({'WARNING'}, "Nothing selected to copy")
@@ -2054,6 +2057,91 @@ class SMD_OT_CopySourceBoneProps(Operator):
                 self._copy_location(src, pb)
 
         self.report({'INFO'}, f"Copied bone properties to {len(targets)} bone(s)")
+        return {'FINISHED'}
+
+
+class SMD_OT_CopyJigglebonesFromArmature(Operator):
+    bl_idname = "smd.copy_jigglebones_from_armature"
+    bl_label = get_id("op_copy_jigglebones_from_armature")
+    bl_description = get_id("op_copy_jigglebones_from_armature_tip")
+    bl_options = {"REGISTER", "UNDO"}
+
+    source_armature: StringProperty(
+        name=get_id("op_copy_jigglebones_source_armature"),
+        options={'SKIP_SAVE'})
+    only_selected: BoolProperty(
+        name=get_id("op_copy_jigglebones_only_selected"),
+        description=get_id("op_copy_jigglebones_only_selected_tip"),
+        default=False, options={'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        # Object/Pose only; data bones aren't reliable in Edit mode.
+        return context.mode in {'OBJECT', 'POSE'} and get_armature(context.object) is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop_search(self, 'source_armature', bpy.data, 'objects')
+        row = layout.row()
+        row.prop(self, 'only_selected')
+        # Selected-bones only makes sense in Pose mode.
+        row.enabled = context.mode == 'POSE'
+
+    def execute(self, context) -> set:
+        tgt_arm = get_armature(context.object)
+        if tgt_arm is None:
+            self.report({'WARNING'}, "No target armature")
+            return {'CANCELLED'}
+
+        src_arm = bpy.data.objects.get(self.source_armature) if self.source_armature else None
+        if src_arm is None or src_arm.type != 'ARMATURE':
+            self.report({'WARNING'}, "Select a source armature to copy from")
+            return {'CANCELLED'}
+        if src_arm == tgt_arm:
+            self.report({'WARNING'}, "Source and target armature are the same")
+            return {'CANCELLED'}
+
+        # Index source jigglebones by export name and by bone name.
+        src_by_export = {}
+        src_by_name = {}
+        for sb in src_arm.data.bones:
+            if not sb.vs.bone_is_jigglebone:
+                continue
+            src_by_name[sb.name] = sb
+            exp = get_bone_exportname(sb)
+            if exp:
+                src_by_export.setdefault(exp, sb)
+
+        if not src_by_name:
+            self.report({'WARNING'}, "Source armature has no jigglebones")
+            return {'CANCELLED'}
+
+        if self.only_selected and context.mode == 'POSE':
+            targets = [pb.bone for pb in (context.selected_pose_bones or [])]
+        else:
+            targets = list(tgt_arm.data.bones)
+
+        count = 0
+        for tbone in targets:
+            # Export name takes priority, fall back to the regular bone name.
+            match = src_by_export.get(get_bone_exportname(tbone)) or src_by_name.get(tbone.name)
+            if match is None:
+                continue
+            for prop in _JIGGLE_PROPS:
+                try:
+                    setattr(tbone.vs, prop, getattr(match.vs, prop))
+                except AttributeError:
+                    continue
+            count += 1
+
+        if count == 0:
+            self.report({'WARNING'}, "No matching bones found")
+            return {'CANCELLED'}
+
+        self.report({'INFO'}, f"Copied jigglebones to {count} bone(s)")
         return {'FINISHED'}
 
 

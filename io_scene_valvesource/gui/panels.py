@@ -1346,6 +1346,7 @@ class SMD_PT_ToonEdgeline(Properties_Panel):
         col = box.column(align=True)
         col.enabled = vs.use_toon_edgeline
         col.prop(vs, 'edgeline_per_material')
+        col.prop(vs, 'edgeline_weld')
         col.prop(vs, 'export_edgeline_separately', text="Export Edgeline Separately")
         col.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
         col.prop_search(vs, 'toon_edgeline_vertexgroup', active_object, 'vertex_groups', text="Outline Width VertexGroup", icon='GROUP_VERTEX')

@@ -109,6 +109,7 @@ class ExportableProps():
     base_toon_edgeline_thickness : FloatProperty(name="Thickness", description=get_id("prop_edgeline_thickness_tip"), default=0.15, min=0.001, soft_max=1.0, precision=3)
     toon_edgeline_vertexgroup : StringProperty(name='Vertex Group Ratio', description=get_id("prop_edgeline_vgroup_tip"), default='')
     export_edgeline_separately : BoolProperty(name="Export Edgeline Separately", description=get_id("prop_export_edgeline_separately_tip"), default=False)
+    edgeline_weld : BoolProperty(name="Weld", description=get_id("prop_edgeline_weld_tip"), default=True)
 
     non_exportable_vgroup : StringProperty(name=get_id('prop_non_exportable_vgroup'), description=get_id("prop_non_exportable_vgroup_tip"), default='')
     non_exportable_vgroup_tolerance : FloatProperty(name=get_id('prop_non_exportable_vgroup_tolerance'), description=get_id("prop_non_exportable_vgroup_tolerance_tip"), default=0.90, min=0.8, max=1.0, precision=2)

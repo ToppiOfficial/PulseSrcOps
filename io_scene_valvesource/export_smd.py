@@ -202,7 +202,7 @@ class EdgelineBuilder:
             bpy.ops.object.convert(target="MESH")
             bpy.context.view_layer.objects.active = ob
 
-        if self._merge_fn is not None and countShapes(ob) == (0, 0):
+        if self._merge_fn is not None and ob.vs.edgeline_weld and countShapes(ob) == (0, 0):
             self._merge_fn(temp)
 
         return temp
@@ -1947,7 +1947,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         # duplicate that would conflict with the embedded data.
         dme = prefab_mode_is_dme(context.scene)
 
-        for export_type, _count in prefab_available_types(arm):
+        for export_type, _count in prefab_available_types(arm, context.scene):
             if dme and export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES', 'PROCEDURAL'):
                 print(f"  - {export_type}: skipped - encoded into model DMX (DME mode)")
                 continue

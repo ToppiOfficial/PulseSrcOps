@@ -75,7 +75,7 @@ class SMD_MT_ExportChoice(Menu):
                 arm = active.parent
 
         if arm:
-            available = prefab_available_types(arm)
+            available = prefab_available_types(arm, context.scene)
             if is_armature(active):
                 allowed = {t for t, _ in available}
             else:

@@ -930,7 +930,7 @@ def make_export_list(scene: bpy.types.Scene):
         avs = getattr(arm.data, 'vs', None)
         if avs is None:
             continue
-        available = prefab_available_types(arm)
+        available = prefab_available_types(arm, scene)
         sync_prefab_items(avs, [t for t, _ in available])
         for ptype, count in available:
             icon, label = prefab_type_info[ptype]
@@ -1373,7 +1373,7 @@ def prefab_mode_is_dme(scene) -> bool:
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
-def prefab_available_types(arm: bpy.types.Object) -> list[tuple[str, int]]:
+def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str, int]]:
     """Prefab types that the given armature currently has content for.
 
     Returns a list of (prefab_type, count) in display order. PROCEDURAL is only
@@ -1381,6 +1381,9 @@ def prefab_available_types(arm: bpy.types.Object) -> list[tuple[str, int]]:
     """
     if arm is None or arm.type != 'ARMATURE':
         return []
+
+    if scene is None:
+        scene = bpy.context.scene
 
     avs = getattr(arm.data, 'vs', None)
     proc_entries = list(getattr(avs, 'proc_bones', [])) if avs else []
@@ -1391,12 +1394,28 @@ def prefab_available_types(arm: bpy.types.Object) -> list[tuple[str, int]]:
     if jiggles:
         result.append(('JIGGLEBONES', len(jiggles)))
 
+    # LOOKAT proc bones can surface as attachments, but only where the exporter
+    # actually writes one: MODELDOC never does; DME mode writes one only for a
+    # non-zero offset (a zero offset aims the bone directly, no attachment);
+    # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
+    # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
+    # writeDMX / PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
-    lookat_drivers = {e.driver_bone for e in proc_entries
-                      if getattr(e, 'proc_type', 'TRIGGER') == 'LOOKAT'
-                      and e.driver_bone and arm.data.bones.get(e.driver_bone)}
-    if attachments or lookat_drivers:
-        result.append(('ATTACHMENTS', len(attachments) + len(lookat_drivers)))
+    lookat_pairs: set[tuple[str, tuple]] = set()
+    if State.compiler != Compiler.MODELDOC:
+        dme = prefab_mode_is_dme(scene)
+        for e in proc_entries:
+            if getattr(e, 'proc_type', 'TRIGGER') != 'LOOKAT':
+                continue
+            dn = e.driver_bone
+            if not dn or not arm.data.bones.get(dn):
+                continue
+            off = tuple(e.lookat_offset)
+            if dme and off == (0.0, 0.0, 0.0):
+                continue
+            lookat_pairs.add((dn, off))
+    if attachments or lookat_pairs:
+        result.append(('ATTACHMENTS', len(attachments) + len(lookat_pairs)))
 
     hitboxes = get_hitboxes(arm)
     if hitboxes:
