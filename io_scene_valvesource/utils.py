@@ -1508,8 +1508,13 @@ def get_preserved_bone_prefixes() -> list:
     if prefs:
         for item in prefs.bone_name_prefixes:
             p = item.prefix.strip().rstrip('.').strip()
-            if p and (p + ".") not in prefixes:
-                prefixes.append(p + ".")
+            if not p:
+                continue
+            # Preserve only the namespace (up to the first dot), so a prefix with a
+            # root like "VRDBiped.Bip1" still guards names like "VRDBiped.Bip1_Spine1".
+            namespace = p.split('.', 1)[0] + "."
+            if namespace not in prefixes:
+                prefixes.append(namespace)
     return prefixes
 
 def get_prefix_shortcut_map() -> dict:
@@ -1525,7 +1530,9 @@ def get_prefix_shortcut_map() -> dict:
             p = item.prefix.strip().rstrip('.').strip()
             sc = re.sub(r'\W', '', item.shortcut.strip())
             if p and sc and sc not in result:
-                result[sc] = p + "."
+                # A prefix with an internal dot (e.g. "VRDBiped.Bip1") expands verbatim;
+                # a bare namespace (e.g. "MyRig") gets the trailing dot added.
+                result[sc] = p if '.' in p else p + "."
     return result
 
 def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_modeldoc: bool = False) -> typing.Union[str, list]:

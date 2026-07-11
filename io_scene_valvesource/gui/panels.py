@@ -1,6 +1,7 @@
 import bpy, math
 from bpy.types import Panel, UILayout, Collection, PoseBone, Bone, EditBone
 from .. import procbones_sim as _procbones_sim
+from .. import updater as _updater
 from bpy.app.translations import pgettext
 from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh, is_empty,
                      is_curve, is_mesh_compatible, modifier_compatible, vertex_maps, vertex_float_maps,
@@ -105,6 +106,8 @@ class SMD_PT_Scene(Panel):
     def draw(self, context) -> None:
         l = self.layout
         scene = context.scene
+
+        _updater.draw_notice(l)
 
         # Export
         row = l.row(align=True)

@@ -1391,8 +1391,8 @@ _data = {
         'ja': "プレフィックス",
     },
     'bone_name_prefix_tip': {
-        'en': "Bone name prefix kept verbatim during Source 2 sanitization (the trailing dot is added automatically)",
-        'ja': "Source 2 サニタイズ時にそのまま保持されるボーン名プレフィックス (末尾のドットは自動追加)",
+        'en': "Bone name prefix kept verbatim during Source 2 sanitization. A bare namespace (e.g. \"MyRig\") gets the trailing dot added automatically; include a root to expand verbatim (e.g. \"VRDBiped.Bip1\")",
+        'ja': "Source 2 サニタイズ時にそのまま保持されるボーン名プレフィックス。名前空間のみ (例: \"MyRig\") の場合は末尾のドットを自動付与。ルートを含めるとそのまま展開されます (例: \"VRDBiped.Bip1\")",
     },
     'bone_name_shortcut': {
         'en': "Shortcut",
@@ -2694,6 +2694,90 @@ _data = {
     'up_axis_tip': {
         'en': "Use for compatibility with data from other 3D tools",
         'ja': "他の3Dツールとの互換性のために使用",
+    },
+    'updater_auto_check': {
+        'en': "Check on startup",
+        'ja': "起動時に確認",
+    },
+    'updater_auto_check_tip': {
+        'en': "Check GitHub for a new build when Blender starts",
+        'ja': "Blender起動時にGitHubで新しいビルドを確認",
+    },
+    'updater_available': {
+        'en': "Update available: {0}",
+        'ja': "アップデートあり: {0}",
+    },
+    'updater_channel': {
+        'en': "Update Channel",
+        'ja': "更新チャンネル",
+    },
+    'updater_channel_dev': {
+        'en': "Development",
+        'ja': "開発版",
+    },
+    'updater_channel_dev_tip': {
+        'en': "Latest automated build. May be unstable or contain breaking changes",
+        'ja': "最新の自動ビルド。不安定または破壊的変更を含む可能性あり",
+    },
+    'updater_channel_stable': {
+        'en': "Stable",
+        'ja': "安定版",
+    },
+    'updater_channel_stable_tip': {
+        'en': "Official tagged releases",
+        'ja': "公式のタグ付きリリース",
+    },
+    'updater_channel_tip': {
+        'en': "Which release channel to fetch updates from",
+        'ja': "アップデートを取得するリリースチャンネル",
+    },
+    'updater_check': {
+        'en': "Check for Updates",
+        'ja': "アップデートを確認",
+    },
+    'updater_check_tip': {
+        'en': "Query GitHub for the latest build on the selected channel",
+        'ja': "選択したチャンネルの最新ビルドをGitHubに問い合わせ",
+    },
+    'updater_error': {
+        'en': "Update failed: {0}",
+        'ja': "アップデート失敗: {0}",
+    },
+    'updater_install': {
+        'en': "Install {0}",
+        'ja': "{0}をインストール",
+    },
+    'updater_install_label': {
+        'en': "Install Update",
+        'ja': "アップデートをインストール",
+    },
+    'updater_install_tip': {
+        'en': "Download this build and replace the installed add-on files. Restart Blender afterwards",
+        'ja': "このビルドをダウンロードしてアドオンを置き換え。その後Blenderを再起動してください",
+    },
+    'updater_no_release': {
+        'en': "No release found on this channel",
+        'ja': "このチャンネルにリリースが見つかりません",
+    },
+    'updater_reinstall': {
+        'en': "Reinstall {0}",
+        'ja': "{0}を再インストール",
+    },
+    'updater_restart': {
+        'en': "Update installed - restart Blender to apply it",
+        'ja': "アップデート完了 - 適用するにはBlenderを再起動",
+    },
+    'updater_title': {
+        'en': "Updates",
+        'ja': "アップデート",
+    },
+    'updater_up_to_date': {
+        'en': "Up to date ({0})",
+        'ja': "最新版です ({0})",
+    },
+    'updater_view': {
+        'en': "View on GitHub",
+        'ja': "GitHubで見る",
     },
     'use_scene_export_tip': {
         'en': "Export this item with the scene",

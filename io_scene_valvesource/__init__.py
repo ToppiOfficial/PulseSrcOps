@@ -19,7 +19,7 @@
 # ##### END GPL LICENSE BLOCK #####
 
 import bpy, math, os
-from bpy.props import PointerProperty, BoolProperty, CollectionProperty, IntProperty, StringProperty
+from bpy.props import PointerProperty, BoolProperty, CollectionProperty, IntProperty, StringProperty, EnumProperty
 
 # Python doesn't reload package sub-modules at the same time as __init__.py!
 import importlib, sys
@@ -43,7 +43,7 @@ for collection in [bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load
         if func.__module__.startswith(pkg_name):
             collection.remove(func)
 
-from . import datamodel, import_smd, export_smd, flex, procbones_sim
+from . import datamodel, import_smd, export_smd, flex, procbones_sim, updater
 from . import gui as GUI
 from .utils import *
 from .props import *
@@ -83,8 +83,28 @@ class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
         description=get_id("bone_name_prefixes_title_tip"),
         default=False)
 
+    update_channel : EnumProperty(
+        name=get_id("updater_channel"),
+        description=get_id("updater_channel_tip"),
+        items=[
+            ('STABLE', get_id("updater_channel_stable"), get_id("updater_channel_stable_tip")),
+            ('DEV', get_id("updater_channel_dev"), get_id("updater_channel_dev_tip")),
+        ],
+        default='STABLE',
+        update=lambda self, context: updater.reset_state())
+    update_auto_check : BoolProperty(
+        name=get_id("updater_auto_check"),
+        description=get_id("updater_auto_check_tip"),
+        default=True)
+    show_updater : BoolProperty(
+        name=get_id("updater_title"),
+        default=False)
+    dev_build_date : StringProperty(options={'HIDDEN'})
+
     def draw(self, context):
         layout = self.layout
+
+        updater.draw_prefs(layout, self)
 
         header = layout.row(align=True)
         header.prop(self, "show_bone_name_prefixes",
@@ -250,6 +270,7 @@ GUI.SMD_PT_Jigglebones,
     GUI.SMD_OT_PreviewVertexAnimation,
     GUI.SMD_OT_GenerateVertexAnimationQCSnippet,
     GUI.SMD_OT_CopyBoneExportName,
+    GUI.SMD_OT_FlattenBoneExportName,
     GUI.SMD_OT_AssignBoneRotExportOffset,
     GUI.SMD_OT_CopySourceBoneProps,
     GUI.SMD_OT_CopyJigglebonesFromArmature,
@@ -274,6 +295,10 @@ GUI.SMD_PT_Jigglebones,
     export_smd.SmdExporter,
     export_smd.PrefabExporter,
     import_smd.SmdImporter,
+
+    # Updater
+    updater.SMD_OT_CheckForUpdates,
+    updater.SMD_OT_InstallUpdate,
 
     # Add-on preferences
     ValveSource_AddonPreferences,
@@ -331,7 +356,12 @@ def register():
         kmi.properties.name = "SMD_MT_BoneToolsPie"
         _addon_keymaps.append((km, kmi))
 
+    bpy.app.timers.register(updater._startup_check, first_interval=5.0)
+
 def unregister():
+    if bpy.app.timers.is_registered(updater._startup_check):
+        bpy.app.timers.unregister(updater._startup_check)
+
     for km, kmi in _addon_keymaps:
         km.keymap_items.remove(kmi)
     _addon_keymaps.clear()

@@ -987,6 +987,54 @@ class SMD_OT_CopyBoneExportName(Operator):
         return {'FINISHED'}
 
 
+class SMD_OT_FlattenBoneExportName(Operator):
+    bl_idname = "smd.flatten_bone_export_name"
+    bl_label = 'Flatten Export Name'
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Resolve shortcut tokens (e.g. !vbip! -> ValveBiped.Bip01), side (*) and counter ($) in the export name into their literal result"
+
+    target : EnumProperty(
+        name='Apply To',
+        items=[
+            ('EXPORT_NAME', 'Export Name', "Write the flattened name back into the export name field"),
+            ('BONE_NAME', 'Native Bone Name', "Rename the actual Blender bone to the flattened name and clear its export name"),
+        ], default='EXPORT_NAME'
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return bool(context.object and context.object.type == 'ARMATURE' and context.mode == 'POSE'
+                    and (context.selected_pose_bones or context.selected_bones))
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop(self, 'target', expand=True)
+
+    def execute(self, context) -> set:
+        data_bones = context.object.data.bones
+        selected = context.selected_pose_bones or context.selected_bones or []
+
+        # Resolve every name first: renaming shifts the $ counter, so read before writing.
+        # Only touch bones that actually have an export name; skip ones that never had one.
+        resolved = []
+        for b in selected:
+            db = data_bones.get(b.name)
+            if db is not None and db.vs.export_name.strip():
+                resolved.append((db, get_bone_exportname(db, for_write=True)))
+
+        for db, name in resolved:
+            if self.target == 'EXPORT_NAME':
+                db.vs.export_name = name
+            else:
+                db.name = name
+                db.vs.export_name = ""
+
+        self.report({'INFO'}, "Flattened {} bone name(s).".format(len(resolved)))
+        return {'FINISHED'}
+
+
 class SMD_OT_AssignBoneRotExportOffset(Operator):
     bl_idname = 'smd.assign_bone_rot_export_offset'
     bl_label = 'Assign Bone Target Forward'

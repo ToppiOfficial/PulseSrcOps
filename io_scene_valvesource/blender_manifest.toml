@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 # Basic Add-on Info
 id = "pulse_src_ops"
 name = "PulseSrcOps"
-version = "1.0.4"
+version = "1.0.5"
 tagline = "A forked of BlenderSourceTools, an Importer and exporter for Valve Software's Source Engine Models"
 maintainer = "Toppi"
 type = "add-on"

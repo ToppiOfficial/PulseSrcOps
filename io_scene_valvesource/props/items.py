@@ -55,7 +55,8 @@ class AttachmentDisplayMeshItem(bpy.types.PropertyGroup):
 
 
 def _update_bone_prefix(self, context):
-    # Users enter the bare prefix (e.g. "ValveBiped"); the trailing dot is implied.
+    # Users enter a bare namespace (e.g. "ValveBiped", trailing dot implied) or a
+    # namespace with a root (e.g. "VRDBiped.Bip1") for verbatim expansion.
     cleaned = self.prefix.strip().rstrip('.').strip()
     if cleaned != self.prefix:
         self.prefix = cleaned

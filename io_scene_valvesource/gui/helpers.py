@@ -18,6 +18,7 @@ def _draw_proc_bone_context_menu(self, context):
         if arm_ob:
             self.layout.operator_context = 'INVOKE_DEFAULT'
             self.layout.operator("smd.copy_bone_export_name", icon='TEXT')
+            self.layout.operator("smd.flatten_bone_export_name", icon='SORTALPHA')
             self.layout.operator("smd.proc_bone_add_from_selected", icon='DRIVER')
             self.layout.operator("smd.proc_bone_add_lookat", icon='CON_TRACKTO')
 
