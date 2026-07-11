@@ -216,7 +216,6 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     hitboxes       : CollectionProperty(type=HitboxEntry)
     hitboxes_index : IntProperty(default=-1, update=_on_hitboxes_index_changed)
     hboxset_name          : StringProperty(name=get_id('prop_hitbox_hboxset'), description=get_id('prop_hitbox_hboxset_tip'), default='')
-    hbox_capsule_support  : BoolProperty(name=get_id('prop_hbox_capsule_support'), description=get_id('prop_hbox_capsule_support_tip'), default=False)
     arm_attachment_entries : CollectionProperty(type=ArmatureItemEntry)
     arm_attachment_index : IntProperty(default=-1)
     arm_jigglebone_entries : CollectionProperty(type=ArmatureItemEntry)

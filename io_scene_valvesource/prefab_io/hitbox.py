@@ -98,7 +98,7 @@ def import_hitboxes_from_dmx_root(dm_root, armature: 'object') -> 'tuple[int, in
 # QC text ($hbox)
 # -----------------------------------------------------------------------------
 
-def qc_line(entry, bone_export: str, capsule_support: bool) -> str:
+def qc_line(entry, bone_export: str) -> str:
     """Return one ``$hbox`` line. Inverse of ``import_hitboxes_from_content``."""
     grp = _group_id(entry.group)
     base = (
@@ -106,13 +106,11 @@ def qc_line(entry, bone_export: str, capsule_support: bool) -> str:
         f'{entry.vec_min[0]:.4f}\t{entry.vec_min[1]:.4f}\t{entry.vec_min[2]:.4f}\t'
         f'{entry.vec_max[0]:.4f}\t{entry.vec_max[1]:.4f}\t{entry.vec_max[2]:.4f}'
     )
-    if capsule_support:
-        rx  = math.degrees(entry.rotation[0])
-        ry  = math.degrees(entry.rotation[1])
-        rz  = math.degrees(entry.rotation[2])
-        scl = entry.scale if entry.scale >= 0.0 else -1.0
-        return f'{base}\t{rx:.4f}\t{ry:.4f}\t{rz:.4f}\t{scl:.4f}'
-    return base
+    rx  = math.degrees(entry.rotation[0])
+    ry  = math.degrees(entry.rotation[1])
+    rz  = math.degrees(entry.rotation[2])
+    scl = entry.scale if entry.scale >= 0.0 else -1.0
+    return f'{base}\t{rx:.4f}\t{ry:.4f}\t{rz:.4f}\t{scl:.4f}'
 
 
 def import_hitboxes_from_content(content: str, armature: 'object', context, create_collection: bool = False, hboxset_name: str = ''):
@@ -273,9 +271,5 @@ def import_hitboxes_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, int, lis
             entry.scale     = radius
             avs.hitboxes_index = len(avs.hitboxes) - 1
             created += 1
-
-    # Source 2 hitboxes are always capsules; enable capsule support.
-    if created:
-        avs.hbox_capsule_support = True
 
     return (created, skipped, skipped_bones)

@@ -28,7 +28,7 @@ jobs:
         run: |
           VERSION=$(python -c 'import re; m = re.search(r"^version\s*=\s*\"([0-9.]+)\"", open("io_scene_valvesource/blender_manifest.toml").read(), re.MULTILINE); print(m.group(1))')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip=$GITHUB_WORKSPACE/../kitsunesourcetool_${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "zip=$GITHUB_WORKSPACE/../pulsesrcops_${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Delete existing dev release
         env:

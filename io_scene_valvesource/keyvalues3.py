@@ -1,17 +1,17 @@
 #   MIT License
-#   
+#
 #   Copyright (c) 2026 Toppi
-#   
+#
 #   Permission is hereby granted, free of charge, to any person obtaining a copy
 #   of this software and associated documentation files (the "Software"), to deal
 #   in the Software without restriction, including without limitation the rights
 #   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 #   copies of the Software, and to permit persons to whom the Software is
 #   furnished to do so, subject to the following conditions:
-#   
+#
 #   The above copyright notice and this permission notice shall be included in all
 #   copies or substantial portions of the Software.
-#   
+#
 #   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 #   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 #   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,8 +23,35 @@
 import re
 from typing import Any
 
+_NUMBER_RE = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
+_INT_RE = re.compile(r"^[+-]?\d+$")
+_BARE_KEY_RE = re.compile(r"^[A-Za-z_][\w.]*$")
+_FLAGGED_STR_RE = re.compile(r'^[\w+]+:".*"$', re.S)
+
+_ESCAPE_DECODE = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "'": "'", "0": "\0"}
+
+
+def _escape_string(value: str) -> str:
+    return (value.replace("\\", "\\\\").replace('"', '\\"')
+            .replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r"))
+
+
+def _format_key(key: str) -> str:
+    return key if _BARE_KEY_RE.match(key) else f'"{_escape_string(key)}"'
+
+
+def _format_float(value: float) -> str:
+    if value != value:
+        return "0"
+    text = repr(value)
+    if "e" in text or "E" in text or "inf" in text:
+        text = f"{value:.10f}".rstrip("0").rstrip(".") or "0"
+    return text
+
 
 def _format_value(value: Any, indent: int = 0) -> str:
+    if value is None:
+        return "null"
     if isinstance(value, KVArray):
         return value._format_multiline(indent)
     if isinstance(value, KVValue):
@@ -32,19 +59,28 @@ def _format_value(value: Any, indent: int = 0) -> str:
     if isinstance(value, KVNode):
         return value._serialize(indent=indent)
     if isinstance(value, str):
-        if re.match(r"^\w+:\".*\"$", value):
+        if _FLAGGED_STR_RE.match(value):
             return value
-        return f'"{value.replace(chr(10), chr(92) + "n")}"'
+        return f'"{_escape_string(value)}"'
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, dict):
+        if not value:
+            return "{}"
+        tab = "\t" * indent
+        items = "".join(f"{tab}\t{_format_key(k)} = {_format_value(v, indent + 1)}\n"
+                        for k, v in value.items())
+        return f"{{\n{items}{tab}}}"
     if isinstance(value, (list, tuple)):
         if not value:
             return "[]"
+        if len(value) <= 4 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
+            return f"[ {', '.join(_format_value(v) for v in value)} ]"
         tab = "\t" * indent
         items = ",\n".join(f"{tab}\t{_format_value(v, indent + 1)}" for v in value)
         return f"[\n{items},\n{tab}]"
     if isinstance(value, float):
-        return f"{value:.5f}".rstrip("0").rstrip(".")
+        return _format_float(value)
     return str(value)
 
 
@@ -88,6 +124,17 @@ class KVBool(KVValue):
         return "true" if self.value else "false"
 
 
+class KVFlaggedString(KVValue):
+    """Flagged string value, e.g. resource:"models/foo.vmdl"."""
+
+    def __init__(self, flag: str, value: str):
+        self.flag = flag
+        self.value = value
+
+    def __str__(self):
+        return f'{self.flag}:"{_escape_string(self.value)}"'
+
+
 class KVArray(KVValue):
     def __init__(self, *values):
         self.values = list(values)
@@ -96,6 +143,8 @@ class KVArray(KVValue):
         return self._format_multiline(0)
 
     def _format_multiline(self, indent: int) -> str:
+        if not self.values:
+            return "[]"
         tab = "\t" * (indent + 1)
         close_tab = "\t" * indent
         items = ",\n".join(f"{tab}{_format_value(v, indent + 1)}" for v in self.values)
@@ -109,9 +158,9 @@ class KVHeader:
     def __init__(self, encoding="text", encoding_version=None,
                  format="modeldoc28", format_version=None):
         self.version = "kv3"
-        self.encoding = encoding
+        self.encoding = encoding or "text"
         self.encoding_version = encoding_version or self.DEFAULT_ENCODING_GUID
-        self.format = format
+        self.format = format or "modeldoc28"
         self.format_version = format_version or self.MODEL_DOC_GUID
 
     def __str__(self):
@@ -141,6 +190,8 @@ class KVNode:
 
     def get(self, recursive: bool = False, **conditions) -> "KVNode | None":
         for child in self.children:
+            if not isinstance(child, KVNode):
+                continue
             if all(child.properties.get(k) == v for k, v in conditions.items()):
                 return child
             if recursive:
@@ -152,6 +203,8 @@ class KVNode:
     def find_all(self, recursive: bool = False, **conditions) -> list["KVNode"]:
         results = []
         for child in self.children:
+            if not isinstance(child, KVNode):
+                continue
             if all(child.properties.get(k) == v for k, v in conditions.items()):
                 results.append(child)
             if recursive:
@@ -163,20 +216,21 @@ class KVNode:
         out = f"{tab}{{\n"
 
         for key, value in self.properties.items():
-            if isinstance(value, KVNode):
-                out += f"{tab}\t{key} =\n{value._serialize(indent + 1)}\n"
-            elif isinstance(value, dict):
-                out += f"{tab}\t{key} =\n{tab}\t{{\n"
-                for k2, v2 in value.items():
-                    out += f"{tab}\t\t{k2} = {_format_value(v2, indent + 2)}\n"
-                out += f"{tab}\t}}\n"
+            key = _format_key(key)
+            if isinstance(value, (KVNode, dict)):
+                block = value._serialize(indent + 1) if isinstance(value, KVNode) \
+                    else f"{tab}\t{_format_value(value, indent + 1)}"
+                out += f"{tab}\t{key} =\n{block}\n"
             else:
                 out += f"{tab}\t{key} = {_format_value(value, indent + 1)}\n"
 
         if self.children:
             out += f"{tab}\tchildren =\n{tab}\t[\n"
             for child in self.children:
-                out += f"{child._serialize(indent + 2)},\n"
+                if isinstance(child, KVNode):
+                    out += f"{child._serialize(indent + 2)},\n"
+                else:
+                    out += f"{tab}\t\t{_format_value(child, indent + 2)},\n"
             out += f"{tab}\t]\n"
 
         out += f"{tab}}}"
@@ -209,7 +263,7 @@ class KVDocument:
     def to_text(self) -> str:
         out = str(self.header) + "\n{\n"
         for key, node in self.roots.items():
-            out += f"\t{key} =\n{node._serialize(indent=1)}\n"
+            out += f"\t{_format_key(key)} =\n{node._serialize(indent=1)}\n"
         out += "}\n"
         return out
 
@@ -222,6 +276,8 @@ class KVParserError(Exception):
 
 
 class KVParser:
+    WORD_STOP = ' \t\r\n={}[],"'
+
     def __init__(self, text: str):
         self.text = text
         self.pos = 0
@@ -235,7 +291,9 @@ class KVParser:
         self._expect("}")
         doc = KVDocument(
             format=header_data.get("format"),
+            format_version=header_data.get("format_version"),
             encoding=header_data.get("encoding"),
+            encoding_version=header_data.get("encoding_version"),
         )
         doc.roots = roots
         return doc
@@ -326,16 +384,20 @@ class KVParser:
             return self._parse_string()
 
         word = self._parse_word()
+        if not word:
+            raise self._error("a value")
 
         if word.endswith(":") and self._peek() == '"':
-            return f'{word}"{self._parse_string()}"'
+            return KVFlaggedString(word[:-1], self._parse_string())
 
         if word == "true":
             return True
         if word == "false":
             return False
-        if re.match(r"^-?\d+(\.\d+)?$", word):
-            return float(word) if "." in word else int(word)
+        if word == "null":
+            return None
+        if _NUMBER_RE.match(word):
+            return int(word) if _INT_RE.match(word) else float(word)
         return word
 
     def _parse_array(self) -> list:
@@ -353,30 +415,64 @@ class KVParser:
         return values
 
     def _parse_identifier(self) -> str:
-        self._consume_whitespace()
-        return self._parse_word()
+        if self._peek() == '"':
+            return self._parse_string()
+        word = self._parse_word()
+        if not word:
+            raise self._error("an identifier")
+        return word
 
     def _parse_word(self) -> str:
         self._consume_whitespace()
         start = self.pos
-        while self.pos < self.length and self.text[self.pos] not in " \t\r\n={}[],":
+        while self.pos < self.length and self.text[self.pos] not in self.WORD_STOP:
             self.pos += 1
         return self.text[start:self.pos]
 
     def _parse_string(self) -> str:
         self._expect('"')
-        start = self.pos
-        while self.pos < self.length and self.text[self.pos] != '"':
-            if self.text[self.pos] == "\\":
-                self.pos += 1
+        if self.text.startswith('""', self.pos):
+            self.pos += 2
+            end = self.text.find('"""', self.pos)
+            if end == -1:
+                raise KVParserError(f"Unterminated multi-line string at pos {self.pos}")
+            s = self.text[self.pos:end]
+            self.pos = end + 3
+            return s
+
+        chars = []
+        while self.pos < self.length:
+            c = self.text[self.pos]
+            if c == '"':
+                break
+            if c == "\\" and self.pos + 1 < self.length:
+                nxt = self.text[self.pos + 1]
+                if nxt in _ESCAPE_DECODE:
+                    chars.append(_ESCAPE_DECODE[nxt])
+                    self.pos += 2
+                    continue
+            chars.append(c)
             self.pos += 1
-        s = self.text[start:self.pos]
-        self._expect('"')
-        return s.replace("\\n", "\n")
+        if self.pos >= self.length:
+            raise KVParserError(f"Unterminated string at pos {self.pos}")
+        self.pos += 1
+        return "".join(chars)
 
     def _consume_whitespace(self):
-        while self.pos < self.length and self.text[self.pos] in " \t\r\n":
-            self.pos += 1
+        while self.pos < self.length:
+            c = self.text[self.pos]
+            if c in " \t\r\n":
+                self.pos += 1
+            elif c == "/" and self.text.startswith("//", self.pos):
+                nl = self.text.find("\n", self.pos)
+                self.pos = self.length if nl == -1 else nl + 1
+            elif c == "/" and self.text.startswith("/*", self.pos):
+                end = self.text.find("*/", self.pos + 2)
+                if end == -1:
+                    raise KVParserError(f"Unterminated block comment at pos {self.pos}")
+                self.pos = end + 2
+            else:
+                break
 
     def _peek(self) -> str:
         self._consume_whitespace()
@@ -385,9 +481,12 @@ class KVParser:
     def _advance(self):
         self.pos += 1
 
+    def _error(self, expected: str) -> KVParserError:
+        got = repr(self.text[self.pos]) if self.pos < self.length else "EOF"
+        return KVParserError(f"Expected {expected} at pos {self.pos}, got {got}")
+
     def _expect(self, char: str):
         self._consume_whitespace()
         if self.pos >= self.length or self.text[self.pos] != char:
-            got = repr(self.text[self.pos]) if self.pos < self.length else "EOF"
-            raise KVParserError(f"Expected '{char}' at pos {self.pos}, got {got}")
+            raise self._error(f"'{char}'")
         self.pos += 1

@@ -10,7 +10,7 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
-                     is_bypassed_into_parent)
+                     is_bypassed_into_parent, parse_order_vg_name, MAX_MESH_SPLIT)
 from ..export_smd import SmdExporter, PrefabExporter
 from ..import_smd import SmdImporter
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
@@ -361,7 +361,6 @@ class SMD_PT_Hitboxes(Properties_Panel):
 
         row = layout.row(align=True)
         row.prop(avs, 'hboxset_name')
-        row.prop(avs, 'hbox_capsule_support', toggle=True, icon='META_CAPSULE', text='')
 
         row = layout.row()
         row.template_list("SMD_UL_Hitboxes", "", avs, "hitboxes",
@@ -1398,8 +1397,15 @@ class SMD_PT_MeshSplit(Properties_Panel):
 
     def draw_header(self, context):
         active_object = context.object
-        is_meshsplited = active_object.vs.use_mesh_split
-        label = '{} ({})'.format(get_id("panel_mesh_split", True), str(is_meshsplited)) if is_mesh_compatible(active_object) else get_id("panel_mesh_split", True)
+        label = get_id("panel_mesh_split", True)
+        if is_mesh_compatible(active_object):
+            if active_object.vs.use_mesh_split:
+                max_n = min(active_object.vs.max_mesh_split, MAX_MESH_SPLIT)
+                count = sum(1 for vg in active_object.vertex_groups
+                            if (n := parse_order_vg_name(vg.name)) is not None and n < max_n)
+                label = '{} ({})'.format(label, count)
+            else:
+                label = '{} (False)'.format(label)
         self.layout.label(text=label, icon='TEXTURE_DATA')
 
     def draw(self, context):

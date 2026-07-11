@@ -15,7 +15,7 @@ with open(toml_path) as toml_file:
     
     version_str = version_match.group(1)
 
-zip_name = f"kitsunesourcetool_{version_str}.zip"
+zip_name = f"pulsesrcops_{version_str}.zip"
 print(f"Creating {zip_name}...")
 
 zip_file = zipfile.ZipFile(os.path.join("..", zip_name), 'w', zipfile.ZIP_BZIP2)

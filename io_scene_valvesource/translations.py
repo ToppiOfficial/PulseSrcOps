@@ -1737,16 +1737,8 @@ _data = {
         'ja': "ヒットボックスセット",
     },
     'prop_hitbox_hboxset_tip': {
-        'en': "Name written to $hboxset in the prefab QC. Leave empty to omit $hboxset.",
-        'ja': "プリファブQCの$hboxsetに書き込まれる名前。空の場合は$hboxsetを省略します。",
-    },
-    'prop_hbox_capsule_support': {
-        'en': "Capsule Support",
-        'ja': "カプセルサポート",
-    },
-    'prop_hbox_capsule_support_tip': {
-        'en': "Write rotation and scale (capsule radius) fields in $hbox lines. Disable for games that only support basic boxes. studiomdl will error on unknown command and stop compiling if these fields are present on unsupported branches.",
-        'ja': "$hboxの行に回転とスケール（カプセル半径）フィールドを書き出します。基本的なボックスのみサポートするゲームでは無効にしてください。",
+        'en': "Name of the hitbox set. Defaults to \"default\" on export if left empty.",
+        'ja': "ヒットボックスセットの名前。空の場合はエクスポート時に「default」になります。",
     },
     'prop_ignore_location_offset': {
         'en': "Ignore Location Offsets",

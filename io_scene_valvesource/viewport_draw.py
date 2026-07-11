@@ -612,40 +612,36 @@ _AXIS_COLORS = (
 
 
 def _draw_ghost_axes(shader, context, ghost_mat, bone_length):
-    tip    = ghost_mat.to_translation()
-    axes   = [Vector((ghost_mat[r][c] for r in range(3))).normalized() for c in range(3)]
-    scale  = bone_length * 0.45
-    region = context.region
-    rv3d   = context.region_data
+    tip      = ghost_mat.to_translation()
+    axes     = [Vector((ghost_mat[r][c] for r in range(3))).normalized() for c in range(3)]
+    scale    = bone_length * 0.45
+    sphere_r = bone_length * 0.03
+    region   = context.region
+    rv3d     = context.region_data
+    wx, wy, wz = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
 
     for ax, ((r, g, b), label) in zip(axes, _AXIS_COLORS):
         end = tip + ax * scale
         _draw_lines([tip, end], (r, g, b, 1.0), 2.0)
+        shader.bind()
+        shader.uniform_float('color', (r, g, b, 1.0))
+        batch_for_shader(shader, 'TRIS', {'pos': _sphere_tris(end, wx, wy, wz, sphere_r)}).draw(shader)
         pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, end)
         if pos_2d:
-            _label_queue.append((pos_2d.x + 3, pos_2d.y + 3, r, g, b, label))
+            _label_queue.append((pos_2d.x, pos_2d.y, r, g, b, label))
 
 
 def _draw_labels_2d():
     if not _label_queue and not _proc_label_queue:
         return
     try:
-        dm        = 8
-        shader_2d = gpu.shader.from_builtin('UNIFORM_COLOR')
         gpu.state.blend_set('ALPHA')
         for x, y, r, g, b, text in _label_queue:
-            # filled diamond at axis tip
-            shader_2d.bind()
-            shader_2d.uniform_float('color', (r, g, b, 1.0))
-            batch_for_shader(shader_2d, 'TRIS', {'pos': [
-                (x, y + dm), (x + dm, y), (x, y - dm),
-                (x, y + dm), (x, y - dm), (x - dm, y),
-            ]}).draw(shader_2d)
-            # centered label just above the diamond
+            # centered label just above the 3D diamond at the axis tip
             blf.size(0, 14)
             blf.color(0, r, g, b, 1.0)
             w, h = blf.dimensions(0, text)
-            blf.position(0, x - w * 0.5, y + dm + 4, 0)
+            blf.position(0, x - w * 0.5, y + 10, 0)
             blf.draw(0, text)
         for x, y, r, g, b, text in _proc_label_queue:
             blf.size(0, 13)
@@ -675,8 +671,6 @@ def _draw_active_proc_bone_preview(shader, context, ob):
         return
 
     entry = avs.proc_bones[idx]
-    if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
-        return
     if not entry.helper_bone or not entry.driver_bone:
         return
 
@@ -685,6 +679,13 @@ def _draw_active_proc_bone_preview(shader, context, ob):
     if not driver_pb:
         return
 
+    if getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT':
+        _draw_proc_lookat_preview(context, ob, entry, helper_pb, driver_pb)
+    else:
+        _draw_proc_trigger_preview(context, ob, entry, helper_pb, driver_pb)
+
+
+def _draw_proc_lookat_preview(context, ob, entry, helper_pb, driver_pb):
     region = context.region
     rv3d   = context.region_data
     hr, hg, hb = _COLOR_LOOKAT_HELPER
@@ -742,6 +743,45 @@ def _draw_active_proc_bone_preview(shader, context, ob):
         _proc_label_queue.append((pos_2d.x + 6, pos_2d.y + 6, tr, tg, tb, label))
 
 
+def _draw_proc_trigger_preview(context, ob, entry, helper_pb, driver_pb):
+    """Show which bone drives a TRIGGER (QuatInterp) helper: a link from the
+    driver (controller) bone to the helper bone, with crosshairs at each head."""
+    if not helper_pb:
+        return
+
+    region = context.region
+    rv3d   = context.region_data
+    hr, hg, hb = _COLOR_LOOKAT_HELPER   # cyan   - the driven helper bone
+    dr, dg, db = _COLOR_LOOKAT_TARGET   # orange - the controlling driver bone
+
+    helper_mat  = ob.matrix_world @ helper_pb.matrix
+    driver_mat  = ob.matrix_world @ driver_pb.matrix
+    helper_head = helper_mat.to_translation()
+    driver_head = driver_mat.to_translation()
+
+    # Controller link: driver -> helper
+    _draw_lines([driver_head, helper_head], (dr, dg, db, 0.6), 1.5)
+
+    def _crosshair(head, mat, pb, color, width):
+        scale = Vector((mat[0][0], mat[1][0], mat[2][0])).length
+        s = pb.bone.length * scale * 0.09
+        _draw_lines([
+            head + Vector(( s, 0, 0)), head + Vector((-s, 0, 0)),
+            head + Vector(( 0, s, 0)), head + Vector(( 0, -s, 0)),
+            head + Vector(( 0, 0, s)), head + Vector(( 0, 0, -s)),
+        ], color, width)
+
+    _crosshair(helper_head, helper_mat, helper_pb, (hr, hg, hb, 0.9), 2.0)
+    _crosshair(driver_head, driver_mat, driver_pb, (dr, dg, db, 1.0), 2.0)
+
+    pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, helper_head)
+    if pos_2d:
+        _proc_label_queue.append((pos_2d.x + 6, pos_2d.y + 6, hr, hg, hb, entry.helper_bone))
+    pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, driver_head)
+    if pos_2d:
+        _proc_label_queue.append((pos_2d.x + 6, pos_2d.y + 6, dr, dg, db, entry.driver_bone))
+
+
 # -- Pose UIList active-bone sync --------------------------------------------
 
 @persistent
@@ -759,8 +799,7 @@ def _on_hitbox_sync_depsgraph(scene, depsgraph):
             return
 
         scvs = getattr(getattr(context, 'scene', None), 'vs', None)
-        if not getattr(scvs, 'hitbox_sync_pose', True):
-            return
+        sync_hitbox = getattr(scvs, 'hitbox_sync_pose', True)
 
         active_pb = context.active_pose_bone
         bone_name = active_pb.name if active_pb else ''
@@ -774,14 +813,22 @@ def _on_hitbox_sync_depsgraph(scene, depsgraph):
             return
 
         avs = getattr(ob.data, 'vs', None)
-        if not avs or not avs.hitboxes:
+        if not avs:
             return
 
-        for i, hb in enumerate(avs.hitboxes):
-            if hb.bone_name == bone_name:
-                if avs.hitboxes_index != i:
-                    avs.hitboxes_index = i  # triggers refresh_hitbox_snapshot via update callback
-                break
+        if sync_hitbox and avs.hitboxes:
+            for i, hb in enumerate(avs.hitboxes):
+                if hb.bone_name == bone_name:
+                    if avs.hitboxes_index != i:
+                        avs.hitboxes_index = i  # triggers refresh_hitbox_snapshot via update callback
+                    break
+
+        if avs.proc_bones:
+            for i, pbentry in enumerate(avs.proc_bones):
+                if pbentry.helper_bone == bone_name:
+                    if avs.proc_bones_index != i:
+                        avs.proc_bones_index = i
+                    break
     except Exception:
         pass
 
@@ -807,6 +854,15 @@ def _draw_export_pose_preview():
             for eb in context.selected_bones:
                 pb = ob.pose.bones.get(eb.name)
                 if pb is None:
+                    continue
+                b = pb.bone.vs
+                has_rot = not b.ignore_rotation_offset and any((
+                    b.export_rotation_offset_x, b.export_rotation_offset_y, b.export_rotation_offset_z
+                ))
+                has_loc = not b.ignore_location_offset and any((
+                    b.export_location_offset_x, b.export_location_offset_y, b.export_location_offset_z
+                ))
+                if not has_rot and not has_loc:
                     continue
                 ghost_mat = ob.matrix_world @ get_bone_matrix(eb.matrix, pb)
                 y_col     = Vector((ghost_mat[0][1], ghost_mat[1][1], ghost_mat[2][1]))

@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,7 +29,7 @@ jobs:
           VERSION=$(python -c 'import re; m = re.search(r"^version\s*=\s*\"([0-9.]+)\"", open("io_scene_valvesource/blender_manifest.toml").read(), re.MULTILINE); print(m.group(1))')
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          echo "zip=$GITHUB_WORKSPACE/../kitsunesourcetool_${VERSION}.zip" >> "$GITHUB_OUTPUT"
+          echo "zip=$GITHUB_WORKSPACE/../pulsesrcops_${VERSION}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Delete existing release if it exists
         env:
@@ -35,12 +37,33 @@ jobs:
         run: |
           gh release delete "${{ steps.meta.outputs.tag }}" --yes --cleanup-tag 2>/dev/null || true
 
-      - name: Create release
+      - name: Create draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-          gh release create "${{ steps.meta.outputs.tag }}" \
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          # Most recent existing release tag, excluding this one
+          PREV_TAG=$(git tag --sort=-v:refname | grep -vx "$TAG" | head -n1)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          # Collect commit bodies since the previous release: %b drops each
+          # commit's subject line (the title shown on the repo), then filter
+          # out "bump version" lines and squeeze blank runs.
+          NOTES=$(git log --reverse --pretty=format:'%b' "$RANGE" \
+            | grep -viE 'bump version' \
+            | sed -e 's/[[:space:]]*$//' \
+            | sed -e '/^[[:space:]]*$/d')
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            NOTES="Release $TAG"
+          fi
+
+          gh release create "$TAG" \
             "${{ steps.meta.outputs.zip }}" \
-            --title "${{ steps.meta.outputs.tag }}" \
-            --notes "$COMMIT_MSG"
+            --title "$TAG" \
+            --draft \
+            --notes "$NOTES"

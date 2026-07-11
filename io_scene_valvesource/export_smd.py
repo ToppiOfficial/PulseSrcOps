@@ -3261,9 +3261,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             havs = getattr(arm_data, 'vs', None)
             hbox_entries = list(getattr(havs, 'hitboxes', [])) if havs else []
             valid_hbox = [e for e in hbox_entries if e.bone_name and arm_data.bones.get(e.bone_name)]
-            hboxset_name = getattr(havs, 'hboxset_name', '').strip() if havs else ''
+            hboxset_name = (getattr(havs, 'hboxset_name', '').strip() if havs else '') or 'default'
 
-            if valid_hbox and hboxset_name:
+            if valid_hbox:
                 inverted = [e.bone_name for e in valid_hbox
                             if e.scale <= 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
                 if inverted:
@@ -4438,12 +4438,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             self.report({'WARNING'}, "No hitboxes found")
             return None, None
 
-        hboxset = getattr(avs, 'hboxset_name', '').strip()
-        if not hboxset:
-            self.report({'WARNING'},
-                "Hitbox export skipped: no HBox Set name is configured. "
-                "Set a HBox Set name on the armature to export hitboxes.")
-            return None, None
+        hboxset = getattr(avs, 'hboxset_name', '').strip() or 'default'
 
         if self.to_clipboard:
             use_vmdl = (State.compiler == Compiler.MODELDOC)
@@ -4473,26 +4468,12 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 f"invert hit registration. Swap Min and Max for: {', '.join(inverted)}")
 
         sorted_bones = sort_bone_by_hierarchy(bones_for_sort)
-        capsule_support = getattr(avs, 'hbox_capsule_support', False)
-
-        if not capsule_support:
-            skipped_capsules  = [e.bone_name for e in valid if e.scale > 0.0]
-            skipped_rotations = [e.bone_name for e in valid
-                                 if any(abs(r) > 1e-6 for r in e.rotation)]
-            if skipped_capsules:
-                self.report({'WARNING'},
-                    f"Capsule Support is disabled : {len(skipped_capsules)} capsule hitbox(es) will be "
-                    f"exported as boxes (bones: {', '.join(skipped_capsules)})")
-            if skipped_rotations:
-                self.report({'WARNING'},
-                    f"Capsule Support is disabled : rotation is ignored on {len(skipped_rotations)} "
-                    f"hitbox(es) (bones: {', '.join(skipped_rotations)})")
 
         lines = []
         lines.append(f'$hboxset\t"{hboxset}"')
         for bone in sorted_bones:
             for e in seen_bones[bone]:
-                lines.append(_hitbox.qc_line(e, get_bone_exportname(bone), capsule_support))
+                lines.append(_hitbox.qc_line(e, get_bone_exportname(bone)))
         lines.append('$skipboneinbbox')
 
         return '\n'.join(lines), None
