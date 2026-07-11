@@ -84,10 +84,6 @@ bonename_direction_map = {
     '.R': '.L', '_R': '_L', 'Right': 'Left', '_Right': '_Left', '.Right': '.Left', 'R_': 'L_', 'R.': 'L.', 'R ': 'L '
 }
 
-exportname_shortcut_keywords = {
-    "vbip": "ValveBiped.Bip01"
-}
-
 hitbox_group = [
     ('0', 'Generic', 'the default group of hitboxes, appears White in HLMV'),
     ('1', 'Head', 'Used for human NPC heads and to define where the player sits on the vehicle.mdl, appears Red in HLMV'),
@@ -99,10 +95,6 @@ hitbox_group = [
     ('7', 'Right Leg', 'Used for human Right Leg, appears White like the default group in HLMV (Orange in Garry\'s Mod'),
     ('8', 'Neck', 'Used for human neck (to fix penetration to head from behind), appears Orange in HLMV (In all games since CS:GO)'),
 ]
-
-exportname_shortcut_keywords = {
-    "vbip": "ValveBiped.Bip01"
-}
 
 kitsune_data_keys: list[str] = []
 
@@ -1527,7 +1519,7 @@ def get_prefix_shortcut_map() -> dict:
     prefs = get_addon_prefs()
     vb_sc = re.sub(r'\W', '', (prefs.valvebiped_shortcut if prefs else 'vbip').strip())
     if vb_sc:
-        result[vb_sc] = "ValveBiped."
+        result[vb_sc] = "ValveBiped.Bip01"
     if prefs:
         for item in prefs.bone_name_prefixes:
             p = item.prefix.strip().rstrip('.').strip()
@@ -1917,10 +1909,8 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         raw_name = b.vs.export_name.strip() or b.name
         raw_name = raw_name.replace("*", b_side)
 
-        # Prefix shortcuts: !name! expands to the assigned prefix (e.g. !vbip! -> ValveBiped.)
+        # Prefix shortcuts: !name! expands to the assigned prefix (e.g. !vbip! -> ValveBiped.Bip01)
         raw_name = re.sub(r'!(\w+)!', lambda m: prefix_shortcuts.get(m.group(1), m.group(0)), raw_name)
-
-        raw_name = re.sub(r'!(\w+)', lambda m: exportname_shortcut_keywords.get(m.group(1), m.group(0)), raw_name)
 
         if "$" in raw_name:
             key = (raw_name, b_side)

@@ -1399,8 +1399,8 @@ _data = {
         'ja': "ショートカット",
     },
     'bone_name_shortcut_tip': {
-        'en': "Optional shortcut token. Type !token! in a bone export name to insert this prefix (e.g. !vbip! -> ValveBiped.). The enclosing ! ! are added automatically; leave empty for no shortcut",
-        'ja': "任意のショートカットトークン。ボーンのエクスポート名に !token! と入力するとこのプレフィックスに展開されます (例: !vbip! -> ValveBiped.)。囲みの ! ! は自動付与。空欄でショートカットなし",
+        'en': "Optional shortcut token. Type !token! in a bone export name to insert this prefix (e.g. !vbip! -> ValveBiped.Bip01). The enclosing ! ! are added automatically; leave empty for no shortcut",
+        'ja': "任意のショートカットトークン。ボーンのエクスポート名に !token! と入力するとこのプレフィックスに展開されます (例: !vbip! -> ValveBiped.Bip01)。囲みの ! ! は自動付与。空欄でショートカットなし",
     },
     'prop_arm_items_view': {
         'en': "View",

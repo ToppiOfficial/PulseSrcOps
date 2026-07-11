@@ -103,7 +103,7 @@ class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
         vb = layout.split(factor=0.6, align=True)
         name = vb.row()
         name.enabled = False
-        name.label(text="ValveBiped.", icon='LOCKED')
+        name.label(text="ValveBiped.Bip01", icon='LOCKED')
         vb.prop(self, "valvebiped_shortcut", text="", icon='SYNTAX_OFF')
 
         row = layout.row()
