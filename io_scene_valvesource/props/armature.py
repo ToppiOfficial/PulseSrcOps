@@ -175,8 +175,6 @@ def _on_armature_data_updated(scene, depsgraph):
 class ValveSource_BoneProps(JiggleBoneProps, bpy.types.PropertyGroup):
     export_name : StringProperty(name=get_id("exportname"), description=get_id("exportname_tip"), maxlen=256)
 
-    bone_sort_order : IntProperty(name=get_id('prop_bone_sort_order'), description=get_id('prop_bone_sort_order_tip'), default=0, min=0, soft_max=4)
-
     ignore_rotation_offset : BoolProperty(name=get_id('prop_ignore_rotation_offset'), description=get_id('prop_ignore_rotation_offset_tip'), default=False)
     export_rotation_offset_x : FloatProperty(name=get_id('prop_rotation_x'), description=get_id('prop_rotation_x_tip'), unit='ROTATION', default=math.radians(0), precision=4, min=-360, max=360, update=_propagate_rotation_to_dependents)
     export_rotation_offset_y : FloatProperty(name=get_id('prop_rotation_y'), description=get_id('prop_rotation_y_tip'), unit='ROTATION', default=math.radians(0), precision=4, min=-360, max=360, update=_propagate_rotation_to_dependents)

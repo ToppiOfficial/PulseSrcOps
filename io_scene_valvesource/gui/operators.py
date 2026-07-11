@@ -967,7 +967,9 @@ class SMD_OT_AssignBoneRotExportOffset(Operator):
     @classmethod
     def poll(cls, context) -> bool:
         selected_arms = [ob for ob in context.selected_objects if is_armature(ob)]
-        return bool(selected_arms and context.mode not in {'EDIT', 'EDIT_ARMATURE', 'OBJECT'} and context.active_bone and context.active_bone.select == True)
+        if not selected_arms or context.mode in {'EDIT', 'EDIT_ARMATURE', 'OBJECT'}:
+            return False
+        return any(b.select for arm in selected_arms for b in arm.data.bones if not b.hide_select)
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)

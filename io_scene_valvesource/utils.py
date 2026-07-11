@@ -1193,13 +1193,12 @@ class VertexGroupNormalizer:
                 self.ob.vertex_groups[group_idx].remove(vert_indices)
 
     def _limit_influence(self):
-        bones_by_name = {b.name: b for b in self.arm.data.bones if b.name in self.bone_names}
         to_remove: dict[int, list[int]] = collections.defaultdict(list)
 
         for v in self.ob.data.vertices:
             groups = sorted(
                 (g for g in v.groups if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names),
-                key=lambda g: (bones_by_name[self.ob.vertex_groups[g.group].name].vs.bone_sort_order, -g.weight)
+                key=lambda g: -g.weight
             )
             for g in groups[self.vgroup_limit:]:
                 to_remove[g.group].append(v.index)

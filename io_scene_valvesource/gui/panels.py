@@ -532,8 +532,6 @@ class SMD_PT_BoneData(Properties_Panel):
 
         active_bone_exportname = get_bone_exportname(active_bone)
         col.prop(active_bone.vs, 'export_name', placeholder=active_bone_exportname, text='')
-        col.separator()
-        col.prop(active_bone.vs, 'bone_sort_order', slider=True)
         col.label(text='{}: {}'.format(get_id('label_export_name_format', True), active_bone_exportname))
 
         split = box.split(factor=0.5)

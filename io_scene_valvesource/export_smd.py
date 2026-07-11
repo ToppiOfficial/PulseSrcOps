@@ -4578,6 +4578,29 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             for idx, off in enumerate(offsets, start=1):
                 lookat_name_map[(dn, off)] = f"{attach_base}_lookat{idx}" if multiple else f"{attach_base}_lookat"
 
+        # studiomdl's .vrd compiler treats the text before the first '.' in a bone
+        # name as a prefix and strips it ("ValveBiped.Bip01" -> "Bip01"). That is
+        # intended for real prefixes like "ValveBiped.", but an accidental dot in a
+        # bone name silently drops part of the name. Only the Source 1 .vrd path is
+        # affected - DME prefab, Source 2 and newer studiomdl/PulseMDL don't strip.
+        preserved = tuple(p.lower() for p in get_preserved_bone_prefixes())
+        warned_dotnames: set[str] = set()
+        for entry in entries:
+            for bname in (entry.helper_bone, entry.driver_bone):
+                bone = arm.data.bones.get(bname) if bname else None
+                if not bone:
+                    continue
+                export_name = get_bone_exportname(bone)
+                if '.' not in export_name or export_name in warned_dotnames:
+                    continue
+                if export_name.lower().startswith(preserved):
+                    continue
+                warned_dotnames.add(export_name)
+                self.report(
+                    {'WARNING'},
+                    f"Procedural bone name '{export_name}' contains a '.'"
+                )
+
         lines: list[str] = []
 
         for entry_idx, entry in enumerate(entries):

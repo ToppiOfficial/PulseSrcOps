@@ -1439,14 +1439,6 @@ _data = {
         'en': "Starting number used when auto-numbering duplicate bone names",
         'ja': "ボーン名の重複時に自動採番を開始する番号",
     },
-    'prop_bone_sort_order': {
-        'en': "Bone Sort Order",
-        'ja': "ボーンソート順",
-    },
-    'prop_bone_sort_order_tip': {
-        'en': "Vertex group culling priority; 0 is the highest priority",
-        'ja': "頂点グループの間引き優先度。0が最も高い優先度",
-    },
     'prop_controller_name': {
         'en': "Controller Name",
         'ja': "コントローラー名",
