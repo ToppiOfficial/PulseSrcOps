@@ -790,6 +790,11 @@ class ExportPlanner:
     def _apply_merge_vertices(self, ob: bpy.types.Object) -> None:
         MERGE_DIST = 1e-5
         OPPOSING_DOT = -0.9
+        # Edgeline / backface / non-exportable vgroups are hard per-vertex masks
+        # that drive the solidify shell. Welding two coincident verts whose mask
+        # weight differs moves the mask boundary or spreads it to verts that never
+        # had it ("leaking"), so those pairs are refused below.
+        PP_WEIGHT_TOL = 1e-4
 
         me = ob.data
         bm = bmesh.new()
@@ -803,78 +808,42 @@ class ExportPlanner:
             bm.free()
             return
 
+        # Post-process mask vgroup indices; a pair is only welded when its weights
+        # match across every one of these.
+        pp_vg_indices = [
+            vg.index for vg in ob.vertex_groups
+            if vg.name and vg.name in {
+                getattr(ob.vs, "toon_edgeline_vertexgroup", ""),
+                getattr(ob.vs, "backface_vgroup", ""),
+                getattr(ob.vs, "non_exportable_vgroup", ""),
+            }
+        ]
+        deform = bm.verts.layers.deform.active if pp_vg_indices else None
+
+        def mask_differs(a, b) -> bool:
+            if deform is None:
+                return False
+            wa, wb = a[deform], b[deform]
+            return any(
+                abs(wa.get(i, 0.0) - wb.get(i, 0.0)) > PP_WEIGHT_TOL
+                for i in pp_vg_indices
+            )
+
         protected_indices = set()
         for src, tgt in raw_map.items():
-            if any(
+            opposing = any(
                 n1.dot(n2) < OPPOSING_DOT
                 for n1 in (f.normal for f in src.link_faces)
                 for n2 in (f.normal for f in tgt.link_faces)
-            ):
+            )
+            if opposing or mask_differs(src, tgt):
                 protected_indices.add(src.index)
                 protected_indices.add(tgt.index)
 
-        # -- Collect post-process VG names to preserve ----------------------------
-        pp_vg_names = set()
-        for name in (
-            getattr(ob.vs, "toon_edgeline_vertexgroup", ""),
-            getattr(ob.vs, "backface_vgroup", ""),
-            getattr(ob.vs, "non_exportable_vgroup", ""),
-        ):
-            if name:
-                pp_vg_names.add(name)
-
-        pp_vg_index_to_name = {
-            vg.index: vg.name
-            for vg in ob.vertex_groups
-            if vg.name in pp_vg_names
-        }
-
-        # Snapshot: target vert position (tuple) -> {vg_name: max_weight}
-        # We accumulate max weights from both the target vert itself and any
-        # src verts that would merge into it - all resolved now while BMVerts
-        # still map 1:1 with me.vertices indices.
-        pos_to_weights: dict[tuple, dict[str, float]] = {}
-
-        if pp_vg_index_to_name:
-            def _vert_pp_weights(vert_index: int) -> dict[str, float]:
-                return {
-                    pp_vg_index_to_name[g.group]: g.weight
-                    for g in me.vertices[vert_index].groups
-                    if g.group in pp_vg_index_to_name
-                }
-
-            def _accumulate(pos_key: tuple, weights: dict[str, float]) -> None:
-                if not weights:
-                    return
-                entry = pos_to_weights.setdefault(pos_key, {})
-                for vg_name, w in weights.items():
-                    if w > entry.get(vg_name, 0.0):
-                        entry[vg_name] = w
-
-            def _ultimate_tgt(bv):
-                # find_doubles can chain (A->B->C); follow to the vertex that survives.
-                seen = set()
-                while bv in raw_map:
-                    if bv in seen:
-                        break
-                    seen.add(bv)
-                    bv = raw_map[bv]
-                return bv
-
-            for src_bv, tgt_bv in raw_map.items():
-                src_w = _vert_pp_weights(src_bv.index)
-                tgt_w = _vert_pp_weights(tgt_bv.index)
-                if not src_w and not tgt_w:
-                    continue
-                # Follow the merge chain: tgt_bv itself may be merged further.
-                final_tgt = _ultimate_tgt(tgt_bv)
-                pos_key = (round(final_tgt.co.x, 6), round(final_tgt.co.y, 6), round(final_tgt.co.z, 6))
-                _accumulate(pos_key, tgt_w)
-                _accumulate(pos_key, src_w)
-
         bm.free()
 
-        # Deselecting protected vertices excludes them from the operator's scope.
+        # Deselecting protected vertices excludes them from the operator's scope,
+        # so mask boundaries are never welded across.
         bpy.context.view_layer.objects.active = ob
         select_only(ob)
         bpy.ops.object.mode_set(mode='EDIT')
@@ -891,18 +860,6 @@ class ExportPlanner:
             bpy.ops.mesh.remove_doubles(threshold=MERGE_DIST)
 
         bpy.ops.object.mode_set(mode='OBJECT')
-
-        # Restore post-process weights by position lookup
-        if pos_to_weights:
-            for v in me.vertices:
-                pos_key = (round(v.co.x, 6), round(v.co.y, 6), round(v.co.z, 6))
-                target_weights = pos_to_weights.get(pos_key)
-                if not target_weights:
-                    continue
-                for vg_name, w in target_weights.items():
-                    vg = ob.vertex_groups.get(vg_name)
-                    if vg:
-                        vg.add([v.index], w, 'REPLACE')
 
         print(f"- Merged duplicate vertices in '{ob.name}'")
 
