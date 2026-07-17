@@ -12,7 +12,7 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
                      is_bypassed_into_parent, parse_order_vg_name, MAX_MESH_SPLIT)
-from ..export_smd import SmdExporter, PrefabExporter
+from ..export import SmdExporter, PrefabExporter
 from ..import_smd import SmdImporter
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors

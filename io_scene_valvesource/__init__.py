@@ -43,7 +43,7 @@ for collection in [bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load
         if func.__module__.startswith(pkg_name):
             collection.remove(func)
 
-from . import datamodel, import_smd, export_smd, flex, procbones_sim, updater
+from . import datamodel, import_smd, export, flex, procbones_sim, updater
 from . import gui as GUI
 from .utils import *
 from .props import *
@@ -292,8 +292,8 @@ GUI.SMD_PT_Jigglebones,
     flex.InsertUUID,
 
     # Export and Import
-    export_smd.SmdExporter,
-    export_smd.PrefabExporter,
+    export.SmdExporter,
+    export.PrefabExporter,
     import_smd.SmdImporter,
 
     # Updater

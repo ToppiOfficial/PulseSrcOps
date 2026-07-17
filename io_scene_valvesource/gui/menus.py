@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
-from ..export_smd import SmdExporter, PrefabExporter
+from ..export import SmdExporter, PrefabExporter
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
