@@ -31,7 +31,7 @@ from . import datamodel, ordered_set, flex
 from .prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 from .export import (BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan,
                      LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder,
-                     Baker, ExportPlanner)
+                     Baker, ExportPlanner, DmxWriter)
 
 
 # -----------------------------------------------------------------------------
@@ -492,7 +492,18 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 source.vs.automerge = True
 
         # -- write -------------------------------------------------------------
-        write_func = self.writeDMX if State.exportFormat == ExportFormat.DMX else self.writeSMD
+        # Phase 1 rewrite: route reference (non-anim, non-VCA) DMX exports through the new
+        # DmxWriter. Animation / vertex-animation exports still use the old writeDMX until
+        # those phases land. Set KST_OLD_DMX=1 to force the old writer for A/B diffing.
+        if State.exportFormat == ExportFormat.DMX:
+            is_anim_export = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
+            has_vca = bool(bake_results[0].vertex_animations) if bake_results else False
+            if not is_anim_export and not has_vca and not os.environ.get("KST_OLD_DMX"):
+                write_func = self._run_dmx_writer
+            else:
+                write_func = self.writeDMX
+        else:
+            write_func = self.writeSMD
         bench.report("Post Bake")
 
         if isinstance(source, bpy.types.Object) and source.type == "ARMATURE" and source.data.vs.action_selection != "CURRENT":
@@ -1245,6 +1256,18 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
     # -------------------------------------------------------------------------
     # DMX writing - logic unchanged from original
     # -------------------------------------------------------------------------
+
+    def _run_dmx_writer(self, datablock, bake_results, name, dir_path):
+        writer = DmxWriter(
+            self, datablock, bake_results, name, dir_path,
+            armature=self.armature, armature_src=self.armature_src,
+            exportable_bones=self.exportable_bones,
+            exportable_boneNames=self.exportable_boneNames,
+            all_bake_results=self.bake_results,
+            flex_mode=getattr(self, "flex_controller_mode", "DME"),
+            flex_source=getattr(self, "flex_controller_source", ""),
+        )
+        return writer.write()
 
     def writeDMX(self, datablock: bpy.types.ID, bake_results: list[BakeResult], name: str, dir_path: str):
         bench = BenchMarker(1, "DMX")

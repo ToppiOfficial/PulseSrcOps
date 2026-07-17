@@ -2,3 +2,4 @@ from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _
 from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder
 from .bake import Baker
 from .plan import ExportPlanner
+from .dmx import DmxWriter
