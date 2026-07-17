@@ -20,7 +20,7 @@
 
 import bpy, re
 from . import datamodel, utils
-from .utils import get_id, getCorrectiveShapeSeparator, get_flexcontrollers, sanitize_string_for_delta, sanitize_flex_expression_deltas, get_dme_corrective_delta_names, get_dme_delta_name_map
+from .utils import get_id, getCorrectiveShapeSeparator, sanitize_string_for_delta, sanitize_flex_expression_deltas, get_dme_corrective_delta_names, get_dme_delta_name_map
 
 class DmxWriteFlexControllers(bpy.types.Operator):
     bl_idname = "export_scene.dmx_flex_controller"
@@ -33,18 +33,18 @@ class DmxWriteFlexControllers(bpy.types.Operator):
         return utils.hasShapes(context.object, valid_only=False)
     
     @classmethod
-    def make_controllers(cls,id, export: bool = False):
+    def make_controllers(cls,id):
         dm = datamodel.DataModel("model",1)
         
         objects = []
         shapes = set()
-        flexcontrollers = None
+        seen_controller_names = set()
+        seen_rule_names = set()
+        seen_dom_rules = set()
         
         if type(id) == bpy.types.Collection:
             objects.extend(list([ob for ob in id.objects if ob.data and ob.type in utils.shape_types and ob.data.shape_keys]))
         else:
-            if export:
-                flexcontrollers = get_flexcontrollers(id)
             objects.append(id)
         
         name = "flex_{}".format(id.name)
@@ -81,32 +81,17 @@ class DmxWriteFlexControllers(bpy.types.Operator):
         for ob in objects:
             normalize = ob.data.vs.normalize_shapekeys if ob.data.shape_keys else False
 
-            if ob.vs.flex_controller_mode == 'BUILDER':
-                ob_flexcontrollers = flexcontrollers
-                if ob_flexcontrollers is None and export:
-                    ob_flexcontrollers = get_flexcontrollers(ob)
-
-                if ob_flexcontrollers is None:
-                    continue
-
-                for fc in ob_flexcontrollers:
-                    shapekey_name = fc[0]
-                    shape = None
-
-                    if shapekey_name and ob.data.shape_keys:
-                        shape = ob.data.shape_keys.key_blocks.get(shapekey_name)
-
-                    createController(ob.name, fc[4], [], shape_key=shape, flexcontroller=fc, normalize_shapekeys=normalize)
-                    if shape:
-                        shapes.add(shape.name)
-
-            elif ob.vs.flex_controller_mode == 'DME':
+            if ob.vs.flex_controller_mode == 'DME':
                 corrective_names = get_dme_corrective_delta_names(ob)
                 delta_name_map = get_dme_delta_name_map(ob)
 
                 for fc in ob.vs.dme_flexcontrollers:
                     if not fc.controller_name or not fc.controller_name.strip():
                         continue
+                    if fc.controller_name in seen_controller_names:
+                        print(f"- Skipping duplicate flex controller '{fc.controller_name}' on '{ob.name}' (already defined by another mesh)")
+                        continue
+                    seen_controller_names.add(fc.controller_name)
                     shape = ob.data.shape_keys.key_blocks.get(fc.shapekey) if (ob.data.shape_keys and fc.shapekey) else None
                     ctrl = dm.add_element(fc.controller_name, "DmeCombinationInputControl",
                                          id=ob.name + fc.controller_name + "inputcontrol")
@@ -137,6 +122,10 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     s_names = [delta_name_map.get(n.strip(), sanitize_string_for_delta(n.strip())) for n in rule.suppressed_names.split(',') if n.strip()]
                     if not d_names or not s_names:
                         continue
+                    dom_key = (tuple(d_names), tuple(s_names))
+                    if dom_key in seen_dom_rules:
+                        continue
+                    seen_dom_rules.add(dom_key)
                     dom_elem = dm.add_element("", "DmeCombinationDominationRule",
                                              id=ob.name + rule.dominator_names + "dom")
                     dom_elem["dominators"] = datamodel.make_array(d_names, str)
@@ -146,19 +135,26 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                 # Flex rules - exclude DOMINATION and CORRECTIVE (correctives are pure deltas)
                 non_dom = [r for r in ob.vs.dme_flex_rules if r.rule_type not in ('DOMINATION', 'CORRECTIVE') and r.name]
                 if non_dom:
-                    flex_rules_elem = dm.add_element("flexRules", "DmeFlexRules",
-                                                     id=ob.name + "flexrules")
-                    rule_deltas  = flex_rules_elem["deltaStates"]      = datamodel.make_array([], datamodel.Element)
-                    rule_weights = flex_rules_elem["deltaStateWeights"] = datamodel.make_array([], datamodel.Vector2)
-                    targets.append(flex_rules_elem)
+                    flex_rules_elem = None
                     for rule in non_dom:
+                        delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
+                        if delta_name in seen_rule_names:
+                            print(f"- Skipping duplicate flex rule '{delta_name}' on '{ob.name}' (already defined by another mesh)")
+                            continue
+                        seen_rule_names.add(delta_name)
+
+                        if flex_rules_elem is None:
+                            flex_rules_elem = dm.add_element("flexRules", "DmeFlexRules",
+                                                             id=ob.name + "flexrules")
+                            rule_deltas  = flex_rules_elem["deltaStates"]      = datamodel.make_array([], datamodel.Element)
+                            rule_weights = flex_rules_elem["deltaStateWeights"] = datamodel.make_array([], datamodel.Vector2)
+                            targets.append(flex_rules_elem)
+
                         if rule.rule_type == 'PASSTHROUGH':
-                            delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
                             rule_elem = dm.add_element(delta_name, "DmeFlexRulePassThrough",
                                                        id=ob.name + delta_name + "passthrough")
                             rule_elem["result"] = 0.0
                         elif rule.rule_type == 'EXPRESSION':
-                            delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
                             rule_elem = dm.add_element(delta_name, "DmeFlexRuleExpression",
                                                        id=ob.name + delta_name + "expression")
                             rule_elem["result"] = 0.0
@@ -166,7 +162,6 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                         else:  # LOCALVAR - sanitize the name the same way as expression
                             # names and %-references, so the declaration stays consistent
                             # with how the variable is referenced (e.g. "ud_norm" -> "udnorm").
-                            delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
                             rule_elem = dm.add_element(delta_name, "DmeFlexRuleLocalVar",
                                                        id=ob.name + delta_name + "localvar")
                             rule_elem["result"] = 0.0

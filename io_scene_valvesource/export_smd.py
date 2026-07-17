@@ -1642,17 +1642,7 @@ class Baker:
         source_ob.show_only_shape_key = not normalize
         preserve_basis_normals = source_ob.data.vs.bake_shapekey_as_basis_normals
 
-        if source_ob.vs.flex_controller_mode == "BUILDER":
-            shapes_to_process = []
-            for delta_name, shape_name in self._exporter.get_delta_shapekeys(source_ob):
-                idx = source_ob.data.shape_keys.key_blocks.find(shape_name)
-                if idx != -1:
-                    shape = source_ob.data.shape_keys.key_blocks[idx]
-                    if delta_name != shape.name:
-                        shape.name = delta_name
-                    shapes_to_process.append((idx, shape))
-        else:
-            shapes_to_process = list(enumerate(source_ob.data.shape_keys.key_blocks))[1:]
+        shapes_to_process = list(enumerate(source_ob.data.shape_keys.key_blocks))[1:]
 
         if preserve_basis_normals:
             print(f"- Ignoring changed normals for shapekeys in {result.name}")
@@ -2568,22 +2558,6 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if src_pb is not None:
                 pb.matrix_basis = src_pb.matrix_basis.copy()
 
-    def get_delta_shapekeys(self, ob: bpy.types.Object) -> list[tuple[str, str]]:
-        if not hasattr(ob, "vs") or not hasattr(ob.vs, "dme_flexcontrollers"):
-            return []
-        valid_keys = set(ob.data.shape_keys.key_blocks.keys()[1:]) if ob.data.shape_keys else set()
-        seen = set()
-        result = []
-        for fc in ob.vs.dme_flexcontrollers:
-            if fc.shapekey not in valid_keys:
-                continue
-            raw = fc.raw_delta_name.strip() if fc.raw_delta_name and fc.raw_delta_name.strip() else fc.shapekey
-            delta = sanitize_string_for_delta(raw)
-            if delta not in seen:
-                seen.add(delta)
-                result.append((delta, fc.shapekey))
-        return result
-
     # -------------------------------------------------------------------------
     # SMD writing - logic unchanged from original
     # -------------------------------------------------------------------------
@@ -3272,11 +3246,11 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     self.error(get_id("exporter_err_flexctrl_loadfail", True).format(err))
                     return written
             else:
-                DmeCombinationOperator = flex.DmxWriteFlexControllers.make_controllers(datablock, export=True).root["combinationOperator"]
+                DmeCombinationOperator = flex.DmxWriteFlexControllers.make_controllers(datablock).root["combinationOperator"]
             break
 
         if not DmeCombinationOperator and bake_results[0].vertex_animations:
-            DmeCombinationOperator = flex.DmxWriteFlexControllers.make_controllers(datablock, export=True).root["combinationOperator"]
+            DmeCombinationOperator = flex.DmxWriteFlexControllers.make_controllers(datablock).root["combinationOperator"]
 
         if DmeCombinationOperator:
             root["combinationOperator"] = DmeCombinationOperator

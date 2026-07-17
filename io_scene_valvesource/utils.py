@@ -585,36 +585,6 @@ def MakeObjectIcon(object,prefix=None,suffix=None):
         out += suffix
     return out
 
-def get_flexcontrollers(ob: bpy.types.Object) -> list[tuple[str, bool, bool, str, str, str]]:
-    """Return list of (shapekey, eyelid, stereo, raw_delta, controller_name, flexgroup) from object,
-    only including entries with a valid controller name. Shapekey is optional."""
-
-    if not hasattr(ob, "vs") or not hasattr(ob.vs, "dme_flexcontrollers"):
-        return []
-
-    valid_keys = set(ob.data.shape_keys.key_blocks.keys()[1:]) if ob.data.shape_keys else set()
-
-    result = []
-
-    for fc in ob.vs.dme_flexcontrollers:
-        controller_name = fc.controller_name.strip() if fc.controller_name and fc.controller_name.strip() else ""
-
-        if not controller_name:
-            if not fc.shapekey or fc.shapekey not in valid_keys:
-                continue
-            controller_name = fc.shapekey
-
-        shapekey = fc.shapekey if fc.shapekey and fc.shapekey in valid_keys else ""
-
-        raw = fc.raw_delta_name.strip() if fc.raw_delta_name and fc.raw_delta_name.strip() else shapekey
-        delta_name = sanitize_string_for_delta(raw)
-
-        flexgroup = fc.resolved_flexgroup()
-
-        result.append((shapekey, fc.eyelid, fc.stereo, delta_name, controller_name, flexgroup))
-
-    return result
-
 def removeObject(obj):
     d = obj.data
     type = obj.type
