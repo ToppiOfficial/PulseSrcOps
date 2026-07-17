@@ -1442,22 +1442,15 @@ def get_armature(ob: bpy.types.Object | bpy.types.Bone | bpy.types.EditBone | bp
             return get_armature(ctx_obj)
         return None
 
-def get_collection_parent(ob, scene) -> bpy.types.Collection | None:
-    for collection in scene.collection.children_recursive:
-        if ob.name in collection.objects:
-            return collection
-    
-    if ob.name in scene.collection.objects:
-        return None
-    
-    return None
-
 def get_valid_vertexanimation_object(ob : bpy.types.Object | None) -> bpy.types.Object | bpy.types.Collection | None:
     if not is_mesh_compatible(ob): return None
-    
-    collection = get_collection_parent(ob, bpy.context.scene)
-    if collection is None or collection.vs.mute: return ob
-    else: return collection
+
+    for group in bpy.data.collections:
+        if group.vs.mute or is_bypassed_into_parent(group):
+            continue
+        if ob in get_collection_export_objects(group):
+            return group
+    return ob
 
 #
 #   DATA

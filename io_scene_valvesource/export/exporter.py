@@ -284,12 +284,12 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     continue
                 if getattr(vs, 'mesh_type', 'DEFAULT') == 'CLOTHPROXY':
                     self.warning(f"'{_ob.name}' is set to Cloth Proxy but scene export format is not DMX - cloth attributes will be omitted.")
-                if getattr(vs, 'flex_controller_mode', '') == 'DME':
+                if getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob):
                     self.warning(get_id("exporter_warn_dme_smd", True).format(_ob.name))
 
         for _ob in check_obs:
             vs = getattr(_ob, 'vs', None)
-            if vs and getattr(vs, 'flex_controller_mode', '') == 'DME':
+            if vs and getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob):
                 dme_errors = validate_dme_flex_for_export(_ob)
                 for err in dme_errors:
                     self.error(err)
