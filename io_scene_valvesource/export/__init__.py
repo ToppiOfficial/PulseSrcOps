@@ -3,3 +3,4 @@ from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBui
 from .bake import Baker
 from .plan import ExportPlanner
 from .dmx import DmxWriter
+from .smd import SmdWriter

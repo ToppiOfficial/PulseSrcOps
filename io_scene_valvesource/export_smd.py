@@ -31,7 +31,7 @@ from . import datamodel, ordered_set, flex
 from .prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 from .export import (BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan,
                      LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder,
-                     Baker, ExportPlanner, DmxWriter)
+                     Baker, ExportPlanner, DmxWriter, SmdWriter)
 
 
 # -----------------------------------------------------------------------------
@@ -492,7 +492,12 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 source.vs.automerge = True
 
         # -- write -------------------------------------------------------------
-        write_func = self._run_dmx_writer if State.exportFormat == ExportFormat.DMX else self.writeSMD
+        # DMX -> new DmxWriter. SMD -> new SmdWriter (KST_OLD_SMD=1 forces old writeSMD for
+        # A/B text diffing during the SMD-rewrite verification window).
+        if State.exportFormat == ExportFormat.DMX:
+            write_func = self._run_dmx_writer
+        else:
+            write_func = self.writeSMD if os.environ.get("KST_OLD_SMD") else self._run_smd_writer
         bench.report("Post Bake")
 
         if isinstance(source, bpy.types.Object) and source.type == "ARMATURE" and source.data.vs.action_selection != "CURRENT":
@@ -1242,10 +1247,6 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         self.smd_file.close()
         return 1
 
-    # -------------------------------------------------------------------------
-    # DMX writing - logic unchanged from original
-    # -------------------------------------------------------------------------
-
     def _run_dmx_writer(self, datablock, bake_results, name, dir_path):
         writer = DmxWriter(
             self, datablock, bake_results, name, dir_path,
@@ -1256,6 +1257,16 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),
+        )
+        return writer.write()
+
+    def _run_smd_writer(self, id, bake_results, name, dir_path):
+        writer = SmdWriter(
+            self, id, bake_results, name, dir_path,
+            armature=self.armature, armature_src=self.armature_src,
+            exportable_bones=self.exportable_bones,
+            exportable_boneNames=self.exportable_boneNames,
+            all_bake_results=self.bake_results,
         )
         return writer.write()
 
