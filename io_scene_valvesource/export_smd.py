@@ -492,13 +492,12 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 source.vs.automerge = True
 
         # -- write -------------------------------------------------------------
-        # Phase 1 rewrite: route reference (non-anim, non-VCA) DMX exports through the new
-        # DmxWriter. Animation / vertex-animation exports still use the old writeDMX until
-        # those phases land. Set KST_OLD_DMX=1 to force the old writer for A/B diffing.
+        # Rewrite phases 1-2: route skeleton/mesh/shape and animation DMX exports through the
+        # new DmxWriter. Vertex-animation (VCA) exports still use the old writeDMX until that
+        # phase lands. Set KST_OLD_DMX=1 to force the old writer for A/B diffing.
         if State.exportFormat == ExportFormat.DMX:
-            is_anim_export = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
             has_vca = bool(bake_results[0].vertex_animations) if bake_results else False
-            if not is_anim_export and not has_vca and not os.environ.get("KST_OLD_DMX"):
+            if not has_vca and not os.environ.get("KST_OLD_DMX"):
                 write_func = self._run_dmx_writer
             else:
                 write_func = self.writeDMX

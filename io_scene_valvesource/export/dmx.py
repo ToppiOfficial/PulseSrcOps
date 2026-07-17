@@ -47,6 +47,7 @@ class DmxWriter:
         print("-", filepath)
         self.filepath = filepath
         self.materials = {}
+        self.is_anim = len(self.bake_results) == 1 and self.bake_results[0].object.type == "ARMATURE"
 
         dm = self.dm = datamodel.DataModel("model", State.datamodelFormat)
         dm.allow_random_ids = False
@@ -73,13 +74,15 @@ class DmxWriter:
             axis["forwardParity"] = 1
             axis["coordSys"] = 0
 
-        # Phase 1 handles the reference (non-anim) case; the caller routes animation exports
-        # to the old writeDMX until the animation phase lands.
         if self.armature:
-            self.armature.data.pose_position = "REST"
+            self.armature.data.pose_position = "POSE" if self.is_anim else "REST"
             if self.armature.data.vs.reset_pose_per_anim:
+                if self.is_anim:
+                    self.r.warnUnkeyframedPose(self.name)
                 for pb in self.armature.pose.bones:
                     pb.matrix_basis.identity()
+            elif self.is_anim:
+                self.r.applyUnkeyframedSourcePose()
             bpy.context.view_layer.update()
 
         root["skeleton"] = DmeModel
@@ -103,6 +106,9 @@ class DmxWriter:
             root["combinationOperator"] = combination_operator
 
         self._write_meshes(combination_operator, bench)
+
+        if self.is_anim:
+            self._write_animation(bench)
 
         return self._write_out(bench)
 
@@ -854,6 +860,112 @@ class DmxWriter:
                         added = True
             if not added:
                 targets.append(DmeMesh)
+
+    # -- animation -----------------------------------------------------------
+    def _evaluated_pose_bones(self):
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = self.armature.evaluated_get(depsgraph)
+        assert isinstance(evaluated, bpy.types.Object) and evaluated.pose
+        return [evaluated.pose.bones[b.name] for b in self.exportable_bones]
+
+    def _write_animation(self, bench):
+        dm = self.dm
+        armature_name = self.armature_src.name if self.armature_src else self.name
+        ad = self.armature.animation_data
+        # first_frame offsets sampling so actions that don't start on frame 0 export their real
+        # motion; the DmeChannelsClip timeline stays 0-based. See animationFrameRange.
+        first_frame, anim_len = animationFrameRange(ad) if ad else (0, 0)
+        fps = bpy.context.scene.render.fps * bpy.context.scene.render.fps_base
+
+        DmeChannelsClip = dm.add_element(self.name, "DmeChannelsClip", id=self.name + "clip")
+        DmeAnimationList = dm.add_element(armature_name, "DmeAnimationList", id=armature_name + "list")
+        DmeAnimationList["animations"] = datamodel.make_array([DmeChannelsClip], datamodel.Element)
+        self.root["animationList"] = DmeAnimationList
+
+        DmeTimeFrame = dm.add_element("timeframe", "DmeTimeFrame", id=self.name + "time")
+        duration = anim_len / fps
+        if dm.format_ver >= 11:
+            DmeTimeFrame["duration"] = datamodel.Time(duration)
+        else:
+            DmeTimeFrame["durationTime"] = int(duration * 10000)
+        DmeTimeFrame["scale"] = 1.0
+        DmeChannelsClip["timeFrame"] = DmeTimeFrame
+        DmeChannelsClip["frameRate"] = fps if self.source2 else int(fps)
+
+        channels = DmeChannelsClip["channels"] = datamodel.make_array([], datamodel.Element)
+        bone_channels = {}
+
+        channel_template = [
+            ("_p", "position", "Vector3", datamodel.Vector3),
+            ("_o", "orientation", "Quaternion", datamodel.Quaternion),
+        ]
+        if self.export_bone_scale:
+            channel_template.append(("_s", "scale", "Float", float))
+
+        def makeChannel(bone):
+            export_name = self.exportable_boneNames[bone.name]
+            bone_channels[bone.name] = []
+            for suffix, attr, type_name, dm_type in channel_template:
+                ch_name = export_name + suffix
+                cur = dm.add_element(ch_name, "DmeChannel", id=bone.name + suffix)
+                cur["toAttribute"] = attr
+                cur["toElement"] = (self.bone_elements[bone.name] if bone else self.DmeModel)["transform"]
+                cur["mode"] = 1
+                if attr == "scale":
+                    # scale is a single float on the transform, not an indexed vector component
+                    cur["fromIndex"] = 0
+                    cur["toIndex"] = 0
+                layer = dm.add_element(type_name + " log", f"Dme{type_name}LogLayer", ch_name + "loglayer")
+                cur["log"] = dm.add_element(type_name + " log", f"Dme{type_name}Log", ch_name + "log")
+                cur["log"]["layers"] = datamodel.make_array([layer], datamodel.Element)
+                layer["times"] = datamodel.make_array([], datamodel.Time if dm.format_ver > 11 else int)
+                layer["values"] = datamodel.make_array([], dm_type)
+                if bone:
+                    bone_channels[bone.name].append(layer)
+                channels.append(cur)
+
+        for bone in self.exportable_bones:
+            makeChannel(bone)
+
+        num_frames = int(anim_len + 1)
+        bench.report("Animation setup")
+        two_percent = num_frames / 50
+        print("Frames: ", debug_only=True, newline=False)
+
+        for frame in range(num_frames):
+            bpy.context.window_manager.progress_update(frame / num_frames)
+            bpy.context.scene.frame_set(first_frame + frame)
+            keyframe_time = datamodel.Time(frame / fps) if dm.format_ver > 11 else int(frame / fps * 10000)
+            evaluated = self._evaluated_pose_bones()
+
+            for bone in evaluated:
+                channel = bone_channels[bone.name]
+                cur_p = bone.parent
+                while cur_p and cur_p not in evaluated:
+                    cur_p = cur_p.parent
+                if cur_p:
+                    relMat = get_bone_matrix(cur_p).inverted() @ bone.matrix
+                else:
+                    relMat = self.armature.matrix_world @ bone.matrix
+                relMat = get_bone_matrix(relMat, bone)
+
+                pos = relMat.to_translation()
+                if bone.parent:
+                    self._scale_translation(pos, self.armature_scale)
+
+                channel[0]["times"].append(keyframe_time)
+                channel[0]["values"].append(datamodel.Vector3(pos))
+                channel[1]["times"].append(keyframe_time)
+                channel[1]["values"].append(getDatamodelQuat(relMat.to_quaternion()))
+                if self.export_bone_scale:
+                    s = relMat.to_scale()
+                    channel[2]["times"].append(keyframe_time)
+                    channel[2]["values"].append((s.x + s.y + s.z) / 3.0)
+
+            if two_percent and frame % two_percent:
+                print(".", debug_only=True, newline=False)
+
+        print(debug_only=True)
 
     # -- write-out -----------------------------------------------------------
     def _write_out(self, bench) -> int:
