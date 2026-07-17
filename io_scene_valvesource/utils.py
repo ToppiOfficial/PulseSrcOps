@@ -1318,7 +1318,7 @@ def get_attachments(ob : bpy.types.Object | None) -> list[bpy.types.Object | Non
 
 
 # Display metadata for each prefab type: (icon, singular label). The default
-# output filename suffix and file extension are resolved in export_smd.py.
+# output filename suffix and file extension are resolved in export/prefab.py.
 prefab_type_info = {
     'JIGGLEBONES':   ('BONE_DATA',        'Jigglebones'),
     'ATTACHMENTS':   ('EMPTY_ARROWS',     'Attachments'),
@@ -1361,7 +1361,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     # non-zero offset (a zero offset aims the bone directly, no attachment);
     # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
     # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
-    # writeDMX / PrefabExporter._collect_lookat_attachments.
+    # DmxWriter._write_procedural_bones / PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
     lookat_pairs: set[tuple[str, tuple]] = set()
     if State.compiler != Compiler.MODELDOC:
