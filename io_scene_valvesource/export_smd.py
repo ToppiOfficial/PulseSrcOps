@@ -1262,6 +1262,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             armature=self.armature, armature_src=self.armature_src,
             exportable_bones=self.exportable_bones,
             exportable_boneNames=self.exportable_boneNames,
+            exportable_empties=self.exportable_empties,
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),

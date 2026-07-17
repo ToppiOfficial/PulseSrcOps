@@ -3,6 +3,7 @@ from mathutils import Vector, Matrix
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
+from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 from .records import BakeResult
 
@@ -14,7 +15,7 @@ from .records import BakeResult
 class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
-                 all_bake_results, flex_mode, flex_source):
+                 exportable_empties, all_bake_results, flex_mode, flex_source):
         self.r = reporter
         self.datablock = datablock
         self.bake_results = bake_results
@@ -24,6 +25,7 @@ class DmxWriter:
         self.armature_src = armature_src
         self.exportable_bones = exportable_bones
         self.exportable_boneNames = exportable_boneNames
+        self.exportable_empties = exportable_empties
         self.all_bake_results = all_bake_results
         self.flex_controller_mode = flex_mode
         self.flex_controller_source = flex_source
@@ -54,6 +56,9 @@ class DmxWriter:
         self.source2 = source2 = dm.format_ver >= 22
         self.export_bone_scale = source2
         self.keywords = getDmxKeywords(dm.format_ver)
+        # DME prefab mode (Source 1 only): embed jigglebones/hitboxes/procedural bones + keep
+        # attachments inside the model DMX instead of writing .qci prefabs.
+        self.dme_mode = (not source2) and prefab_mode_is_dme(bpy.context.scene)
 
         self.want_jointlist = dm.format_ver >= 11
         self.want_jointtransforms = dm.format_ver in range(0, 21)
@@ -100,6 +105,9 @@ class DmxWriter:
             self.armature_scale = self.armature.matrix_world.to_scale()
 
         self._build_skeleton(bench)
+        self._write_attachments(bench)
+        self._write_procedural_bones()
+        self._write_hitboxes(bench)
 
         combination_operator = self._setup_flex(bench)
         if combination_operator:
@@ -152,7 +160,14 @@ class DmxWriter:
             bone_name = bone.name
 
         bone_exportname = self.exportable_boneNames[bone.name] if bone else bone_name
-        self.bone_elements[bone_name] = bone_elem = dm.add_element(bone_exportname, "DmeJoint", id=bone_name)
+        # In DME mode a jigglebone is a skeleton joint of element type DmeJiggleBone
+        # (a DmeJoint subclass); the .vs props live on the data Bone (bone.bone).
+        data_bone = bone.bone if bone is not None else None
+        is_dme_jiggle = self.dme_mode and not self.is_anim and data_bone is not None and data_bone.vs.bone_is_jigglebone
+        bone_elem_type = "DmeJiggleBone" if is_dme_jiggle else "DmeJoint"
+        self.bone_elements[bone_name] = bone_elem = dm.add_element(bone_exportname, bone_elem_type, id=bone_name)
+        if is_dme_jiggle:
+            _jigglebone.write_dme_attrs(bone_elem, data_bone)
         if self.want_jointlist:
             self.jointList.append(bone_elem)
         self.bone_ids[bone_name] = len(self.bone_elements) - (0 if self.source2 else 1)
@@ -188,6 +203,180 @@ class DmxWriter:
                     children.extend(child_elems)
             bpy.context.window_manager.progress_update(len(self.bone_elements) / self.num_bones)
         return [bone_elem]
+
+    # -- attachments / procedural bones / hitboxes --------------------------
+    def _write_attach(self, name, relMat, boneelem):
+        dm = self.dm
+        dag = dm.add_element(name, "DmeDag", id=name)
+        att = dm.add_element(name, "DmeAttachment", id="attachment" + name)
+        att["visible"] = True
+        att["isRigid"] = True
+        att["isWorldAligned"] = False
+        dag["shape"] = att
+        dag["visible"] = True
+        dag["children"] = datamodel.make_array([], datamodel.Element)
+
+        if self.want_jointlist:
+            self.jointList.append(dag)
+
+        if "children" not in boneelem:
+            boneelem["children"] = datamodel.make_array([], datamodel.Element)
+
+        trfm = self._make_transform(name, relMat, name)
+        trfm_base = self._make_transform(name, relMat, "empty_base" + name)
+
+        self._scale_translation(trfm["position"], self.armature_scale)
+        trfm_base["position"] = trfm["position"]
+
+        dag["transform"] = trfm
+        self.DmeModel_transforms.append(trfm_base)
+        if self.want_jointtransforms:
+            self.jointTransforms.append(trfm)
+
+        boneelem["children"].append(dag)
+        return dag
+
+    def _write_attachment(self, empty, empty_matrix):
+        current_bone = self.armature.data.bones.get(empty.parent_bone)
+        exportable_parent = None
+        while current_bone:
+            if current_bone.name in self.exportable_boneNames:
+                exportable_parent = self.armature.pose.bones.get(current_bone.name)
+                break
+            current_bone = current_bone.parent
+
+        if not exportable_parent:
+            self._warning(f"Attachment '{empty.name}' has no exportable parent bone. Skipping.")
+            return None
+
+        pmat = get_bone_matrix(exportable_parent, rest_space=True)
+        relMat = pmat.inverted() @ empty_matrix
+        return self._write_attach(empty.name, relMat, self.bone_elements[exportable_parent.name])
+
+    def _write_attachments(self, bench):
+        # Source 2 (.vmdl) always embeds attachments; Source 1 embeds them only in DME mode.
+        embed_attachments = self.source2 or self.dme_mode
+        if embed_attachments and not self.is_anim and self.exportable_empties and self.armature:
+            for empty, world_matrix in self.exportable_empties:
+                self._write_attachment(empty, world_matrix)
+            bench.report("Empties")
+
+    def _write_procedural_bones(self):
+        if not (self.dme_mode and not self.is_anim and not self.source2 and self.armature and self.armature_src):
+            return
+        avs = getattr(self.armature_src.data, 'vs', None)
+        proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
+        bone_elements = self.bone_elements
+
+        # LOOKAT aim targets: non-zero offsets get a {base}_lookat[idx] DmeAttachment in the
+        # driver bone's local space; a zero offset aims the DmeAimAtBone at the driver joint
+        # directly. Naming/dedup mirror PrefabExporter so QCI and DME produce the same names.
+        lookat_by_driver: dict[str, list[tuple]] = {}
+        for entry in proc_bones_list:
+            if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
+                continue
+            dn = entry.driver_bone
+            if not dn or dn not in bone_elements:
+                continue
+            off = tuple(entry.lookat_offset)
+            if off == (0.0, 0.0, 0.0):
+                continue
+            lookat_by_driver.setdefault(dn, [])
+            if off not in lookat_by_driver[dn]:
+                lookat_by_driver[dn].append(off)
+
+        lookat_name_map: dict[tuple, str] = {}
+        for dn, offsets in lookat_by_driver.items():
+            db = self.armature_src.data.bones.get(dn)
+            if not db:
+                continue
+            attach_base = get_bone_exportname(db).split('.', 1)[-1]
+            multiple = len(offsets) > 1
+            for idx, off in enumerate(offsets, start=1):
+                attach_name = f"{attach_base}_lookat{idx}" if multiple else f"{attach_base}_lookat"
+                lookat_name_map[(dn, off)] = attach_name
+                self._write_attach(attach_name, Matrix.Translation(Vector(off)), bone_elements[dn])
+
+        # Promote each helper's joint to DmeQuatInterpBone (TRIGGER) or DmeAimAtBone (LOOKAT).
+        # On failure the element stays a plain DmeJoint. armature_src is used so the real
+        # drivers/constraints/action are live, matching the VRD path.
+        seen_helpers: set[str] = set()
+        for entry_idx, entry in enumerate(proc_bones_list):
+            helper_name = entry.helper_bone
+            if not helper_name or helper_name not in bone_elements:
+                continue
+            if helper_name in seen_helpers:
+                self._warning(get_id('exporter_warn_procbone_duplicate', True).format(helper_name))
+                continue
+            seen_helpers.add(helper_name)
+
+            data_bone = self.armature.data.bones.get(helper_name)
+            if data_bone is not None and data_bone.vs.bone_is_jigglebone:
+                self._warning(get_id('exporter_warn_procbone_jiggle_conflict', True).format(helper_name))
+                continue
+
+            helper_db = self.armature_src.data.bones.get(helper_name)
+            parent_db = helper_db.parent if helper_db else None
+            while parent_db and parent_db.name not in self.exportable_boneNames:
+                parent_db = parent_db.parent
+            parent_bname = parent_db.name if parent_db else entry.driver_bone
+
+            bone_elem = bone_elements[helper_name]
+            proc_type = getattr(entry, 'proc_type', 'TRIGGER')
+            if proc_type == 'TRIGGER':
+                control_bone = self.exportable_boneNames.get(entry.driver_bone) if entry.driver_bone else None
+                if _proceduralbone.write_dme_quatinterp_attrs(
+                        bone_elem, self.armature_src, entry, entry_idx,
+                        bpy.context.scene, control_bone, self.armature_scale, self._warning,
+                        parent_bname):
+                    bone_elem.type = "DmeQuatInterpBone"
+            else:
+                off = tuple(entry.lookat_offset)
+                aim_target = lookat_name_map.get((entry.driver_bone, off))
+                if aim_target is None:
+                    aim_target = self.exportable_boneNames.get(entry.driver_bone, entry.driver_bone) if entry.driver_bone else None
+                parent_control = self.exportable_boneNames.get(parent_bname, "")
+                if _proceduralbone.write_dme_aimat_attrs(
+                        bone_elem, self.armature_src, entry, aim_target,
+                        self.armature_scale, self._warning, parent_control, parent_bname):
+                    bone_elem.type = "DmeAimAtBone"
+
+    def _write_hitboxes(self, bench):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src):
+            return
+        dm = self.dm
+        arm_data = self.armature_src.data
+        havs = getattr(arm_data, 'vs', None)
+        hbox_entries = list(getattr(havs, 'hitboxes', [])) if havs else []
+        valid_hbox = [e for e in hbox_entries if e.bone_name and arm_data.bones.get(e.bone_name)]
+        hboxset_name = (getattr(havs, 'hboxset_name', '').strip() if havs else '') or 'default'
+
+        if not valid_hbox:
+            return
+
+        inverted = [e.bone_name for e in valid_hbox
+                    if e.scale <= 0.0 and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
+        if inverted:
+            self._warning(
+                f"Hitbox min/max are inverted on {len(inverted)} box hitbox(es): Source Engine "
+                f"will invert hit registration. Swap Min and Max for: {', '.join(inverted)}")
+
+        hbox_set_list = dm.add_element("hitboxSetList", "DmeHitboxSetList", id="hitboxSetList")
+        hbox_set_list["hitboxSetList"] = datamodel.make_array([], datamodel.Element)
+
+        hbox_set = dm.add_element(hboxset_name, "DmeHitboxSet", id="hitboxSet_" + hboxset_name)
+        hbox_set["hitboxList"] = datamodel.make_array([], datamodel.Element)
+        hbox_set_list["hitboxSetList"].append(hbox_set)
+
+        for hi, e in enumerate(valid_hbox):
+            bone = arm_data.bones[e.bone_name]
+            bone_export = self.exportable_boneNames.get(e.bone_name, get_bone_exportname(bone))
+            hb = dm.add_element(bone_export, "DmeHitbox", id=f"hitbox_{hboxset_name}_{hi}_{e.bone_name}")
+            _hitbox.write_dme_attrs(hb, e, bone_export)
+            hbox_set["hitboxList"].append(hb)
+
+        self.root["hitboxSetList"] = hbox_set_list
+        bench.report("Hitboxes")
 
     # -- flex controller setup ----------------------------------------------
     def _setup_flex(self, bench):
