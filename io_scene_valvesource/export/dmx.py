@@ -5,7 +5,7 @@ from ..utils import *
 from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
-from .records import BakeResult
+from .records import BakeResult, ExportTask
 
 
 # DmxWriter - Phase 1 of the export rewrite. Covers skeleton, mesh (Source 1 + Source 2
@@ -49,6 +49,7 @@ class DmxWriter:
         print("-", filepath)
         self.filepath = filepath
         self.materials = {}
+        self._written = 0
         self.is_anim = len(self.bake_results) == 1 and self.bake_results[0].object.type == "ARMATURE"
 
         dm = self.dm = datamodel.DataModel("model", State.datamodelFormat)
@@ -108,8 +109,11 @@ class DmxWriter:
         self._write_attachments(bench)
         self._write_procedural_bones()
         self._write_hitboxes(bench)
+        self._write_vca_bones()
 
         combination_operator = self._setup_flex(bench)
+        if not combination_operator and self.bake_results and self.bake_results[0].vertex_animations:
+            combination_operator = flex.DmxWriteFlexControllers.make_controllers(self.datablock).root["combinationOperator"]
         if combination_operator:
             root["combinationOperator"] = combination_operator
 
@@ -842,11 +846,11 @@ class DmxWriter:
         keywords = self.keywords
         delta_states = []
         corrective_shapes_seen = []
+        shape_names = []
         two_percent = int(len(bake.shapes) / 50)
         print("Shapes: ", debug_only=True, newline=False)
 
         if bake.shapes:
-            shape_names = []
             num_shapes = len(bake.shapes)
             num_correctives = num_wrinkles = 0
 
@@ -1033,6 +1037,8 @@ class DmxWriter:
             bench.report("shapes")
             print(f"- {num_shapes - num_correctives} flexes ({num_wrinkles} with wrinklemaps) + {num_correctives} correctives")
 
+        self._write_vca_deltas(ob, delta_states, bench)
+
         if delta_states:
             DmeMesh["deltaStates"] = datamodel.make_array(delta_states, datamodel.Element)
             DmeMesh["deltaStateWeights"] = DmeMesh["deltaStateWeightsLagged"] = datamodel.make_array(
@@ -1049,6 +1055,87 @@ class DmxWriter:
                         added = True
             if not added:
                 targets.append(DmeMesh)
+
+    # -- vertex animations (VCA) --------------------------------------------
+    def _write_vca_bones(self):
+        if not self.bake_results:
+            return
+        for vca in self.bake_results[0].vertex_animations:
+            self.DmeModel_children.extend(self._write_bone(f"vcabone_{vca}"))
+
+    def _write_vca_deltas(self, ob, delta_states, bench):
+        dm = self.dm
+        vca_matrix = ob.matrix_world.inverted()
+        for vca_name, vca in self.bake_results[0].vertex_animations.items():
+            frame_shapes = []
+            for i, vca_ob in enumerate(vca):
+                VDD = dm.add_element(f"{vca_name}-{i}", "DmeVertexDeltaData", id=ob.name + vca_name + str(i))
+                delta_states.append(VDD)
+                frame_shapes.append(VDD)
+                VDD["vertexFormat"] = datamodel.make_array(["positions", "normals"], str)
+
+                sp, spi, sn, sni = [], [], [], []
+                for sl in vca_ob.data.loops:
+                    sv = vca_ob.data.vertices[sl.vertex_index]
+                    ol = ob.data.loops[sl.index]
+                    ov = ob.data.vertices[ol.vertex_index]
+                    if ov.co != sv.co:
+                        delta = vca_matrix @ sv.co - ov.co
+                        if abs(delta.length) > 1e-5:
+                            sp.append(datamodel.Vector3(delta))
+                            spi.append(ov.index)
+                    norm = Vector(sl.normal)
+                    norm.rotate(vca_matrix)
+                    if abs(1.0 - norm.dot(ol.normal)) > epsilon[0]:
+                        sn.append(datamodel.Vector3(norm - ol.normal))
+                        sni.append(sl.index)
+
+                VDD["positions"] = datamodel.make_array(sp, datamodel.Vector3)
+                VDD["positionsIndices"] = datamodel.make_array(spi, int)
+                VDD["normals"] = datamodel.make_array(sn, datamodel.Vector3)
+                VDD["normalsIndices"] = datamodel.make_array(sni, int)
+
+                removeObject(vca_ob)
+                vca[i] = None
+
+            if vca.export_sequence:
+                vca_arm = bpy.data.objects.new("vca_arm", bpy.data.armatures.new("vca_arm"))
+                bpy.context.scene.collection.objects.link(vca_arm)
+                bpy.context.view_layer.objects.active = vca_arm
+                bpy.ops.object.mode_set(mode="EDIT")
+                vca_bone = vca_arm.data.edit_bones.new("vcabone_" + vca_name)
+                vca_bone.tail.y = 1
+                bpy.context.scene.frame_set(0)
+                mat = getUpAxisMat("y").inverted()
+                if self.armature_src:
+                    for bone in [b for b in self.armature_src.data.bones if b.parent is None]:
+                        b = vca_arm.data.edit_bones.new(bone.name)
+                        b.head = mat @ bone.head
+                        b.tail = mat @ bone.tail
+                else:
+                    for bk in self.bake_results:
+                        bm_mat = mat @ bk.object.matrix_world
+                        b = vca_arm.data.edit_bones.new(bk.name)
+                        b.head = bm_mat @ b.head
+                        b.tail = bm_mat @ Vector([0, 1, 0])
+
+                bpy.ops.object.mode_set(mode="POSE")
+                bpy.ops.pose.armature_apply()
+
+                fcurves = channelBagForNewActionSlot(vca_arm, vca_name).fcurves
+
+                for ax in range(2):
+                    fc = fcurves.new(f'pose.bones["vcabone_{vca_name}"].location', index=ax)
+                    fc.keyframe_points.add(count=2)
+                    for kp in fc.keyframe_points:
+                        kp.interpolation = "LINEAR"
+                    if ax == 0:
+                        fc.keyframe_points[0].co = (0, 1.0)
+                    fc.keyframe_points[1].co = (vca.num_frames, 1.0)
+                    fc.update()
+
+                self.r._execute_task(bpy.context, vca_arm, ExportTask(vca_arm, vca_arm.name), os.path.dirname(self.filepath), bench)
+                self._written += 1
 
     # -- animation -----------------------------------------------------------
     def _evaluated_pose_bones(self):
@@ -1158,7 +1245,6 @@ class DmxWriter:
 
     # -- write-out -----------------------------------------------------------
     def _write_out(self, bench) -> int:
-        written = 0
         bpy.context.window_manager.progress_update(0.99)
         print("- Writing DMX...")
         try:
@@ -1166,11 +1252,11 @@ class DmxWriter:
                 self.dm.write(self.filepath, "keyvalues2", 1)
             else:
                 self.dm.write(self.filepath, "binary", State.datamodelEncoding)
-            written += 1
+            self._written += 1
         except (PermissionError, FileNotFoundError) as err:
             self._error(get_id("exporter_err_open", True).format("DMX", err))
 
         bench.report("write")
         if bench.quiet:
             print("- DMX export took", bench.total(), "\n")
-        return written
+        return self._written
