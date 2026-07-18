@@ -96,8 +96,6 @@ hitbox_group = [
     ('8', 'Neck', 'Used for human neck (to fix penetration to head from behind), appears Orange in HLMV (In all games since CS:GO)'),
 ]
 
-kitsune_data_keys: list[str] = []
-
 class ExportFormat:
     SMD = 1
     DMX = 2
@@ -807,7 +805,8 @@ def make_export_list(scene: bpy.types.Scene):
     scene.vs.export_list.clear()
 
     def makeDisplayName(item, name=None):
-        return (name if name else item.name) + getFileExt()
+        base = name if name else item.name
+        return sanitize_string(base, allow_unicode=True) + getFileExt()
 
     if not State.exportableObjects:
         return
@@ -828,10 +827,11 @@ def make_export_list(scene: bpy.types.Scene):
             scene_groups.append(group)
 
     for g in scene_groups:
+        san_name = sanitize_string(g.name, allow_unicode=True)
         if g.vs.mute:
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_mute_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_mute_suffix", True)))
         elif is_bypassed_into_parent(g):
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_bypass_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_bypass_suffix", True)))
         else:
             label = makeDisplayName(g)
         pending.append((0, label, "COLLECTION", "GROUP", None, g))
@@ -851,18 +851,24 @@ def make_export_list(scene: bpy.types.Scene):
         i_name = i_type = i_icon = None
         if ob.type == 'ARMATURE':
             ad = ob.animation_data
-            if ad:
+            # No assigned action means nothing to export - keep it off the list.
+            if ad and ad.action:
                 i_icon = i_type = "ACTION_SLOT"
                 if ob.data.vs.action_selection != 'CURRENT':
                     export_slots = ob.data.vs.action_selection == 'FILTERED'
                     exportables_count = len(actionSlotsForFilter(ob) if export_slots else actionsForFilter(ob.vs.action_filter))
-                    if exportables_count > 0:
-                        if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
-                            i_name = get_id("exportables_arm_filter_result", True).format(ob.vs.action_filter, exportables_count)
-                        else:
-                            i_name = get_id("exportables_arm_no_slot_filter", True).format(exportables_count, ob.name)
+                    # Keep the row even when the filter matches nothing, otherwise the
+                    # armature vanishes from the list and the filter can't be recovered.
+                    if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
+                        i_name = get_id("exportables_arm_filter_result", True).format(ob.name, ob.vs.action_filter, exportables_count)
+                    else:
+                        i_name = get_id("exportables_arm_no_slot_filter", True).format(ob.name, exportables_count)
                 elif ad.action_slot:
                     i_name = makeDisplayName(ob, actionSlotExportName(ad))
+                else:
+                    # CURRENT mode with no active slot: keep the row so its action
+                    # settings stay reachable instead of the row disappearing.
+                    i_name = makeDisplayName(ob)
         else:
             i_name = makeDisplayName(ob)
             i_icon = MakeObjectIcon(ob, prefix="OUTLINER_OB_")
@@ -1330,8 +1336,10 @@ prefab_type_info = {
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs should be encoded into the model DMX (DME mode) rather than
     written to .qci files. DME embedding is a Source 1 concept only - it is always
-    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl."""
+    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl.
+    Embedding only happens in the DMX writer, so SMD export always uses file mode."""
     return (State.compiler != Compiler.MODELDOC
+            and State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
@@ -1858,16 +1866,17 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
     
     arm_prop = armature.data.vs
     
+    scene = bpy.context.scene
+    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
+
     if arm_prop.ignore_bone_exportnames and not for_write:
-        return bone.name
+        # Still sanitize: the Blender name may contain chars invalid for the compiler.
+        return sanitize_string(data_bone.name, force_modeldoc=force_s2)
 
     def get_bone_side(b: bpy.types.Bone) -> str:
         bone_x = b.matrix_local.to_translation().x
-        return (arm_prop.bone_direction_naming_right if bone_x < 0 
+        return (arm_prop.bone_direction_naming_right if bone_x < 0
                 else arm_prop.bone_direction_naming_left)
-
-    scene = bpy.context.scene
-    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
     prefix_shortcuts = get_prefix_shortcut_map()
 
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
@@ -1960,7 +1969,7 @@ def is_curve(ob : bpy.types.Object | None) -> bool:
     return ob is not None and ob.type == 'CURVE'
 
 
-KST_ATTACHMENT_COLL = "KST Attachment References"
+PULSE_ATTACHMENT_COLL = "Pulse Attachment References"
 
 
 def _find_layer_collection(layer_coll, name: str):
@@ -1973,13 +1982,13 @@ def _find_layer_collection(layer_coll, name: str):
     return None
 
 
-def ensure_kst_collection_at_top(scene, view_layer):
-    """Get (or create) the hidden KST attachment collection and move it to the
+def ensure_pulse_collection_at_top(scene, view_layer):
+    """Get (or create) the hidden Pulse attachment collection and move it to the
     very top of the outliner, above all other scene children."""
     scene_coll = scene.collection
-    coll = bpy.data.collections.get(KST_ATTACHMENT_COLL)
+    coll = bpy.data.collections.get(PULSE_ATTACHMENT_COLL)
     if coll is None:
-        coll = bpy.data.collections.new(KST_ATTACHMENT_COLL)
+        coll = bpy.data.collections.new(PULSE_ATTACHMENT_COLL)
 
     children = list(scene_coll.children)
     if not (children and children[0] == coll):
@@ -1993,7 +2002,7 @@ def ensure_kst_collection_at_top(scene, view_layer):
             scene_coll.children.link(c)
 
     coll.hide_render = True
-    lc = _find_layer_collection(view_layer.layer_collection, KST_ATTACHMENT_COLL)
+    lc = _find_layer_collection(view_layer.layer_collection, PULSE_ATTACHMENT_COLL)
     if lc:
         lc.exclude = True
 

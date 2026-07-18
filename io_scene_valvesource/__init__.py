@@ -185,13 +185,13 @@ _classes = (
     GUI.SMD_MT_ConfigureScene,
     GUI.SMD_UL_ExportItems,
     GUI.SMD_UL_GroupItems,
+    GUI.SMD_UL_ActionExport,
     GUI.SMD_PT_Exportables,
     GUI.SMD_PT_ViewportSimulation,
 
     # Properties
     GUI.SMD_PT_Armature,
     GUI.SMD_PT_ArmatureData,
-    GUI.SMD_PT_Action,
     GUI.SMD_PT_Bone,
     GUI.SMD_PT_BoneData,
     GUI.SMD_PT_Mesh,

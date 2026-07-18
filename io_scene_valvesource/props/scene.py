@@ -3,7 +3,7 @@ __all__ = ['ValveSource_Exportable', 'ValveSource_SceneProps']
 import bpy
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
                        CollectionProperty, FloatProperty, PointerProperty)
-from ..utils import (get_id, State, axes, axes_forward, dmx_versions_source1,
+from ..utils import (get_id, State, Compiler, axes, axes_forward, dmx_versions_source1,
                      dmx_versions_source2, get_active_exportable)
 from .. import datamodel, procbones_sim as _procbones_sim
 
@@ -17,6 +17,52 @@ formats = []
 for _version in set(x for x in [*dmx_versions_source1.values(), *dmx_versions_source2.values()] if x.format != 0):
     formats.append((_version.format_enum, _version.format_title, ''))
 formats.sort(key=lambda f: f[0])
+
+# Canonical model format for each binary encoding, to steer confused users away from
+# invalid encoding/format combos. ASCII (kv2) works with any format, so it's omitted.
+_encoding_to_format = {'1': '1', '2': '1', '3': '15', '4': '15', '5': '18', '9': '22'}
+# Default binary encoding for each model format (highest binary of each pair).
+_format_to_encoding = {'1': '2', '15': '4', '18': '5', '22': '9', '22_modeldoc': '9'}
+
+
+# Cached so the strings we return stay referenced (dynamic enum items must not be
+# garbage-collected while Blender holds them).
+_prefab_export_mode_items_cache = []
+
+def _prefab_export_mode_items(self, context):
+    # Label the FILE option after the format it actually writes: .vmdl for ModelDoc,
+    # .qc(i) for Source 1.
+    file_label = "VMDL" if State.compiler == Compiler.MODELDOC else "QC"
+    global _prefab_export_mode_items_cache
+    _prefab_export_mode_items_cache = [
+        ('QCI', file_label, get_id("prefab_export_mode_qci_tip"), 0),
+        ('DME', "DME", get_id("prefab_export_mode_dme_tip"), 1),
+    ]
+    return _prefab_export_mode_items_cache
+
+
+def on_dmx_encoding_changed(self, context):
+    target = _encoding_to_format.get(self.dmx_encoding)
+    if target is None:
+        return  # ASCII: any format allowed
+    # Binary 9 covers both Model 22 and Model 22 (ModelDoc); keep whichever is set.
+    if self.dmx_encoding == '9' and self.dmx_format in ('22', '22_modeldoc'):
+        return
+    if self.dmx_format != target:
+        self.dmx_format = target
+
+
+def on_dmx_format_changed(self, context):
+    enc = self.dmx_encoding
+    if enc == 'kv2':
+        return  # ASCII works with any format, so don't disturb it
+    # Leave the encoding alone if it's already valid for this model (e.g. binary 3
+    # and 4 both map to Model 15), so we don't fight the user's encoding choice.
+    if _encoding_to_format.get(enc) == self.dmx_format.split('_')[0]:
+        return
+    target = _format_to_encoding.get(self.dmx_format)
+    if target and enc != target:
+        self.dmx_encoding = target
 
 
 def export_active_changed(self, context):
@@ -100,8 +146,8 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     export_path : StringProperty(name=get_id("exportroot"), description=get_id("exportroot_tip"), subtype='DIR_PATH', options={'PATH_SUPPORTS_BLEND_RELATIVE'})
     engine_path : StringProperty(name=get_id("engine_path"), description=get_id("engine_path_tip"), subtype='DIR_PATH', update=State.onEnginePathChanged)
 
-    dmx_encoding : EnumProperty(name=get_id("dmx_encoding"), description=get_id("dmx_encoding_tip"), items=tuple(encodings), default='2')
-    dmx_format : EnumProperty(name=get_id("dmx_format"), description=get_id("dmx_format_tip"), items=tuple(formats), default='1')
+    dmx_encoding : EnumProperty(name=get_id("dmx_encoding"), description=get_id("dmx_encoding_tip"), items=tuple(encodings), default='2', update=on_dmx_encoding_changed)
+    dmx_format : EnumProperty(name=get_id("dmx_format"), description=get_id("dmx_format_tip"), items=tuple(formats), default='1', update=on_dmx_format_changed)
 
     smd_format : EnumProperty(name=get_id("smd_format"), description=get_id("smd_format_tip"), items=(('SOURCE', "Source", "Source Engine (Half-Life 2)"), ("GOLDSOURCE", "GoldSrc", "GoldSrc engine (Half-Life 1)")), default="SOURCE")
 
@@ -109,7 +155,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     up_axis : EnumProperty(name=get_id("up_axis"), items=axes, default='Z', description=get_id("up_axis_tip"))
     up_axis_offset : FloatProperty(name=get_id("up_axis_offset"), description=get_id("up_axis_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     forward_axis : EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("up_axis_tip"))
-    world_scale : FloatProperty(name=get_id("world_scale"), description=get_id("world_scale_tip"), default=1.00, precision=3, min=0.0001)
+    world_scale : FloatProperty(name=get_id("world_scale"), description=get_id("world_scale_tip"), default=1.00, precision=4, min=0.0001)
     material_path : StringProperty(name=get_id("dmx_mat_path"), description=get_id("dmx_mat_path_tip"))
     export_list_active : IntProperty(name=get_id("active_exportable"), default=0, min=0, update=export_active_changed)
     export_list : CollectionProperty(type=ValveSource_Exportable, options={'SKIP_SAVE', 'HIDDEN'})
@@ -123,7 +169,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     force_source2_bone_sanitize : BoolProperty(name=get_id("force_source2_bone_sanitize"), description=get_id("force_source2_bone_sanitize_tip"), default=False)
 
     prefab_to_clipboard : BoolProperty(name=get_id("prefab_to_clipboard"), description=get_id("prefab_to_clipboard_tip"), default=False)
-    prefab_export_mode : EnumProperty(name=get_id("prefab_export_mode"), description=get_id("prefab_export_mode_tip"), items=[('QCI', "FILE", get_id("prefab_export_mode_qci_tip")), ('DME', "DME", get_id("prefab_export_mode_dme_tip"))], default='QCI')
+    prefab_export_mode : EnumProperty(name=get_id("prefab_export_mode"), description=get_id("prefab_export_mode_tip"), items=_prefab_export_mode_items)
 
     preview_export_pose : BoolProperty(name=get_id('prop_preview_export_pose'), description=get_id('prop_preview_export_pose_tip'), default=True)
     preview_jigglebone_constraints : BoolProperty(name=get_id('prop_preview_jigglebone_constraints'), description=get_id('prop_preview_jigglebone_constraints_tip'), default=True)

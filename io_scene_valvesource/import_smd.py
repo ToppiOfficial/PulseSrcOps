@@ -28,7 +28,7 @@ from typing import cast
 from .utils import *
 from . import datamodel, ordered_set, flex, keyvalues3
 
-from .utils import KST_ATTACHMENT_COLL as _KST_ATTACHMENT_COLL, ensure_kst_collection_at_top as _ensure_kst_collection_at_top
+from .utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 
 
 # QC flex type keywords that map directly onto a real flexgroup enum option. Anything not
@@ -310,8 +310,8 @@ class SmdImporter(bpy.types.Operator, Logger):
         self.append = pre_append
 
         State.update_scene(context.scene)
-        if bpy.data.collections.get(_KST_ATTACHMENT_COLL):
-            _ensure_kst_collection_at_top(context.scene, context.view_layer)
+        if bpy.data.collections.get(_PULSE_ATTACHMENT_COLL):
+            _ensure_pulse_collection_at_top(context.scene, context.view_layer)
         return {'FINISHED'}
 
     def invoke(self, context, event):

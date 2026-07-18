@@ -210,6 +210,7 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     reset_pose_per_anim : BoolProperty(name=get_id('prop_reset_pose_per_anim'), description=get_id('prop_reset_pose_per_anim_tip'), default=True)
 
     action_selection : EnumProperty(name=get_id("action_selection_mode"), items=arm_modes, description=get_id("action_selection_mode_tip"), default='FILTERED')
+    action_preview_index : IntProperty(default=-1)
 
     hitboxes       : CollectionProperty(type=HitboxEntry)
     hitboxes_index : IntProperty(default=-1, update=_on_hitboxes_index_changed)

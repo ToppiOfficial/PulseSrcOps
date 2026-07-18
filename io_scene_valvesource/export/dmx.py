@@ -1046,12 +1046,18 @@ class DmxWriter:
             if not combination_operator:
                 raise RuntimeError("Internal error: shapes exist but no DmeCombinationOperator was created.")
             targets = combination_operator["targets"]
+            # match on any rule, not just the first - localvar declarations sort ahead of
+            # the expression rules and never name a delta. Each rule set drives one mesh,
+            # so an already-claimed set must not be stolen: every mesh has to end up either
+            # as some rule set's target or as a target in its own right.
             added = False
             for elem in targets:
-                if elem.type == "DmeFlexRules":
-                    if elem["deltaStates"][0].name in shape_names:
-                        elem["target"] = DmeMesh
-                        added = True
+                if elem.type != "DmeFlexRules" or "target" in elem:
+                    continue
+                if any(d.name in shape_names for d in elem["deltaStates"]):
+                    elem["target"] = DmeMesh
+                    added = True
+                    break
             if not added:
                 targets.append(DmeMesh)
 

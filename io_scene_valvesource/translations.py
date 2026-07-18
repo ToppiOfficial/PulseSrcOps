@@ -6,6 +6,18 @@ _data = {
         'en': "Action Filter",
         'ja': "アクションフィルター",
     },
+    'action_preview_actions': {
+        'en': "Actions to export:",
+        'ja': "エクスポートするアクション：",
+    },
+    'action_preview_none_slots': {
+        'en': "No animation data on this armature",
+        'ja': "このアーマチュアにアニメーションデータがありません",
+    },
+    'action_preview_slots': {
+        'en': "Action slots to export:",
+        'ja': "エクスポートするアクションスロット：",
+    },
     'action_selection_filter_tip': {
         'en': "All actions that match the armature's filter term and have users",
         'ja': "アーマチュアのフィルターに一致するすべてのアクション",
@@ -171,12 +183,12 @@ _data = {
         'ja': "Source Engine (.smd, .vta, .dmx)",
     },
     'exportables_arm_filter_result': {
-        'en': "\"{0}\" actions ({1})",
-        'ja': "「{0}」アクション ({1})",
+        'en': "{0}: \"{1}\" actions ({2})",
+        'ja': "{0}: 「{1}」アクション ({2})",
     },
     'exportables_arm_no_slot_filter': {
-        'en': "All action slots ({0}) for \"{1}\"",
-        'ja': "「{1}」のすべてのアクションスロット（{0}）",
+        'en': "{0}: All action slots ({1})",
+        'ja': "{0}: すべてのアクションスロット（{1}）",
     },
     'exportables_flex_count': {
         'en': "Shapes: {0}",
@@ -1355,8 +1367,8 @@ _data = {
         'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (KitsuneMDL)",
-        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (KitsuneMDL) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (PulseMDL)",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (PulseMDL) が必要です",
     },
     'bone_naming_label': {
         'en': "Bone Naming",

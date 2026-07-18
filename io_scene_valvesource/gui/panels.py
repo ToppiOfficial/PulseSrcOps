@@ -245,6 +245,31 @@ class SMD_PT_Exportables(Panel):
                                          armvs, "proc_bones_index", rows=3)
             return
 
+        if item is not None and not self.is_collection(item) and not (active_exportable and active_exportable.is_prefab) and is_armature(item):
+            avs = item.data.vs
+            box = layout.box()
+            col = box.column()
+            col.row().prop(avs, "action_selection", expand=True)
+            if avs.action_selection != 'CURRENT':
+                is_slot_filter = avs.action_selection == 'FILTERED'
+                col.prop(item.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
+                col.prop(avs, "reset_pose_per_anim")
+
+                col.separator(factor=0.5)
+                col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
+                          icon='ACTION')
+                if is_slot_filter:
+                    ad = item.animation_data
+                    if ad:
+                        col.template_list("SMD_UL_ActionExport", "", ad, "action_suitable_slots",
+                                          avs, "action_preview_index", rows=3, maxrows=6)
+                    else:
+                        col.label(text=get_id("action_preview_none_slots"), icon='INFO')
+                else:
+                    col.template_list("SMD_UL_ActionExport", "", bpy.data, "actions",
+                                      avs, "action_preview_index", rows=3, maxrows=6)
+            return
+
         if not item or not self.is_collection(item): return
 
         vs = item.vs
@@ -313,32 +338,6 @@ class SMD_PT_ArmatureData(Properties_Panel):
         row.prop(active_armature.data.vs, 'bone_direction_naming_right', text='Right')
 
         box.prop(active_armature.data.vs, 'bone_name_startcount', slider=True)
-
-
-class SMD_PT_Action(Properties_Panel):
-    bl_label = ''
-    bl_parent_id = 'SMD_PT_Armature'
-
-    @classmethod
-    def poll(cls, context):
-        return is_armature(get_armature(context.object))
-
-    def draw_header(self, context):
-        active_object = get_armature(context.object)
-        label = '{} ({})'.format(pgettext("Action"), active_object.name) if active_object else pgettext("Action")
-        self.layout.label(text=label, icon='ACTION')
-
-    def draw(self, context):
-        layout = self.layout
-        active_object = get_armature(context.object)
-
-        box = layout.box()
-        col = box.column()
-        col.row().prop(active_object.data.vs, "action_selection", expand=True)
-        if active_object.data.vs.action_selection != 'CURRENT':
-            is_slot_filter = active_object.data.vs.action_selection == 'FILTERED'
-            col.prop(active_object.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
-            col.prop(active_object.data.vs, "reset_pose_per_anim")
 
 
 class SMD_PT_Hitboxes(Properties_Panel):

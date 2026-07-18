@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
-from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, validate_flex_expression, validate_corrective_components, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_delta_override_conflicts, get_dme_renamed_delta_names, get_dme_split_delta_conflicts, is_bypassed_into_parent
+from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, validate_flex_expression, validate_corrective_components, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_delta_override_conflicts, get_dme_renamed_delta_names, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable
 
 
 class SMD_UL_ExportItems(UIList):
@@ -98,6 +98,35 @@ class SMD_UL_GroupItems(UIList):
         else:
             order = []
         return flt, order
+
+
+class SMD_UL_ActionExport(UIList):
+    # Read-only preview of the action slots (FILTERED) or actions (FILTERED_ACTIONS)
+    # that the active armature's glob filter will export. Bound directly to
+    # animation_data.action_suitable_slots / bpy.data.actions; filter_items applies
+    # the same fnmatch used by the exporter so only exported entries are shown.
+    def draw_item(self, context, layout, data, item, icon, active_data, active_property, index, flt_flag):
+        row = layout.row(align=True)
+        if hasattr(item, 'name_display'):  # ActionSlot
+            row.label(text=item.name_display, icon='ACTION')
+        else:  # Action
+            row.label(text=item.name, icon='ACTION')
+
+    def filter_items(self, context, data, propname):
+        from fnmatch import fnmatch
+        items = getattr(data, propname)
+        ae = get_active_exportable(context)
+        arm = ae.item if ae else None
+        filt = arm.vs.action_filter if arm else ""
+
+        flags = []
+        for it in items:
+            if hasattr(it, 'name_display'):  # slot
+                ok = (not filt) or fnmatch(it.name_display, filt)
+            else:  # action - mirror actionsForFilter: must have users
+                ok = bool(it.users) and ((not filt) or fnmatch(it.name, filt))
+            flags.append(self.bitflag_filter_item if ok else 0)
+        return flags, []
 
 
 class SMD_UL_DmeFlexControllers(UIList):
