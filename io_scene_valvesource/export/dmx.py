@@ -124,13 +124,12 @@ class DmxWriter:
         return self._write_out(bench)
 
     # -- transforms ----------------------------------------------------------
-    def _make_transform(self, name, matrix, object_name):
+    def _make_transform(self, name, matrix, object_name, scale_divisor=None):
         trfm = self.dm.add_element(name, "DmeTransform", id=object_name + "transform")
         trfm["position"] = datamodel.Vector3(matrix.to_translation())
         trfm["orientation"] = getDatamodelQuat(matrix.to_quaternion())
         if self.export_bone_scale:
-            s = matrix.to_scale()
-            trfm["scale"] = (s.x + s.y + s.z) / 3.0
+            trfm["scale"] = getDatamodelScale(matrix, scale_divisor)
         return trfm
 
     # -- skeleton ------------------------------------------------------------
@@ -175,6 +174,11 @@ class DmxWriter:
             self.jointList.append(bone_elem)
         self.bone_ids[bone_name] = len(self.bone_elements) - (0 if self.source2 else 1)
 
+        # A root bone's matrix comes from matrix_world, so it carries the armature object's
+        # scale. Its position needs that (children get it via armature_scale below), but the
+        # transform scale must not repeat it - Source 2 would apply it a second time and blow
+        # the model up by the armature's scale factor.
+        scale_divisor = None
         if not bone:
             relMat = Matrix()
         else:
@@ -185,10 +189,11 @@ class DmxWriter:
                 relMat = get_bone_matrix(cur_p, rest_space=True).inverted() @ bone.matrix
             else:
                 relMat = self.armature.matrix_world @ bone.matrix
+                scale_divisor = self.armature_scale
 
         relMat = get_bone_matrix(relMat, bone, rest_space=True)
-        trfm = self._make_transform(bone_exportname, relMat, "bone" + bone_name)
-        trfm_base = self._make_transform(bone_exportname, relMat, "bone_base" + bone_name)
+        trfm = self._make_transform(bone_exportname, relMat, "bone" + bone_name, scale_divisor)
+        trfm_base = self._make_transform(bone_exportname, relMat, "bone_base" + bone_name, scale_divisor)
 
         if bone and bone.parent:
             self._scale_translation(trfm["position"], self.armature_scale)
@@ -872,15 +877,8 @@ class DmxWriter:
                     corrective = shape_name in dme_corrective_names
                     if corrective:
                         num_correctives += 1
-                    elif shape_name in dme_split_map:
-                        _split_base = dme_split_map[shape_name]
-                        shape_name = _split_base + "L"
-                    elif '+' in shape_name:
-                        parts = [dme_delta_map.get(c.strip(), sanitize_string_for_delta(c.strip())) for c in shape_name.split('+') if c.strip()]
-                        shape_name = parts[0]
-                        _extra_delta_names = parts[1:]
-                    else:
-                        shape_name = dme_delta_map.get(shape_name, sanitize_string_for_delta(shape_name))
+                    shape_name, _extra_delta_names, _split_base = resolve_dme_delta_names(
+                        shape_name, dme_corrective_names, dme_delta_map, dme_split_map)
                 else:
                     corrective = getCorrectiveShapeSeparator() in shape_name
 
@@ -1224,10 +1222,12 @@ class DmxWriter:
                 cur_p = bone.parent
                 while cur_p and cur_p not in evaluated:
                     cur_p = cur_p.parent
+                scale_divisor = None
                 if cur_p:
                     relMat = get_bone_matrix(cur_p).inverted() @ bone.matrix
                 else:
                     relMat = self.armature.matrix_world @ bone.matrix
+                    scale_divisor = self.armature_scale
                 relMat = get_bone_matrix(relMat, bone)
 
                 pos = relMat.to_translation()
@@ -1239,9 +1239,8 @@ class DmxWriter:
                 channel[1]["times"].append(keyframe_time)
                 channel[1]["values"].append(getDatamodelQuat(relMat.to_quaternion()))
                 if self.export_bone_scale:
-                    s = relMat.to_scale()
                     channel[2]["times"].append(keyframe_time)
-                    channel[2]["values"].append((s.x + s.y + s.z) / 3.0)
+                    channel[2]["values"].append(getDatamodelScale(relMat, scale_divisor))
 
             if two_percent and frame % two_percent:
                 print(".", debug_only=True, newline=False)

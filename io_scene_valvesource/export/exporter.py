@@ -114,6 +114,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 if self.export_scene:
                     self._auto_export_prefabs_scene(context, export_ids)
                 self.errorReport(get_id("exporter_report", True).format(self.files_exported, self.elapsed_time()))
+            else:
+                self.errorReport(get_id("exporter_report_aborted", True).format(self.files_exported, self.elapsed_time()))
 
         finally:
             ops.ed.undo_push(message=self.bl_label)

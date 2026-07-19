@@ -359,6 +359,25 @@ def smdContinue(line):
 def getDatamodelQuat(blender_quat):
     return datamodel.Quaternion([blender_quat[1], blender_quat[2], blender_quat[3], blender_quat[0]])
 
+# Decimal places bone scale is rounded to. Enough to collapse matrix-decomposition noise
+# (0.9999999999999998, 1.0000000794728596) without touching a genuinely small scale.
+DATAMODEL_SCALE_PRECISION = 6
+
+def getDatamodelScale(matrix, divisor=None):  # THIS IS ABSOLUTE BS!
+    """Average a matrix's decomposed scale into the single uniform float DmeTransform wants.
+
+    divisor cancels a scale that is already accounted for elsewhere - a root bone's matrix
+    carries the armature object's scale, which is baked into positions and must not be
+    written again as a transform scale."""
+    s = matrix.to_scale()
+    comps = [s.x, s.y, s.z]
+    if divisor and all(divisor):
+        comps = [c / d for c, d in zip(comps, divisor)]
+    avg = sum(comps) / 3.0
+    rounded = round(avg, DATAMODEL_SCALE_PRECISION)
+    # never let a small-but-real scale round away to zero - that collapses the mesh
+    return rounded if rounded != 0.0 or avg == 0.0 else avg
+
 def getEngineBranch() -> dmx_version | None:
     if not bpy.context.scene.vs.engine_path: return None
     path = os.path.abspath(bpy.path.abspath(bpy.context.scene.vs.engine_path))
@@ -1608,6 +1627,49 @@ def get_dme_split_delta_map(ob) -> dict:
     return result
 
 
+def resolve_dme_delta_names(shape_name: str, corrective_names, delta_map: dict, split_map: dict):
+    """Resolve a shape key name to the delta names DME export emits for it.
+
+    Returns (primary, extras, split_base). When split_base is set the exporter emits
+    '<base>L' (the primary) and '<base>R'. Sole source of truth for DME delta naming:
+    used by the DMX writer and by export validation, so the two cannot drift."""
+    if shape_name in corrective_names:
+        return shape_name, [], None
+    if shape_name in split_map:
+        base = split_map[shape_name]
+        return base + "L", [], base
+    if '+' in shape_name:
+        parts = [delta_map.get(c.strip(), sanitize_string_for_delta(c.strip())) for c in shape_name.split('+') if c.strip()]
+        if parts:
+            return parts[0], parts[1:], None
+    return delta_map.get(shape_name, sanitize_string_for_delta(shape_name)), [], None
+
+
+def get_dme_delta_name_collisions(ob) -> dict:
+    """Return {delta_name: [shapekey, ...]} for delta names claimed by more than one shape key.
+
+    Sanitization and delta overrides can merge distinct shape keys onto one delta name,
+    which would otherwise surface as an opaque ID collision inside the DMX writer."""
+    sk = ob.data.shape_keys if ob.data and hasattr(ob.data, 'shape_keys') else None
+    if not sk:
+        return {}
+
+    corrective_names = get_dme_corrective_delta_names(ob)
+    delta_map = get_dme_delta_name_map(ob)
+    split_map = get_dme_split_delta_map(ob)
+
+    owners = {}
+    for kb in sk.key_blocks[1:]:
+        primary, extras, split_base = resolve_dme_delta_names(kb.name, corrective_names, delta_map, split_map)
+        names = [primary] + extras
+        if split_base:
+            names.append(split_base + "R")
+        for name in names:
+            owners.setdefault(name, []).append(kb.name)
+
+    return {name: keys for name, keys in owners.items() if len(keys) > 1}
+
+
 def get_dme_split_delta_conflicts(ob) -> set:
     """Return indices of dme_delta_overrides that request split_lr but whose shape key is
     assigned to a flex controller (so the split cannot be performed)."""
@@ -1824,6 +1886,10 @@ def validate_dme_flex_for_export(ob) -> list:
                 errors.append(get_id('exporter_err_dme_domination_no_dominators', True).format(ob.name))
             if not rule.suppressed_names.strip():
                 errors.append(get_id('exporter_err_dme_domination_no_suppressed', True).format(ob.name))
+
+    for delta_name, keys in get_dme_delta_name_collisions(ob).items():
+        errors.append(get_id('exporter_err_dme_delta_collision', True).format(
+            ob.name, delta_name, ", ".join("'{}'".format(k) for k in keys)))
 
     return errors
 

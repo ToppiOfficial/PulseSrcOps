@@ -268,6 +268,9 @@ _data = {
     'exporter_err_dme_corrective_unknown_component': {
         'en': "'{0}': CORRECTIVE component '{1}' is not a known shape key",
     },
+    'exporter_err_dme_delta_collision': {
+        'en': "'{0}': shape keys {2} all export as delta '{1}'. Delta names must be unique - rename a key or set a distinct delta name override.",
+    },
     'exporter_err_dme_domination_no_dominators': {
         'en': "'{0}': DOMINATION rule has no dominators",
     },
@@ -393,6 +396,9 @@ _data = {
     'exporter_prop_scene_tip': {
         'en': "Export all items selected in the Source Engine Exportables panel",
         'ja': "Source Engine Exportablesパネルで選択されたすべてのアイテムをエクスポート",
+    },
+    'exporter_report_aborted': {
+        'en': "Export aborted after {0} files ({1} seconds)",
     },
     'exporter_report': {
         'en': "{0} files exported in {1} seconds",
