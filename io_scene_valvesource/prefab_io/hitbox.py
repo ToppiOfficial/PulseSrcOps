@@ -98,6 +98,27 @@ def import_hitboxes_from_dmx_root(dm_root, armature: 'object') -> 'tuple[int, in
 # QC text ($hbox)
 # -----------------------------------------------------------------------------
 
+def parse_hitbox_line(line: str):
+    """Parse a $hbox line. Returns dict with group, bone, min, max, rotation (degrees), scale or None."""
+    import re
+    pattern = (r'\$hbox\s+(\d+)\s+"([^"]+)"\s+'
+               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+'
+               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
+               r'(?:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+))?'
+               r'(?:\s+([-\d.]+))?')
+    match = re.match(pattern, line.strip())
+    if not match:
+        return None
+    g = match.groups()
+    return {
+        'group':    int(g[0]),
+        'bone':     g[1],
+        'min':      Vector((float(g[2]), float(g[3]), float(g[4]))),
+        'max':      Vector((float(g[5]), float(g[6]), float(g[7]))),
+        'rotation': (float(g[8] or 0), float(g[9] or 0), float(g[10] or 0)),
+        'scale':    float(g[11]) if g[11] is not None else -1.0,
+    }
+
 def qc_line(entry, bone_export: str) -> str:
     """Return one ``$hbox`` line. Inverse of ``import_hitboxes_from_content``."""
     grp = _group_id(entry.group)
@@ -121,7 +142,7 @@ def import_hitboxes_from_content(content: str, armature: 'object', context, crea
     parsed = []
     for line in content.split('\n'):
         if line.strip().lower().startswith('$hbox'):
-            data = utils.parse_hitbox_line(line)
+            data = parse_hitbox_line(line)
             if data:
                 parsed.append(data)
 

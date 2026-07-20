@@ -1210,33 +1210,6 @@ def parse_order_vg_name(name: str) -> int | None:
     return n
 
 #
-#   IMPORT
-#
-
-
-def parse_hitbox_line(line: str):
-    """Parse a $hbox line. Returns dict with group, bone, min, max, rotation (degrees), scale or None."""
-    import re
-    pattern = (r'\$hbox\s+(\d+)\s+"([^"]+)"\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
-               r'(?:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+))?'
-               r'(?:\s+([-\d.]+))?')
-    match = re.match(pattern, line.strip())
-    if not match:
-        return None
-    g = match.groups()
-    return {
-        'group':    int(g[0]),
-        'bone':     g[1],
-        'min':      mathutils.Vector((float(g[2]), float(g[3]), float(g[4]))),
-        'max':      mathutils.Vector((float(g[5]), float(g[6]), float(g[7]))),
-        'rotation': (float(g[8] or 0), float(g[9] or 0), float(g[10] or 0)),
-        'scale':    float(g[11]) if g[11] is not None else -1.0,
-    }
-
-
-#
 #   GET
 #
 
@@ -1281,56 +1254,6 @@ def get_attachments(ob : bpy.types.Object | None) -> list[bpy.types.Object | Non
         attchs.append(ob)
         
     return attchs
-
-# I forgot what I even made this for??? Unused function
-#def get_collision_cloth_bone_uses(arm_ob: bpy.types.Object, weight_threshold: float) -> set[str]:
-#    """Return names of bones that have at least one vertex with weight > weight_threshold
-#    in any COLLISION or CLOTHPROXY mesh associated with arm_ob (via Armature modifier
-#    or direct parenting).  Uses the evaluated (post-modifier) mesh so Mirror and other
-#    modifiers that affect vertex group assignments are respected."""
-#    result: set[str] = set()
-#    bone_names = {b.name for b in arm_ob.data.bones}
-#
-#    try:
-#        depsgraph = bpy.context.evaluated_depsgraph_get()
-#    except Exception:
-#        depsgraph = None
-#
-#    for obj in bpy.data.objects:
-#        if obj.type != 'MESH':
-#            continue
-#        if getattr(getattr(obj, 'vs', None), 'mesh_type', 'DEFAULT') not in ('COLLISION', 'CLOTHPROXY'):
-#            continue
-#        associated = obj.parent is arm_ob
-#        if not associated:
-#            for mod in obj.modifiers:
-#                if mod.type == 'ARMATURE' and mod.object is arm_ob:
-#                    associated = True
-#                    break
-#        if not associated:
-#            continue
-#
-#        eval_obj = obj.evaluated_get(depsgraph) if depsgraph is not None else None
-#        mesh_data = eval_obj.to_mesh() if eval_obj is not None else obj.data
-#        vg_source = eval_obj if eval_obj is not None else obj
-#
-#        try:
-#            vg_to_bone = {
-#                vg.index: vg.name
-#                for vg in vg_source.vertex_groups
-#                if vg.name in bone_names
-#            }
-#            if not vg_to_bone:
-#                continue
-#            for vert in mesh_data.vertices:
-#                for ge in vert.groups:
-#                    if ge.group in vg_to_bone and ge.weight > weight_threshold:
-#                        result.add(vg_to_bone[ge.group])
-#        finally:
-#            if eval_obj is not None:
-#                eval_obj.to_mesh_clear()
-#
-#    return result
 
 
 # Display metadata for each prefab type: (icon, singular label). The default
