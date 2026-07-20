@@ -452,8 +452,8 @@ def build_smd_skeleton(ctx, smd, nodes) -> None:
     if bone_parents:
         print(f"- Imported {len(bone_parents)} new bones")
 
-    if len(smd.a.data.bones) > 128:
-        ctx.warning(get_id("importer_err_bonelimit_smd"))
+    # No bone-count warning here: 128 is an SMD *export* limit, and the exporter already
+    # reports it with the real count. Warning per imported file just spams a QC import.
 
 
 def apply_rest_pose(ctx, smd, bone_matrices: dict) -> None:

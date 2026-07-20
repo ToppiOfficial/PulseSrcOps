@@ -672,10 +672,6 @@ _data = {
         'en': "{0} vertices weighted to invalid bones on {1}",
         'ja': "{1}の{0}頂点が無効なボーンにウェイト付けされています",
     },
-    'importer_err_bonelimit_smd': {
-        'en': "SMD only supports 128 bones!",
-        'ja': "SMDは128ボーンまでしかサポートしていません",
-    },
     'importer_err_missingbones': {
         'en': "{0} contains {1} bones not present in {2}. Check the console for a list.",
         'ja': "{0}に{2}にないボーンが{1}個含まれています。詳細はコンソールを確認",
