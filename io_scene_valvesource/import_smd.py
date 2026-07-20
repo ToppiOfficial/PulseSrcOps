@@ -141,6 +141,25 @@ class ImporterBase(bpy.types.Operator, Logger):
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+        for prop in ("createCollections", "append", "upAxis", "rotMode", "boneMode"):
+            layout.prop(self.properties, prop)
+        self.draw_options(layout)
+
+    def draw_options(self, layout) -> None:
+        """Format-specific controls, drawn under the shared ones."""
+
+    def draw_prefab_data(self, layout) -> None:
+        """Stacked, not the default expanded row - three horizontal toggles get their
+        labels truncated to 'Jiggl.../Hitb.../Proc...' in the file browser sidebar."""
+        col = layout.column(align=True)
+        col.use_property_split = False
+        col.label(text=get_id("importer_prefabdata"))
+        col.prop(self.properties, "prefabData", expand=True)
+
     def read_file(self, filepath: str) -> int | None:
         raise NotImplementedError
 
@@ -1785,6 +1804,10 @@ class SmdImporter(ImporterBase):
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
     makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
 
+    def draw_options(self, layout) -> None:
+        layout.prop(self.properties, "doAnim")
+        layout.prop(self.properties, "makeCamera")
+
     def read_file(self, filepath: str) -> int | None:
         filepath_lc = filepath.lower()
         if filepath_lc.endswith(('.qc', '.qci', '.vmdl', '.vmdl_prefab')):
@@ -1839,6 +1862,11 @@ class ImportQC(ImporterBase):
         default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
     )
 
+    def draw_options(self, layout) -> None:
+        layout.prop(self.properties, "doAnim")
+        layout.prop(self.properties, "makeCamera")
+        self.draw_prefab_data(layout)
+
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith(('.qc', '.qci')):
             self.report_unreadable(filepath)
@@ -1881,9 +1909,10 @@ class ImportPrefab(ImporterBase):
     def draw(self, context):
         # Nothing is being built, so the build options (upAxis, append, rotMode,
         # boneMode) do not apply. Hitboxes are the only consumer of createCollections.
+        self.layout.use_property_split = True
+        self.layout.use_property_decorate = False
         self.layout.prop(self.properties, "createCollections")
-        self.layout.label(text=get_id("importer_prefabdata"))
-        self.layout.prop(self.properties, "prefabData", expand=True)
+        self.draw_prefab_data(self.layout)
 
     def read_file(self, filepath: str) -> int | None:
         arm = findArmatureForPrefab(bpy.context)
@@ -2012,6 +2041,11 @@ class ImportVMDL(ImporterBase):
         default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
     )
 
+    def draw_options(self, layout) -> None:
+        layout.prop(self.properties, "doAnim")
+        layout.prop(self.properties, "contentPath")
+        self.draw_prefab_data(layout)
+
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith(('.vmdl', '.vmdl_prefab')):
             self.report_unreadable(filepath)
@@ -2042,6 +2076,9 @@ class ImportDMX(ImporterBase):
         options={'ENUM_FLAG'},
         default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
     )
+
+    def draw_options(self, layout) -> None:
+        self.draw_prefab_data(layout)
 
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith('.dmx'):
