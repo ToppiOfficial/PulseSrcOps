@@ -346,6 +346,36 @@ BlenderSourceTools and PulseMDL sample QCs and prints what each `$body` / `$body
 `$lod` / `$sequence` / `$collisionmodel` / `flexfile` would import. The BST QCs resolve to
 their real files only. It caught one regression (a dropped `xfade` option, restored).
 
+## VTA matching now spans every reference mesh (fixes a long-standing bug)
+
+`readShapes` matched the VTA against a single mesh - `qc.ref_mesh`, i.e. whichever REF
+happened to be imported last - and accepted any shrinkwrap snap. A decompiled VTA is
+indexed against the *whole model*: its base frame lists every vertex while the deltas
+stay sparse. So on any multi-bodygroup model most of the base frame had no home, the
+"VTA vertices" error object survived, and vertices were silently snapped onto whichever
+face vertex happened to be nearest.
+
+`read_shapes` now matches the base frame against every mesh in `qc.ref_meshes` (new,
+appended per REF import) and assigns each vertex to the mesh with the smallest snap
+distance, then applies each delta to its owning mesh, creating shape keys lazily so a
+frame only touches the meshes it moves.
+
+Verified offline against `koleda_dorm` (7 bodygroups, 56554-vertex base frame):
+
+    unmatched by ANY mesh: 3 of 56554        (was ~53k against facesrc alone)
+    delta ids: 4230 -> facesrc 3994, facegf2 236
+
+Known limits:
+- 6374 positions in that model exist in more than one mesh. Ties go to the mesh checked
+  first (import order) because the update test is `dist >= best_dist`. Harmless there -
+  the deltas are all face vertices - but it is the ambiguity this approach cannot resolve
+  from coordinates alone.
+- `_MATCH_TOLERANCE` (0.01) is the snap distance above which a vertex is called
+  unmatched. The original had no threshold, so a vertex that is genuinely far from every
+  mesh is now reported instead of silently mismapped.
+- A mesh referenced only by `$lod` `replacemodel` is never imported at LOD0, so deltas
+  owned by it (facegf2's 236 here) are still dropped.
+
 ## Pre-existing bug this surfaced - decide before phase 6
 
 The `$sequence` option table is incomplete, in the original as much as the port: `fps`,

@@ -959,6 +959,7 @@ class ImporterBase(bpy.types.Operator, Logger):
                     ob = importsrc.build_mesh(self, smd, imesh)
                     if smd.jobType == REF and self.qc:
                         self.qc.ref_mesh = ob
+                        self.qc.ref_meshes.append(ob)
                     # Leave the mesh active and selected. A VTA imported in the same
                     # batch gets a fresh SmdInfo, so read_shapes finds its target by
                     # scanning the selection - readPolys did this for the same reason.
@@ -1044,6 +1045,8 @@ class ImporterBase(bpy.types.Operator, Logger):
             if smd.jobType == REF and smd.m:
                 if self.qc:
                     self.qc.ref_mesh = smd.m
+                    self.qc.ref_meshes.extend(m for m in imported_meshes
+                                              if m not in self.qc.ref_meshes)
                 flex_meshes = [m for m in imported_meshes if hasShapes(m)]
                 _combo_op = parsed.root.get("combinationOperator")
                 if self.qc:

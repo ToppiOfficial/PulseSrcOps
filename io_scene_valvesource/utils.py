@@ -1110,6 +1110,10 @@ class QcInfo:
         self.dir_stack = []
         # Every imported mesh with shape keys; global flex data is applied to all of them.
         self.flex_meshes = []
+        # Every imported reference mesh, in import order. A decompiled VTA is indexed
+        # against the whole model, so shape matching has to span all of them, not just
+        # the ref_mesh that happened to be imported last.
+        self.ref_meshes = []
 
     def cd(self):
         return os.path.join(self.root_filedir,*self.dir_stack)

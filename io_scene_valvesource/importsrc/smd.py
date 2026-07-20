@@ -291,50 +291,45 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
 # VTA shapes
 # ---------------------------------------------------------------------------
 
-def read_shapes(ctx, smd) -> None:
-    """Reads a VTA vertex-animation block onto smd.m as shape keys.
+# Snap distance above which a VTA vertex is considered to belong to no imported mesh.
+# Genuine members snap to distance ~0; the VTA and the SMD carry the same coordinates
+# through the same up-axis matrix, so anything beyond this is a different bodypart.
+_MATCH_TOLERANCE = 0.01
 
-    This one does not go through build_mesh: VTA gives no topology, only positions
-    keyed by an id space that is not the target mesh's. Matching is done by
-    shrinkwrapping a throwaway point cloud onto the mesh, which has no DMX analogue.
+
+def read_shapes(ctx, smd) -> None:
+    """Reads a VTA vertex-animation block into shape keys.
+
+    Not routed through build_mesh: VTA carries no topology, only positions in an id
+    space that belongs to no single mesh. A decompiled VTA is indexed against the whole
+    model - its base frame lists every vertex in the model while the deltas stay sparse -
+    so the base frame is matched against every imported reference mesh and each delta is
+    applied to the mesh that owns that vertex.
     """
     if smd.jobType is not FLEX:
         return
 
-    if not smd.m:
-        if ctx.qc:
-            smd.m = ctx.qc.ref_mesh
-        else:
-            if bpy.context.active_object.type in shape_types:
-                smd.m = bpy.context.active_object
-            else:
-                for obj in bpy.context.selected_objects:
-                    if obj.type in shape_types:
-                        smd.m = obj
-
-    if not smd.m:
+    targets = _shape_targets(ctx, smd)
+    if not targets:
         ctx.error(get_id("importer_err_shapetarget"))
         return
 
-    if hasShapes(smd.m):
-        smd.m.active_shape_key_index = 0
-    smd.m.show_only_shape_key = True
-
-    def vec_round(v):
-        return Vector([round(co, 3) for co in v])
-
-    co_map: dict[int, int] = {}
-    mesh_cos = [vert.co for vert in smd.m.data.vertices]
-    mesh_cos_rnd = None
+    smd.m = smd.m or targets[0]
+    for ob in targets:
+        if hasShapes(ob):
+            ob.active_shape_key_index = 0
+        ob.show_only_shape_key = True
 
     smd.vta_ref = None
-    vta_cos = []
-    vta_ids = []
-
+    base_ids: list[int] = []
+    base_cos: list[float] = []
+    base_name = None
+    pending_name = None
+    co_map: dict = {}
+    frame_keys: dict = {}
+    touched: set = set()
     making_base_shape = True
-    bad_vta_verts = []
     num_shapes = 0
-    md = smd.m.data
 
     for line in smd.file:
         line = line.rstrip("\n")
@@ -347,82 +342,133 @@ def read_shapes(ctx, smd) -> None:
 
         if values[0] == "time":
             shape_name = smd.shapeNames.get(values[1])
-            if smd.vta_ref is None:
-                if not hasShapes(smd.m, False):
-                    smd.m.shape_key_add(name=shape_name if shape_name else "Basis")
-                vd = bpy.data.meshes.new(name="VTA vertices")
-                vta_ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
-                vta_ref.matrix_world = smd.m.matrix_world
-                smd.g.objects.link(vta_ref)
-                vta_err_vg = vta_ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
+            if base_name is None:
+                base_name = shape_name or "Basis"
             elif making_base_shape:
-                vd.vertices.add(int(len(vta_cos) / 3))
-                vd.vertices.foreach_set("co", vta_cos)
-                num_vta_verts = len(vd.vertices)
-                del vta_cos
-
-                mod = vta_ref.modifiers.new(name="VTA Shrinkwrap", type='SHRINKWRAP')
-                mod.target = smd.m
-                mod.wrap_method = 'NEAREST_VERTEX'
-
-                vd = bpy.data.meshes.new_from_object(
-                    vta_ref.evaluated_get(bpy.context.evaluated_depsgraph_get()))
-                vta_ref.modifiers.remove(mod)
-                del mod
-
-                for i in range(len(vd.vertices)):
-                    id = vta_ids[i]
-                    co = vd.vertices[i].co
-                    map_id = None
-                    try:
-                        map_id = mesh_cos.index(co)
-                    except ValueError:
-                        if not mesh_cos_rnd:
-                            mesh_cos_rnd = [vec_round(co) for co in mesh_cos]
-                        try:
-                            map_id = mesh_cos_rnd.index(vec_round(co))
-                        except ValueError:
-                            bad_vta_verts.append(i)
-                            continue
-                    co_map[id] = map_id
-
-                bpy.data.meshes.remove(vd)
-                del vd
-
-                if bad_vta_verts:
-                    err_ratio = len(bad_vta_verts) / num_vta_verts
-                    vta_err_vg.add(bad_vta_verts, 1.0, 'REPLACE')
-                    message = get_id("importer_err_unmatched_mesh", True).format(
-                        len(bad_vta_verts), int(err_ratio * 100))
-                    if err_ratio == 1:
-                        ctx.error(message)
-                        return
-                    else:
-                        ctx.warning(message)
-                else:
-                    removeObject(vta_ref)
+                co_map = _match_vta(ctx, smd, targets, base_ids, base_cos)
+                if co_map is None:
+                    return
                 making_base_shape = False
-
             if not making_base_shape:
-                sk = smd.m.shape_key_add(name=shape_name if shape_name else values[1])
-                sk.value = 0.0
+                frame_keys = {}
+                pending_name = shape_name or values[1]
                 num_shapes += 1
-
             continue
 
         cur_id = int(values[0])
         vta_co = getUpAxisMat(smd.upAxis) @ Vector([float(values[1]), float(values[2]), float(values[3])])
 
         if making_base_shape:
-            vta_ids.append(cur_id)
-            vta_cos.extend(vta_co)
-        else:
-            try:
-                md.shape_keys.key_blocks[-1].data[co_map[cur_id]].co = vta_co
-            except KeyError:
-                pass
+            base_ids.append(cur_id)
+            base_cos.extend(vta_co)
+            continue
 
-    print(f"- Imported {num_shapes} flex shapes")
+        entry = co_map.get(cur_id)
+        if entry is None:
+            continue
+        ob, vert_index = entry
+        key_block = frame_keys.get(ob)
+        if key_block is None:
+            # Created lazily so a frame only adds a shape key to the meshes it moves.
+            if not hasShapes(ob, False):
+                ob.shape_key_add(name=base_name)
+            key_block = ob.shape_key_add(name=pending_name)
+            key_block.value = 0.0
+            frame_keys[ob] = key_block
+            touched.add(ob)
+        key_block.data[vert_index].co = vta_co
+
+    print(f"- Imported {num_shapes} flex shapes across {len(touched)} mesh(es)")
+
+
+def _shape_targets(ctx, smd) -> list:
+    """Meshes a VTA may write into. Under a QC that is every reference mesh imported so
+    far, because the VTA's ids span the whole model rather than one bodygroup."""
+    if smd.m:
+        return [smd.m]
+    qc = getattr(ctx, 'qc', None)
+    if qc:
+        meshes = [m for m in qc.ref_meshes if m and m.type in shape_types]
+        if meshes:
+            return meshes
+        return [qc.ref_mesh] if qc.ref_mesh else []
+    active = bpy.context.active_object
+    if active and active.type in shape_types:
+        return [active]
+    return [o for o in bpy.context.selected_objects if o.type in shape_types]
+
+
+def _round_key(co):
+    return (round(co.x, 3), round(co.y, 3), round(co.z, 3))
+
+
+def _vertex_lookup(ob) -> dict:
+    lookup: dict = {}
+    for i, v in enumerate(ob.data.vertices):
+        lookup.setdefault(_round_key(v.co), i)  # first wins, as list.index did
+    return lookup
+
+
+def _match_vta(ctx, smd, targets, ids, cos):
+    """Map each base-frame VTA id onto (mesh, vertex index).
+
+    Shrinkwrap NEAREST_VERTEX snaps every point to the closest vertex on its target, so
+    the snap distance says whether the point belongs to that mesh at all. The original
+    shrinkwrapped against a single mesh and accepted any snap, which silently mapped a
+    body vertex onto whichever face vertex happened to be nearest. Taking the smallest
+    snap distance across all candidate meshes gives each vertex its real owner.
+
+    Returns None when nothing matched, having already reported the error.
+    """
+    count = len(ids)
+    vd = bpy.data.meshes.new(name="VTA vertices")
+    vd.vertices.add(count)
+    vd.vertices.foreach_set("co", cos)
+    ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
+    (smd.g if smd.g else bpy.context.scene.collection).objects.link(ref)
+    err_group = ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
+
+    origin = [Vector(cos[i * 3:i * 3 + 3]) for i in range(count)]
+    best: list = [None] * count
+    best_dist = [_MATCH_TOLERANCE] * count
+
+    for ob in targets:
+        lookup = _vertex_lookup(ob)
+        ref.matrix_world = ob.matrix_world
+        mod = ref.modifiers.new(name="VTA Shrinkwrap", type='SHRINKWRAP')
+        mod.target = ob
+        mod.wrap_method = 'NEAREST_VERTEX'
+        bpy.context.view_layer.update()
+        snapped = bpy.data.meshes.new_from_object(
+            ref.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+        ref.modifiers.remove(mod)
+
+        for i, v in enumerate(snapped.vertices):
+            dist = (v.co - origin[i]).length
+            if dist >= best_dist[i]:
+                continue
+            index = lookup.get(_round_key(v.co))
+            if index is not None:
+                best_dist[i] = dist
+                best[i] = (ob, index)
+
+        bpy.data.meshes.remove(snapped)
+
+    unmatched = [i for i in range(count) if best[i] is None]
+    if unmatched:
+        ratio = len(unmatched) / count
+        err_group.add(unmatched, 1.0, 'REPLACE')
+        message = get_id("importer_err_unmatched_mesh", True).format(
+            len(unmatched), int(ratio * 100))
+        if ratio == 1:
+            ctx.error(message)
+            return None
+        ctx.warning(message)
+    else:
+        removeObject(ref)
+        smd.vta_ref = None
+
+    return {ids[i]: best[i] for i in range(count) if best[i] is not None}
 
 
 def _face_set_for(mesh: ImportedMesh, mat_path: str) -> int:
