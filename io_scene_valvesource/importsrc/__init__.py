@@ -10,6 +10,6 @@ from .prefab import apply_dmx_prefab_data, read_dmx_prefab
 from .flexdata import (parse_flex_text, apply_flex_text_to_object,
                        populate_dme_flex_from_dmx)
 from .qc import read_qc
-from .vmdl import read_vmdl, local_matrix, extract_bones, resolve_dmx_ref
+from .vmdl import read_vmdl, local_matrix, extract_bones, resolve_content_ref
 from .smd import (SmdNode, ParsedFrames, parse_quote_blocked_line, scan_smd,
                   read_nodes, read_frames, read_polys, read_shapes)

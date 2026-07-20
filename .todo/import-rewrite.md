@@ -501,6 +501,32 @@ only matters at import time.
 Verified against the CS2 addon endfield models: **23/23 references across 11 VMDLs
 resolve with contentPath empty**, where all previously failed.
 
+## Three VMDL structures that were never supported
+
+Found while testing against real CS2 addon models. All pre-existing - `_import_vmdl` had
+the same gaps - and all three had to be fixed before a single one of those models could
+import anything at all.
+
+1. **`SkeletonFile`.** A Skeleton node can reference a DMX instead of inlining `Bone`
+   children. `extract_bones` found none, and the old code did `return 0` *before*
+   reading meshes, so nothing imported. `_read_skeleton_file` now imports the referenced
+   DMX and takes the armature it builds. Every one of the 5 endfield character models
+   uses this; none inline bones.
+2. **Mesh-only VMDLs.** The `_arms` models have a RenderMeshList and no Skeleton node at
+   all, so the "no Skeleton" early return skipped their meshes. Mesh reading no longer
+   depends on a skeleton existing; attachments/jigglebones/hitboxes are skipped instead
+   if no armature turns up.
+3. **`PrefabList` / `Prefab` `target_file`.** Source 2's `$include` - a `.vmdl_prefab`
+   holding the shared skeleton, constraints and sometimes meshes that the model extends.
+   Was ignored entirely. `_read_document` now recurses into prefabs *first* (they are the
+   base), with a `seen` set for cycles and for a prefab shared by two branches.
+
+`read_vmdl` is now a thin entry point over `_read_document`, which is what recurses.
+`resolve_dmx_ref` became `resolve_content_ref` - it resolves prefab paths too.
+
+Verified across the 11 endfield VMDLs: **every prefab, skeleton, mesh and animation
+reference resolves - 0 unresolved**, following prefab chains up to 3 documents deep.
+
 ## Next: make DMX prefab import optional (the phase 1.6 question)
 
 `readDMX` still calls `apply_dmx_prefab_data` unconditionally, so importing a model DMX

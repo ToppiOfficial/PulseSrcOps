@@ -48,7 +48,7 @@ def extract_bones(skeleton_node) -> list[tuple[str, object]]:
     return result
 
 
-def resolve_dmx_ref(vmdl_path: str, dmx_ref: str, content_path: str = "") -> str | None:
+def resolve_content_ref(vmdl_path: str, dmx_ref: str, content_path: str = "") -> str | None:
     """Find the DMX a VMDL references.
 
     Source 2 paths are relative to the *content* root - for a CS2 addon that is
@@ -96,24 +96,6 @@ def read_vmdl(ctx, filepath: str, qc, rot_mode: str) -> int:
     filename = os.path.basename(filepath)
     print(f"\nVMDL IMPORTER: now working on {filename}")
 
-    try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            vmdl_text = f.read()
-    except IOError as e:
-        ctx.error(f"Could not read {filepath}: {e}")
-        return 0
-
-    try:
-        kv_doc = keyvalues3.KVParser(vmdl_text).parse()
-    except Exception as e:
-        ctx.error(f"Failed to parse {filename}: {e}")
-        return 0
-
-    root_node = kv_doc.roots.get("rootNode")
-    if not root_node:
-        ctx.error(f"{filename}: no rootNode")
-        return 0
-
     # smd exists so create_armature can read smd.isDMX and the collection helper works
     smd = ctx.smd = SmdInfo(qc.jobName)
     smd.isDMX = 1
@@ -122,22 +104,71 @@ def read_vmdl(ctx, filepath: str, qc, rot_mode: str) -> int:
     smd.rotMode = rot_mode
     ctx.createCollection()
 
-    skeleton_node = root_node.get(recursive=True, _class="Skeleton")
-    if not skeleton_node:
-        ctx.warning(f"{filename}: no Skeleton - only jigglebones imported")
-        arm = qc.a or find_armature()
-        if arm:
-            cnt, _missing = import_jigglebones_from_kv3(kv_doc, arm)
-            ctx.imported_jigglebones += cnt
-        return 1
-
-    if not extract_bones(skeleton_node):
-        ctx.warning(f"{filename}: Skeleton has no Bone children")
+    if not _read_document(ctx, smd, qc, filepath, rot_mode, set()):
         return 0
 
-    arm = _build_skeleton(ctx, smd, qc, skeleton_node)
+    printTimeMessage(qc.startTime, filename, "import", "VMDL")
+    # Count referenced meshes when present, otherwise the VMDL itself.
+    return ctx.num_files_imported or 1
 
+
+def _read_document(ctx, smd, qc, filepath: str, rot_mode: str, seen: set) -> bool:
+    """Process one .vmdl / .vmdl_prefab, prefabs first.
+
+    A PrefabList/Prefab target_file is Source 2's $include: the prefab holds the shared
+    base (skeleton, constraints, sometimes meshes) that the model extends, so it has to
+    be read before the model's own content. `seen` breaks cycles and stops a prefab
+    shared by two branches being imported twice.
+    """
+    key = os.path.normcase(os.path.abspath(filepath))
+    if key in seen:
+        return True
+    seen.add(key)
+
+    filename = os.path.basename(filepath)
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            text = f.read()
+    except IOError as e:
+        ctx.error(f"Could not read {filepath}: {e}")
+        return False
+
+    try:
+        kv_doc = keyvalues3.KVParser(text).parse()
+    except Exception as e:
+        ctx.error(f"Failed to parse {filename}: {e}")
+        return False
+
+    root_node = kv_doc.roots.get("rootNode")
+    if not root_node:
+        ctx.error(f"{filename}: no rootNode")
+        return False
+
+    _read_prefabs(ctx, smd, qc, root_node, filepath, filename, rot_mode, seen)
+
+    # Skeleton. Either inline Bone children, or a SkeletonFile referencing a DMX.
+    skeleton_node = root_node.get(recursive=True, _class="Skeleton")
+    if skeleton_node:
+        if extract_bones(skeleton_node):
+            qc.a = _build_skeleton(ctx, smd, qc, skeleton_node)
+        else:
+            found = _read_skeleton_file(ctx, qc, skeleton_node, filepath, filename, rot_mode)
+            if found:
+                qc.a = found
+            else:
+                ctx.warning(f"{filename}: Skeleton has no Bone children and no usable "
+                            f"SkeletonFile")
+
+    # Meshes do not depend on a skeleton - an arms/mesh-only VMDL has no Skeleton node
+    # at all, and skipping its RenderMeshList would import nothing.
     _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode)
+
+    arm = qc.a or (ctx.smd.a if ctx.smd else None) or find_armature()
+    if not arm:
+        print(f"- {filename}: no armature, skipping attachments/jigglebones/hitboxes")
+        return True
+    qc.a = smd.a = arm
+
     _read_attachments(ctx, smd, arm, root_node, filename)
 
     cnt, missing = import_jigglebones_from_kv3(kv_doc, arm)
@@ -158,9 +189,45 @@ def read_vmdl(ctx, filepath: str, qc, rot_mode: str) -> int:
     if getattr(ctx.properties, 'doAnim', True):
         _read_animations(ctx, qc, arm, root_node, filepath, filename, rot_mode)
 
-    printTimeMessage(qc.startTime, filename, "import", "VMDL")
-    # Count referenced meshes when present, otherwise the VMDL itself.
-    return ctx.num_files_imported or 1
+    return True
+
+
+def _read_prefabs(ctx, smd, qc, root_node, filepath, filename, rot_mode, seen) -> None:
+    for prefab in root_node.find_all(recursive=True, _class="Prefab"):
+        target = prefab.properties.get("target_file", "")
+        if not target:
+            continue
+        path = resolve_content_ref(filepath, target, _content_path(ctx))
+        if not path:
+            ctx.warning(f"{filename}: could not find prefab '{target}'")
+            continue
+        print(f"- {filename}: including prefab {os.path.basename(path)}")
+        _read_document(ctx, smd, qc, path, rot_mode, seen)
+
+
+def _read_skeleton_file(ctx, qc, skeleton_node, filepath, filename, rot_mode):
+    """Import the DMX a SkeletonFile points at and return the armature it built."""
+    for child in skeleton_node.children:
+        if child.properties.get("_class") != "SkeletonFile":
+            continue
+        ref = child.properties.get("filename", "")
+        if not ref:
+            continue
+        path = resolve_content_ref(filepath, ref, _content_path(ctx))
+        if not path:
+            ctx.warning(f"{filename}: could not find skeleton DMX '{ref}'")
+            continue
+        if path not in qc.imported_smds:
+            qc.imported_smds.append(path)
+            prev_append = ctx.append
+            ctx.append = 'VALIDATE' if qc.a else 'NEW_ARMATURE'
+            ctx.num_files_imported += ctx.readDMX(path, qc.upAxis, rot_mode, False, REF)
+            ctx.append = prev_append
+        # readDMX replaced ctx.smd with its own; the armature it built is on that.
+        if ctx.smd and ctx.smd.a:
+            qc.a = ctx.smd.a
+            return qc.a
+    return qc.a or find_armature()
 
 
 def _build_skeleton(ctx, smd, qc, skeleton_node):
@@ -223,7 +290,7 @@ def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> Non
         dmx_ref = rmf.properties.get("filename", "")
         if not dmx_ref:
             continue
-        dmx_path = resolve_dmx_ref(filepath, dmx_ref, _content_path(ctx))
+        dmx_path = resolve_content_ref(filepath, dmx_ref, _content_path(ctx))
         if not dmx_path:
             ctx.warning(f"{filename}: could not find DMX '{dmx_ref}'")
             continue
@@ -297,7 +364,7 @@ def _read_animations(ctx, qc, arm, root_node, filepath, filename, rot_mode) -> N
         src = af.properties.get("source_filename", "")
         if not src:
             continue
-        anim_path = resolve_dmx_ref(filepath, src, _content_path(ctx))
+        anim_path = resolve_content_ref(filepath, src, _content_path(ctx))
         if not anim_path:
             ctx.warning(f"{filename}: could not find animation DMX '{src}'")
             continue
