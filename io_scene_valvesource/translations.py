@@ -588,6 +588,10 @@ _data = {
         'en': "Source 2 content root that VMDL file references are relative to (e.g. .../content/csgo_addons/my_addon). Leave empty to detect it from the VMDL's own location",
         'ja': "VMDLのファイル参照の基準となるSource 2コンテンツルート (例: .../content/csgo_addons/my_addon)。空欄の場合はVMDLの場所から自動検出",
     },
+    'importer_contentpath_hint': {
+        'en': "Leave empty to find it automatically from the VMDL's own location",
+        'ja': "空欄のままにすると、VMDLの場所から自動的に検出します",
+    },
     'importer_prefabdata': {
         'en': "Import Prefab Data",
         'ja': "プレハブデータをインポート",

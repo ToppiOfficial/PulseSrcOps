@@ -2046,8 +2046,37 @@ class ImportVMDL(ImporterBase):
         default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
     )
 
+    # Set once the content-path popup has been answered; the file browser is stage two.
+    contentPathChosen: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        # Two stages, because a folder-browse button cannot open a second file browser
+        # once one is already open. The content root is collected in a popup first, then
+        # Blender's file browser opens for the VMDL itself.
+        self.properties.upAxis = context.scene.vs.up_axis
+        self.properties.contentPathChosen = False
+        return context.window_manager.invoke_props_dialog(self, width=460)
+
+    def execute(self, context):
+        if not self.properties.contentPathChosen:
+            self.properties.contentPathChosen = True
+            context.window_manager.fileselect_add(self)
+            return {'RUNNING_MODAL'}
+        return super().execute(context)
+
+    def draw(self, context):
+        # draw() serves both stages: the popup, then the file browser sidebar.
+        if not self.properties.contentPathChosen:
+            col = self.layout.column()
+            col.prop(self.properties, "contentPath")
+            col.separator()
+            col.label(text=get_id("importer_contentpath_hint"), icon='INFO')
+            return
+        super().draw(context)
+
     def draw_options(self, layout) -> None:
         layout.prop(self.properties, "doAnim")
+        # Still editable in the browser sidebar, in case the popup value was wrong
         layout.prop(self.properties, "contentPath")
         self.draw_prefab_data(layout)
 

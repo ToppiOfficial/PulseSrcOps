@@ -501,6 +501,18 @@ only matters at import time.
 Verified against the CS2 addon endfield models: **23/23 references across 11 VMDLs
 resolve with contentPath empty**, where all previously failed.
 
+`ImportVMDL` invokes in two stages: an `invoke_props_dialog` popup collects the content
+root, then `execute` calls `fileselect_add` to open the file browser for the VMDL itself.
+`contentPathChosen` (HIDDEN, SKIP_SAVE) marks which stage is running - `draw()` serves
+both. The split exists because a DIR_PATH browse button cannot open a second file browser
+while one is already open, so the path has to be collected *before* the file browser.
+Leaving it empty is the normal case and falls back to the ancestor walk; the field stays
+editable in the browser sidebar in case the popup value was wrong.
+
+**Unverified in Blender.** Chaining `fileselect_add` out of an `invoke_props_dialog`
+execute is the standard pattern but is the risky part of this; if the browser fails to
+open, that chain is the first thing to look at.
+
 ## Three VMDL structures that were never supported
 
 Found while testing against real CS2 addon models. All pre-existing - `_import_vmdl` had
