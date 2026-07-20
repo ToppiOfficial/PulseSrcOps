@@ -18,17 +18,17 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math, bmesh
-from typing import Optional, Any
+import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
+from typing import Optional
+# NB: `math` and `Optional` above are re-exported to every `from .utils import *`
+# consumer in exports/ - they are used there without a local import.
 from bpy.app.translations import pgettext
-from contextlib import contextmanager
 from bpy.app.handlers import depsgraph_update_post, load_post, persistent
 from mathutils import Matrix, Vector
 from math import radians, pi, ceil, floor
 from io import TextIOWrapper
 from . import datamodel
 from . import keyvalues3
-import numpy as np
 
 intsize = struct.calcsize("i")
 floatsize = struct.calcsize("f")
@@ -200,9 +200,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
 
     @property
     def datamodelFormat(cls): return cls._engineBranch.format if cls._engineBranch else int(bpy.context.scene.vs.dmx_format.split("_")[0])
-
-    @property
-    def engineBranchTitle(cls): return cls._engineBranch.title if cls._engineBranch else None
 
     @property
     def compiler(cls): return cls._engineBranch.compiler if cls._engineBranch else Compiler.MODELDOC if "modeldoc" in bpy.context.scene.vs.dmx_format else Compiler.UNKNOWN
@@ -512,9 +509,6 @@ def animationFrameRange(ad : bpy.types.AnimData):
     first = floor(min(times))
     return first, ceil(max(times)) - first
 
-def animationLength(ad : bpy.types.AnimData):
-    return animationFrameRange(ad)[1]
-    
 def getFileExt(flex=False):
     if State.datamodelEncoding != 0 and bpy.context.scene.vs.export_format == 'DMX':
         return ".dmx"
@@ -1061,24 +1055,17 @@ class SmdInfo:
     def __init__(self, jobName : str):
         self.jobName = jobName
         self.upAxis = bpy.context.scene.vs.up_axis
-        self.amod = {} # Armature modifiers
         self.materials_used = set() # printed to the console for users' benefit
 
         # DMX stuff
         self.attachments = []
         self.meshes = []
-        self.parent_chain = []
-        self.dmxShapes = collections.defaultdict(list)
         self.boneTransformIDs = {}
-
-        self.frameData = []
-        self.bakeInfo = []
 
         # boneIDs contains the ID-to-name mapping of *this* SMD's bones.
         # - Key: integer ID
         # - Value: bone name (storing object itself is not safe)
         self.boneIDs = {}
-        self.boneNameToID = {} # for convenience during export
         self.phantomParentIDs = {} # for bones in animation SMDs but not the ref skeleton
 
 class QcInfo:
