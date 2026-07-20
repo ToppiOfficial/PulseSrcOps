@@ -52,6 +52,13 @@ Both are deliberate; revert if they turn out to matter.
 
 ## Watch out for
 
+- **`readSMD` must leave the built mesh active and selected.** Each file in a multi-file
+  selection gets a fresh `SmdInfo`, so an SMD+VTA batch import hands the target mesh to
+  `read_shapes` only through the selection. `readPolys` did this; `build_mesh` does not,
+  and dropping it broke SMD+VTA-in-one-go with "no valid target object found". Note this
+  also depends on the file browser handing `.smd` to us before `.vta` - true for the
+  usual `name.smd` / `name.vta` pair, but nothing enforces it.
+
 - `build_mesh`'s `split_duplicate_faces` branch is **new code, never executed.** SMD is
   the only caller that enables it, so it first runs during phase 2 verification.
 - The cloth-group `loop_i` counter in `build_mesh` walks `bm.faces` and drifts if any

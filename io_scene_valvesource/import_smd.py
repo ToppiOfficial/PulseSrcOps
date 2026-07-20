@@ -1120,6 +1120,14 @@ class ImporterBase(bpy.types.Operator, Logger):
                     ob = importsrc.build_mesh(self, smd, imesh)
                     if smd.jobType == REF and self.qc:
                         self.qc.ref_mesh = ob
+                    # Leave the mesh active and selected. A VTA imported in the same
+                    # batch gets a fresh SmdInfo, so read_shapes finds its target by
+                    # scanning the selection - readPolys did this for the same reason.
+                    ops.object.select_all(action="DESELECT")
+                    ob.select_set(True)
+                    bpy.context.view_layer.objects.active = ob
+                    for poly in ob.data.polygons:
+                        poly.select = True
             if line == "vertexanimation\n":
                 importsrc.read_shapes(self, smd)
 
