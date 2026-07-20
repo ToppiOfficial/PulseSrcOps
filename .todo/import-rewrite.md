@@ -302,7 +302,37 @@ but the clean two-phase split is DMX-specific.
 The hard one. `readQC` is ~410 lines of recursive directive parsing that also
 orchestrates child SMD/DMX imports.
 
-- [ ] Split parse (directives -> job list) from orchestration (run the jobs).
+**Approach changed.** The original plan said "split parse from orchestration". That is
+not achievable without behaviour change: directive handling is genuinely stateful and
+order-dependent. `flex` / `flexpair` / `flexcontroller` / `localvar` / `%expr` are all
+gated on `qc.ref_mesh`, which only exists after an earlier `$body` import ran; `$hbox`,
+`$proceduralbones` and `$sequence` call `findArmature()` mid-parse; `$upaxis` writes
+`scene.vs.up_axis` for every later import; `$include` recurses immediately into shared
+accumulators. A "job list" would have to be re-evaluated between jobs, which is just the
+interpreter again. Same finding as SMD in phase 2: `importsrc/qc.py` will be a *reader*
+that touches Blender, not a pure parser.
+
+What is worth fixing is the *lexing*, which is where the mess actually is:
+`in_bodygroup` / `in_lod` / `in_sequence` booleans tracking `{` and `}` by hand across
+lines, plus `num_words_to_skip` counters walking `$sequence` options.
+
+- [x] `keyvalues1.py` - tokenizer + `Cursor` for Valve script syntax. Token stream, not
+      a value tree: QC is `$directive arg arg` with positional args, so a KV tree would
+      wrap every directive in a synthetic node. Shape follows PulseMDL's `qcloader.cpp`
+      (`Tokenize` -> `Cur`/`Next`/`Eof` cursor, braces consumed inline). No `bpy` import,
+      so it is testable outside Blender - 20 unit checks plus a tokenize-everything pass
+      over the BlenderSourceTools and PulseMDL sample QCs (all balance to depth 0).
+- [ ] Rebuild `readQC`'s dispatch on `Cursor.block()`, retiring the brace booleans and
+      `num_words_to_skip`.
+      **Blocker to respect:** several handlers need the raw line, not tokens - `localvar`
+      and `%expr` are regexed off `line_str`, `$hbox` passes the whole raw line to
+      `import_hitboxes_from_content`, and `$definemacro` skips `\\` continuations. Tokens
+      carry 1-based line numbers for exactly this; keep `text.splitlines()` addressable.
+      `$var$` substitution and the `/`->`\` + lowercase normalisation stay in the QC
+      layer, above the lexer.
+- [ ] Keep the old `readQC` behind `KST_OLD_QC` while the new one is unproven. Phase 2
+      deleted the SMD fallback and then hit two bugs with nothing to diff against; do not
+      repeat that on the hairiest format.
 - [ ] Format readers must stay plain callables - QC cannot invoke operators.
 - [ ] Revisit `QcInfo`'s `*_pending` accumulator lists (`utils.py:1099-1105`); suspected
       latent ordering bugs in the flex flush. Cheapest to fix here.
