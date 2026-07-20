@@ -1974,6 +1974,7 @@ class ImportVMDL(ImporterBase):
     filter_glob: StringProperty(default="*.vmdl;*.vmdl_prefab", options={'HIDDEN'})
 
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
+    contentPath: StringProperty(name=get_id("content_path"), description=get_id("content_path_tip"), subtype='DIR_PATH')
 
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith(('.vmdl', '.vmdl_prefab')):

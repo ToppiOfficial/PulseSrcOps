@@ -580,6 +580,14 @@ _data = {
         'en': "Imports an uncompiled Source Engine DMX model or animation",
         'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
     },
+    'content_path': {
+        'en': "Content Path",
+        'ja': "コンテンツパス",
+    },
+    'content_path_tip': {
+        'en': "Source 2 content root that VMDL file references are relative to (e.g. .../content/csgo_addons/my_addon). Leave empty to detect it from the VMDL's own location",
+        'ja': "VMDLのファイル参照の基準となるSource 2コンテンツルート (例: .../content/csgo_addons/my_addon)。空欄の場合はVMDLの場所から自動検出",
+    },
     'import_menuitem_prefab': {
         'en': "Prefab data only (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
         'ja': "プレハブデータのみ (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",

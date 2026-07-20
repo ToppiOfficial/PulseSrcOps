@@ -48,20 +48,48 @@ def extract_bones(skeleton_node) -> list[tuple[str, object]]:
     return result
 
 
-def resolve_dmx_ref(vmdl_path: str, dmx_ref: str) -> str | None:
+def resolve_dmx_ref(vmdl_path: str, dmx_ref: str, content_path: str = "") -> str | None:
+    """Find the DMX a VMDL references.
+
+    Source 2 paths are relative to the *content* root - for a CS2 addon that is
+    `.../content/csgo_addons/<addon>/`, several levels above the VMDL - so neither the
+    VMDL's own directory nor the compiled game path resolves them. The content root is
+    found by walking up from the VMDL until the reference resolves, which needs no
+    configuration because the VMDL always lives inside its own content tree.
+    `content_path` (the importer's Content Path field) overrides that for references into
+    a different addon, or a VMDL that has been moved out of its tree.
+    """
     vmdl_dir = os.path.dirname(vmdl_path)
     normalized = dmx_ref.replace("\\", os.sep).replace("/", os.sep)
     basename = os.path.basename(normalized)
-    candidates = [
-        os.path.join(vmdl_dir, basename),
-        os.path.normpath(os.path.join(vmdl_dir, normalized)),
-    ]
+
+    candidates = []
+    if content_path:
+        candidates.append(os.path.normpath(
+            os.path.join(bpy.path.abspath(content_path), normalized)))
+    candidates.append(os.path.join(vmdl_dir, basename))
+    candidates.append(os.path.normpath(os.path.join(vmdl_dir, normalized)))
     if State.gamePath:
         candidates.append(os.path.normpath(os.path.join(State.gamePath, normalized)))
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
-    return None
+
+    # Walk up for the content root the reference is relative to.
+    current = vmdl_dir
+    while True:
+        candidate = os.path.normpath(os.path.join(current, normalized))
+        if os.path.exists(candidate):
+            return candidate
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _content_path(ctx) -> str:
+    """Only ImportVMDL offers the field; other entry points fall back to the walk."""
+    return getattr(ctx.properties, "contentPath", "") or ""
 
 
 def read_vmdl(ctx, filepath: str, qc, rot_mode: str) -> int:
@@ -195,7 +223,7 @@ def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> Non
         dmx_ref = rmf.properties.get("filename", "")
         if not dmx_ref:
             continue
-        dmx_path = resolve_dmx_ref(filepath, dmx_ref)
+        dmx_path = resolve_dmx_ref(filepath, dmx_ref, _content_path(ctx))
         if not dmx_path:
             ctx.warning(f"{filename}: could not find DMX '{dmx_ref}'")
             continue
@@ -269,7 +297,7 @@ def _read_animations(ctx, qc, arm, root_node, filepath, filename, rot_mode) -> N
         src = af.properties.get("source_filename", "")
         if not src:
             continue
-        anim_path = resolve_dmx_ref(filepath, src)
+        anim_path = resolve_dmx_ref(filepath, src, _content_path(ctx))
         if not anim_path:
             ctx.warning(f"{filename}: could not find animation DMX '{src}'")
             continue

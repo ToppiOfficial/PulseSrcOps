@@ -484,6 +484,23 @@ geometry from them.
 - [ ] **Verify in Blender.** Untested end to end. `.vrd` onto an existing rig is the
       case that motivated it (and the one with no other entry point).
 
+## Source 2 content-root resolution
+
+VMDL file references are relative to the Source 2 *content* root, not the VMDL's own
+directory - for a CS2 addon that is `.../content/csgo_addons/<addon>/`, four or more
+levels up. `resolve_dmx_ref` tried only the VMDL dir (bare basename, then the full
+relative path) and `State.gamePath`, which is the *compiled* game dir, so every reference
+in an addon VMDL missed.
+
+It now walks up from the VMDL until the reference resolves. No configuration needed: a
+VMDL always lives inside its own content tree, so an ancestor is always the root.
+`ImportVMDL.contentPath` overrides it (tried first) for references into a different addon
+or a VMDL moved out of its tree. Kept as an operator property, not a scene property - it
+only matters at import time.
+
+Verified against the CS2 addon endfield models: **23/23 references across 11 VMDLs
+resolve with contentPath empty**, where all previously failed.
+
 ## Next: make DMX prefab import optional (the phase 1.6 question)
 
 `readDMX` still calls `apply_dmx_prefab_data` unconditionally, so importing a model DMX
