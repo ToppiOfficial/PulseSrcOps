@@ -320,6 +320,33 @@ def get_active_exportable(context = None):
 
     return context.scene.vs.export_list[context.scene.vs.export_list_active]
 
+def get_material_path(scene, matdata = None) -> str:
+    """Resolve the DMX material path a material exports under. Materials point at an entry
+    in scene.vs.material_paths by index; anything out of range falls back to the first."""
+    paths = scene.vs.material_paths
+    if not len(paths):
+        return ""
+    index = 0
+    if matdata:
+        try:
+            index = int(matdata.vs.material_path_index)
+        except ValueError:
+            index = 0
+    if not 0 <= index < len(paths):
+        index = 0
+    return paths[index].path
+
+
+def find_or_add_material_path(scene, path: str) -> int:
+    """Index of path in scene.vs.material_paths, appending it if it isn't there yet."""
+    path = path.strip().replace('\\', '/').strip('/')
+    for i, item in enumerate(scene.vs.material_paths):
+        if item.path == path:
+            return i
+    scene.vs.material_paths.add().path = path
+    return len(scene.vs.material_paths) - 1
+
+
 class BenchMarker:
     def __init__(self,indent = 0, prefix = None):
         self._indent = indent * 4

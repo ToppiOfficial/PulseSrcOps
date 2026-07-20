@@ -6,6 +6,7 @@ from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
 from ..utils import (get_id, State, Compiler, axes, axes_forward, dmx_versions_source1,
                      dmx_versions_source2, get_active_exportable)
 from .. import datamodel, procbones_sim as _procbones_sim
+from .items import MaterialPathItem
 
 
 encodings = []
@@ -156,6 +157,10 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     up_axis_offset : FloatProperty(name=get_id("up_axis_offset"), description=get_id("up_axis_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     forward_axis : EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("up_axis_tip"))
     world_scale : FloatProperty(name=get_id("world_scale"), description=get_id("world_scale_tip"), default=1.00, precision=4, min=0.0001)
+    material_paths : CollectionProperty(type=MaterialPathItem)
+    material_paths_index : IntProperty(name=get_id("dmx_mat_path"), default=0, min=0)
+    # Legacy single path. Kept registered so pre-collection .blend files still load their
+    # value for _on_blend_load_migrate_material_paths to pick up; not drawn in the UI.
     material_path : StringProperty(name=get_id("dmx_mat_path"), description=get_id("dmx_mat_path_tip"))
     export_list_active : IntProperty(name=get_id("active_exportable"), default=0, min=0, update=export_active_changed)
     export_list : CollectionProperty(type=ValveSource_Exportable, options={'SKIP_SAVE', 'HIDDEN'})

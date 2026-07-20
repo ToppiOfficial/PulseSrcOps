@@ -11,6 +11,7 @@ __all__ = [
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',
+    'MaterialPathItem',
     # mixins
     'ShapeTypeProps',
     'CurveTypeProps',
@@ -34,6 +35,7 @@ __all__ = [
     'ValveSource_CollectionProps',
     # material
     'ValveSource_MaterialProps',
+    '_on_blend_load_migrate_material_paths',
 ]
 
 if "bpy" in dir():

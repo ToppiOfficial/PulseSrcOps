@@ -16,7 +16,7 @@ from mathutils import Matrix, Vector
 
 from .. import flex, ordered_set
 from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id, getUpAxisMat,
-                     channelBagForNewActionSlot)
+                     channelBagForNewActionSlot, find_or_add_material_path)
 
 
 # ---------------------------------------------------------------------------
@@ -557,12 +557,15 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     # land in one slot.
     slot_for_face_set: list[int] = []
     for mat_path in imesh.materials:
+        path_index = None
         if imesh.materials_are_paths:
-            bpy.context.scene.vs.material_path = os.path.dirname(mat_path).replace("\\", "/")
+            path_index = find_or_add_material_path(bpy.context.scene, os.path.dirname(mat_path))
             mat_name = os.path.basename(mat_path)
         else:
             mat_name = mat_path
-        _mat, mat_ind = get_mesh_material(ctx, smd, mat_name)
+        mat, mat_ind = get_mesh_material(ctx, smd, mat_name)
+        if path_index is not None:
+            mat.vs.material_path_index = str(path_index)
         slot_for_face_set.append(mat_ind)
 
     deform_layer = bm.verts.layers.deform.active

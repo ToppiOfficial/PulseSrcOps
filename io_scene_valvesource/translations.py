@@ -154,6 +154,18 @@ _data = {
         'en': "Folder relative to game root containing VMTs referenced in this scene (DMX only)",
         'ja': "VMTを含むゲームルートからの相対フォルダー（DMXのみ）",
     },
+    'dmx_mat_path_none': {
+        'en': "(game root)",
+        'ja': "（ゲームルート）",
+    },
+    'dmx_mat_path_add_tip': {
+        'en': "Add a material path that materials in this scene can be assigned to",
+        'ja': "このシーンのマテリアルに割り当てられるマテリアルパスを追加",
+    },
+    'dmx_mat_path_remove_tip': {
+        'en': "Remove the selected material path. Materials using it fall back to the first path",
+        'ja': "選択したマテリアルパスを削除。使用中のマテリアルは最初のパスに戻ります",
+    },
     'dummy_bone': {
         'en': "Implicit motionless bone",
         'ja': "暗黙の静止ボーン",
@@ -1444,6 +1456,10 @@ _data = {
         'en': "Select a material",
         'ja': "マテリアルを選択",
     },
+    'panel_no_material_paths': {
+        'en': "Add a material path in the scene panel",
+        'ja': "シーンパネルでマテリアルパスを追加してください",
+    },
     'panel_toon_outline_edgeline': {
         'en': "Toon Outline/Edgeline",
         'ja': "トゥーンアウトライン/エッジライン",
@@ -2392,6 +2408,10 @@ _data = {
     'prop_normalize_shapekeys_tip': {
         'en': "Normalize shapekeys so max value is 1 and min is -1 or 0",
         'ja': "シェイプキーの最大値を1、最小値を-1または0に正規化",
+    },
+    'prop_material_path_index_tip': {
+        'en': "Which of the scene's material paths this material is exported under",
+        'ja': "このマテリアルの書き出しに使用するシーンのマテリアルパス",
     },
     'prop_override_dmx_export_path_tip': {
         'en': "Override the material path written into DMX for this material",

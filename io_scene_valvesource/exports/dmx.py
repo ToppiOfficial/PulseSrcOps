@@ -826,10 +826,7 @@ class DmxWriter:
             if not material_elem:
                 materials[mat_name] = material_elem = dm.add_element(mat_name, "DmeMaterial", id=mat_name + "mat")
                 matdata = ob.data.materials.get(mat_name)
-                if matdata and matdata.vs.override_dmx_export_path.strip():
-                    mat_path = matdata.vs.override_dmx_export_path
-                else:
-                    mat_path = bpy.context.scene.vs.material_path
+                mat_path = get_material_path(bpy.context.scene, matdata)
                 material_elem["mtlName"] = os.path.join(mat_path, mat_name).replace("\\", "/")
 
             face_set = dm.add_element(mat_name, "DmeFaceSet", id=bake.name + mat_name + "faces")

@@ -157,6 +157,7 @@ _classes = (
     PrefabItem,
     AttachmentDisplayMeshItem,
     BoneNamePrefixItem,
+    MaterialPathItem,
 
     # Material Classes
     ValveSource_MaterialProps,
@@ -187,6 +188,9 @@ _classes = (
     GUI.SMD_UL_ExportItems,
     GUI.SMD_UL_GroupItems,
     GUI.SMD_UL_ActionExport,
+    GUI.SMD_UL_MaterialPaths,
+    GUI.SMD_OT_MaterialPathAdd,
+    GUI.SMD_OT_MaterialPathRemove,
     GUI.SMD_PT_Exportables,
     GUI.SMD_PT_ViewportSimulation,
 
@@ -347,6 +351,7 @@ def register():
     State.hook_events()
     bpy.app.handlers.depsgraph_update_post.append(_on_armature_data_updated)
     bpy.app.handlers.load_post.append(_on_blend_load_refresh_hitbox_snapshot)
+    bpy.app.handlers.load_post.append(_on_blend_load_migrate_material_paths)
 
     procbones_sim.register()
 
@@ -380,6 +385,8 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(_on_armature_data_updated)
     if _on_blend_load_refresh_hitbox_snapshot in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_blend_load_refresh_hitbox_snapshot)
+    if _on_blend_load_migrate_material_paths in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_blend_load_migrate_material_paths)
     State.unhook_events()
 
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)

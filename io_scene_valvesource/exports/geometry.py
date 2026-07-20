@@ -167,8 +167,8 @@ class EdgelineBuilder:
             name = f"{slot.material.name}_edgeline" if slot.material else self.EDGELINE_MAT
             mat = bpy.data.materials.get(name) or bpy.data.materials.new(name=name)
 
-            if slot.material and slot.material.vs.override_dmx_export_path.strip():
-                mat.vs.override_dmx_export_path = slot.material.vs.override_dmx_export_path
+            if slot.material:
+                mat.vs.material_path_index = slot.material.vs.material_path_index
 
             return mat
 

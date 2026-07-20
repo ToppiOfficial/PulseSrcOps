@@ -1,4 +1,4 @@
-import bpy, math
+import bpy, math, os
 from bpy.types import Panel, UILayout, Collection, PoseBone, Bone, EditBone
 from .. import procbones_sim as _procbones_sim
 from .. import updater as _updater
@@ -11,7 +11,7 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
-                     is_bypassed_into_parent, parse_order_vg_name, MAX_MESH_SPLIT)
+                     is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors
 from .operators import (
@@ -37,6 +37,8 @@ from .operators import (
     SMD_OT_CreateVertexFloatMap_idname,
     SMD_OT_RemoveVertexFloatMap_idname,
     SMD_OT_SelectVertexFloatMap_idname,
+    SMD_OT_MaterialPathAdd,
+    SMD_OT_MaterialPathRemove,
 )
 
 
@@ -139,8 +141,13 @@ class SMD_PT_Scene(Panel):
                 sub.enabled = not sub.alert
             if State.exportFormat == ExportFormat.DMX:
                 col1 = box.column()
-                col1.scale_y = 1.2
-                col1.prop(scene.vs, "material_path")
+                col1.label(text=get_id("dmx_mat_path", True) + ":")
+                row = col1.row()
+                row.template_list("SMD_UL_MaterialPaths", "", scene.vs, "material_paths",
+                                  scene.vs, "material_paths_index", rows=2, maxrows=5)
+                col2 = row.column(align=True)
+                col2.operator(SMD_OT_MaterialPathAdd.bl_idname, text="", icon='ADD')
+                col2.operator(SMD_OT_MaterialPathRemove.bl_idname, text="", icon='REMOVE')
 
                 if State.compiler != Compiler.MODELDOC:
                     row = box.row().split(factor=0.33)
@@ -1488,7 +1495,12 @@ class SMD_PT_Material(Properties_Panel):
         box = layout.box()
 
         if State.exportFormat == ExportFormat.DMX:
-            box.prop(active_material.vs, 'override_dmx_export_path', placeholder=context.scene.vs.material_path)
+            if not len(context.scene.vs.material_paths):
+                box.label(text=get_id("panel_no_material_paths"), icon='INFO')
+                return
+            box.prop(active_material.vs, 'material_path_index')
+            resolved = get_material_path(context.scene, active_material)
+            box.label(text=os.path.join(resolved, active_material.name).replace("\\", "/"), icon='FILE_BLANK')
 
 
 class SMD_PT_Empty(Properties_Panel):

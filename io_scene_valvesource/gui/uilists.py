@@ -371,6 +371,13 @@ class SMD_UL_BoneNamePrefixes(UIList):
         split.prop(item, "shortcut", text="", emboss=True, icon='SYNTAX_OFF')
 
 
+class SMD_UL_MaterialPaths(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.label(text="", icon='MATERIAL' if index else 'MATERIAL_DATA')
+        row.prop(item, "path", text="", emboss=True, placeholder=get_id("dmx_mat_path_none"))
+
+
 class SMD_UL_AttachmentDisplayMeshes(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)

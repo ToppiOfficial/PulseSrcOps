@@ -2276,6 +2276,48 @@ class SMD_OT_SetAttachmentMeshRender(Operator):
         return {'FINISHED'}
 
 
+class SMD_OT_MaterialPathAdd(Operator):
+    bl_idname = 'smd.material_path_add'
+    bl_label = "Add Material Path"
+    bl_description = get_id("dmx_mat_path_add_tip")
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    def execute(self, context):
+        vs = context.scene.vs
+        vs.material_paths.add()
+        vs.material_paths_index = len(vs.material_paths) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_MaterialPathRemove(Operator):
+    bl_idname = 'smd.material_path_remove'
+    bl_label = "Remove Material Path"
+    bl_description = get_id("dmx_mat_path_remove_tip")
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        vs = context.scene.vs
+        return 0 <= vs.material_paths_index < len(vs.material_paths)
+
+    def execute(self, context):
+        vs = context.scene.vs
+        idx = vs.material_paths_index
+
+        # Materials index into this collection, so shift every assignment that sits past
+        # the removed entry. Anything pointing at the entry itself falls back to 0.
+        for mat in bpy.data.materials:
+            assigned = int(mat.vs.material_path_index)
+            if assigned > idx:
+                mat.vs.material_path_index = str(assigned - 1)
+            elif assigned == idx:
+                mat.vs.material_path_index = '0'
+
+        vs.material_paths.remove(idx)
+        vs.material_paths_index = min(idx, len(vs.material_paths) - 1)
+        return {'FINISHED'}
+
+
 class SMD_OT_BoneNamePrefixAdd(Operator):
     bl_idname = 'smd.bone_name_prefix_add'
     bl_label = "Add Prefix"
