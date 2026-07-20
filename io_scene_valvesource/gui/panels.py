@@ -308,6 +308,8 @@ class SMD_PT_Exportables(Panel):
             box = layout.box()
             col = box.column()
             col.row().prop(avs, "action_selection", expand=True)
+            if any(e.proc_type == 'TRIGGER' and e.action for e in avs.proc_bones):
+                col.prop(avs, "export_proc_bone_actions")
             if avs.action_selection != 'CURRENT':
                 is_slot_filter = avs.action_selection == 'FILTERED'
                 col.prop(item.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))

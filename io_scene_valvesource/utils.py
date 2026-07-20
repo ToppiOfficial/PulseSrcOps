@@ -741,6 +741,46 @@ def actionsForFilter(filter):
     import fnmatch
     return list([action for action in bpy.data.actions if action.users and fnmatch.fnmatch(action.name, filter)])
 
+def _procBoneSlotDisplayName(action, slot_name : str):
+    """Mirror procbones_sim._find_action_slot, but return the slot's display name so it
+    can be compared against what the exporter iterates. An entry naming no slot, or a
+    slot that no longer exists, resolves to nothing - it drives no procedural bone, so
+    it must not suppress any animation."""
+    if not slot_name:
+        return None
+    for s in getattr(action, 'slots', ()):
+        if slot_name in (s.identifier, s.name_display, getattr(s, 'name', '')):
+            return s.name_display
+    return None
+
+def procBoneTriggerSlotNames(arm_ob : bpy.types.Object) -> set:
+    """Display names of the action slots that drive one of `arm_ob`'s procedural bones.
+    Only slots of the action currently assigned to `arm_ob` can collide, so entries
+    pointing at another action are ignored."""
+    ad = getattr(arm_ob, 'animation_data', None)
+    if not ad or not ad.action or arm_ob.type != 'ARMATURE':
+        return set()
+    names = (_procBoneSlotDisplayName(ad.action, e.action_slot_name)
+             for e in arm_ob.data.vs.proc_bones
+             if e.proc_type == 'TRIGGER' and e.action == ad.action)
+    return {n for n in names if n}
+
+def procBoneTriggerActionNames(arm_ob : bpy.types.Object) -> set:
+    """Names of the actions that drive one of `arm_ob`'s procedural bones."""
+    if arm_ob.type != 'ARMATURE':
+        return set()
+    return {e.action.name for e in arm_ob.data.vs.proc_bones
+            if e.proc_type == 'TRIGGER' and e.action}
+
+def isProcBoneAnimSkipped(arm_ob : bpy.types.Object, action_name : str, slot_name : str = None) -> bool:
+    """True when this animation only exists to drive a procedural bone and the armature
+    is not set to export those."""
+    if getattr(arm_ob, 'type', None) != 'ARMATURE' or arm_ob.data.vs.export_proc_bone_actions:
+        return False
+    if slot_name is not None:
+        return slot_name in procBoneTriggerSlotNames(arm_ob)
+    return action_name in procBoneTriggerActionNames(arm_ob)
+
 def actionSlotExportName(animData : bpy.types.AnimData):
     """For use only when exporting a single action slot"""
     slot_name = animData.action_slot.name_display
@@ -906,7 +946,12 @@ def make_export_list(scene: bpy.types.Scene):
                 i_icon = i_type = "ACTION_SLOT"
                 if ob.data.vs.action_selection != 'CURRENT':
                     export_slots = ob.data.vs.action_selection == 'FILTERED'
-                    exportables_count = len(actionSlotsForFilter(ob) if export_slots else actionsForFilter(ob.vs.action_filter))
+                    if export_slots:
+                        exportables_count = len([s for s in actionSlotsForFilter(ob)
+                                                 if not isProcBoneAnimSkipped(ob, None, s.name_display)])
+                    else:
+                        exportables_count = len([a for a in actionsForFilter(ob.vs.action_filter)
+                                                 if not isProcBoneAnimSkipped(ob, a.name)])
                     # Keep the row even when the filter matches nothing, otherwise the
                     # armature vanishes from the list and the filter can't be recovered.
                     if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):

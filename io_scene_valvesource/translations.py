@@ -436,6 +436,10 @@ _data = {
         'en': "Sanitised exportable name \"{0}\" to \"{1}\"",
         'ja': "エクスポート名「{0}」を「{1}」にサニタイズしました",
     },
+    'exporter_warn_procbone_anim': {
+        'en': "Skipped \"{0}\": it drives a procedural bone of \"{1}\". Enable 'Export Procedural Bone Animations' to export it anyway.",
+        'ja': "「{0}」をスキップしました: 「{1}」のプロシージャルボーンを駆動しています。エクスポートするには「プロシージャルボーンのアニメーションをエクスポート」を有効にしてください。",
+    },
     'exporter_warn_source2names': {
         'en': "Consider renaming \"{0}\": in Source 2, model names can contain only lower-case characters, digits, and/or underscores.",
         'ja': "「{0}」の名前変更を検討してください: Source 2では英小文字・数字・アンダースコアのみ使用可",
@@ -2473,6 +2477,14 @@ _data = {
     'prop_pose_bone_proc_tolerance_tip': {
         'en': "Angular cone within which this trigger pose is active when used as a Proc Bone driver. Keyframe in the driver's action to vary per trigger",
         'ja': "このボーンがProcボーンのドライバーとして使用される場合のトリガーポーズが有効になるコーンの角度。アクション内でキーフレームを打つとトリガーごとに変化させることができます。",
+    },
+    'prop_export_proc_bone_actions': {
+        'en': "Export Procedural Bone Animations",
+        'ja': "プロシージャルボーンのアニメーションをエクスポート",
+    },
+    'prop_export_proc_bone_actions_tip': {
+        'en': "Also export animations that are used as trigger animations by this armature's procedural bones. They are excluded by default because they only exist to author helper bone poses",
+        'ja': "このアーマチュアのプロシージャルボーンがトリガーアニメーションとして使用しているアニメーションもエクスポートします。ヘルパーボーンのポーズ作成専用のため、既定では除外されます",
     },
     'prop_reset_pose_per_anim': {
         'en': "Reset Pose Per Animation Export",

@@ -1477,6 +1477,11 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
 
         action = bpy.data.actions.get(self.action_name) if self.action_name else None
 
+        if action and not getattr(action, 'is_action_legacy', True) \
+                and _procbones_sim._find_action_slot(action, self.action_slot_name) is None:
+            self.report({'ERROR'}, f"Action '{action.name}' needs a slot - pick one, or leave the action unset")
+            return {'CANCELLED'}
+
         ref_arm = bpy.data.objects.get(self.reference_armature) if self.reference_armature else None
         if self.reference_armature and (ref_arm is None or ref_arm.type != 'ARMATURE'):
             self.report({'ERROR'}, "Reference armature must be an armature object")

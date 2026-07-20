@@ -455,12 +455,23 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             baked_armature = bake_results[0].object
             if source.data.vs.action_selection == "FILTERED":
                 for slot in actionSlotsForFilter(baked_armature):
+                    if isProcBoneAnimSkipped(source, None, slot.name_display):
+                        self.warning(get_id("exporter_warn_procbone_anim", True).format(slot.name_display, source.name))
+                        continue
                     baked_armature.animation_data.action_slot = slot
                     self.files_exported += write_func(source, bake_results, self.sanitiseFilename(slot.name_display), path)
             else:
                 for action in actionsForFilter(baked_armature.vs.action_filter):
+                    if isProcBoneAnimSkipped(source, action.name):
+                        self.warning(get_id("exporter_warn_procbone_anim", True).format(action.name, source.name))
+                        continue
                     baked_armature.animation_data.action = action
                     self.files_exported += write_func(source, bake_results, self.sanitiseFilename(action.name), path)
+        elif (isinstance(source, bpy.types.Object) and source.type == "ARMATURE"
+              and source.animation_data and source.animation_data.action_slot
+              and isProcBoneAnimSkipped(source, None, source.animation_data.action_slot.name_display)):
+            self.warning(get_id("exporter_warn_procbone_anim", True).format(
+                source.animation_data.action_slot.name_display, source.name))
         else:
             self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
 

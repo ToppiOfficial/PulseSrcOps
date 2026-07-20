@@ -1,6 +1,6 @@
 import bpy
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
-from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable
+from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable, isProcBoneAnimSkipped, _procBoneSlotDisplayName
 from .helpers import build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
 
 
@@ -123,9 +123,11 @@ class SMD_UL_ActionExport(UIList):
         flags = []
         for it in items:
             if hasattr(it, 'name_display'):  # slot
-                ok = (not filt) or fnmatch(it.name_display, filt)
+                ok = ((not filt) or fnmatch(it.name_display, filt)) and \
+                     not (arm and isProcBoneAnimSkipped(arm, None, it.name_display))
             else:  # action - mirror actionsForFilter: must have users
-                ok = bool(it.users) and ((not filt) or fnmatch(it.name, filt))
+                ok = bool(it.users) and ((not filt) or fnmatch(it.name, filt)) and \
+                     not (arm and isProcBoneAnimSkipped(arm, it.name))
             flags.append(self.bitflag_filter_item if ok else 0)
         return flags, []
 
@@ -331,7 +333,15 @@ class SMD_UL_ProcBones(UIList):
             action_label = item.action.name if item.action else ""
             if action_label and item.action_slot_name:
                 action_label = f"{item.action_slot_name} ({action_label})"
-            row.label(text=action_label)
+            # A slotted action with no resolvable slot drives nothing - flag it here,
+            # otherwise the entry silently does nothing until export.
+            if item.action and not getattr(item.action, 'is_action_legacy', True) \
+                    and _procBoneSlotDisplayName(item.action, item.action_slot_name) is None:
+                sub = row.row(align=True)
+                sub.alert = True
+                sub.label(text=action_label or item.action.name, icon='ERROR')
+            else:
+                row.label(text=action_label)
 
 
 class SMD_UL_BoneNamePrefixes(UIList):
