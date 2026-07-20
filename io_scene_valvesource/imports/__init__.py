@@ -14,5 +14,5 @@ from .vmdl import read_vmdl, local_matrix, extract_bones, resolve_content_ref
 from .smd import (SmdNode, ParsedFrames, parse_quote_blocked_line, scan_smd,
                   read_nodes, read_frames, read_polys, read_shapes)
 # Imported last: importer.py pulls in the submodules above.
-from .importer import (ImporterBase, SmdImporter, ImportSMD, ImportQC,
+from .importer import (ImporterBase, ImportSMD, ImportQC,
                        ImportVMDL, ImportDMX, ImportPrefab)

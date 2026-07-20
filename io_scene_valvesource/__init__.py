@@ -295,7 +295,6 @@ GUI.SMD_PT_Jigglebones,
     # Export and Import
     exports.SmdExporter,
     exports.PrefabExporter,
-    imports.SmdImporter,
     imports.ImportDMX,
     imports.ImportSMD,
     imports.ImportQC,

@@ -1,6 +1,6 @@
 """DMX -> IR. Parse only: this module builds no Blender data.
 
-Extracted from SmdImporter.readDMX. Everything here is a faithful port; behaviour
+Extracted from readDMX. Everything here is a faithful port; behaviour
 changes belong in the build half.
 """
 

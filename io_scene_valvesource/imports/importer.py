@@ -383,36 +383,6 @@ class ImporterBase(bpy.types.Operator, Logger):
     # VMDL helpers
     # -------------------------------------------------------------------------
 
-class SmdImporter(ImporterBase):
-    """All formats in one operator. Superseded per-format as each one migrates to its
-    own operator; still the entry point for any extension."""
-    bl_idname = "import_scene.smd"
-    bl_label = get_id("importer_title")
-    bl_description = get_id("importer_tip")
-
-    filter_glob: StringProperty(default="*.smd;*.vta;*.dmx;*.qc;*.qci;*.vmdl;*.vmdl_prefab", options={'HIDDEN'})
-
-    doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
-    makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
-
-    def draw_options(self, layout) -> None:
-        layout.prop(self.properties, "doAnim")
-        layout.prop(self.properties, "makeCamera")
-
-    def read_file(self, filepath: str) -> int | None:
-        filepath_lc = filepath.lower()
-        if filepath_lc.endswith(('.qc', '.qci', '.vmdl', '.vmdl_prefab')):
-            count = self.readQC(filepath, False, self.properties.doAnim, self.properties.makeCamera, self.properties.rotMode, outer_qc=True)
-            bpy.context.view_layer.objects.active = self.qc.a
-            return count
-        if filepath_lc.endswith('.smd'):
-            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode)
-        if filepath_lc.endswith('.vta'):
-            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode, smd_type=FLEX)
-        if filepath_lc.endswith('.dmx'):
-            return self.readDMX(filepath, self.properties.upAxis, self.properties.rotMode)
-        self.report_unreadable(filepath_lc)
-        return None
 
 
 class ImportSMD(ImporterBase):

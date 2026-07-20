@@ -1,6 +1,6 @@
 """IR -> Blender. The half of the DMX importer that creates data-blocks.
 
-Extracted from SmdImporter.readDMX. `ctx` is the importer operator, duck-typed for
+Extracted from readDMX. `ctx` is the importer operator, duck-typed for
 `warning`/`error` (Logger), `append`, `existingBones`, `appliedReferencePose`, `qc`
 and `properties`.
 """
