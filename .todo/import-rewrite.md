@@ -527,6 +527,25 @@ import anything at all.
 Verified across the 11 endfield VMDLs: **every prefab, skeleton, mesh and animation
 reference resolves - 0 unresolved**, following prefab chains up to 3 documents deep.
 
+## VMDL no longer forces VALIDATE on referenced DMX
+
+A Source 2 render mesh is frequently skinned to the *art* rig, not the model skeleton -
+the prefab's AnimConstraints bridge the two at compile time. Measured on xaihi:
+
+    player.skeleton.dmx :  76 joints -> pelvis, spine_0, spine_1, neck_0, head_0
+    player.mesh.dmx     : 100 joints -> Hips, Left_leg, Left_knee, Left_ankle
+
+`_read_render_meshes` hardcoded `append = 'VALIDATE'`, so all 100 mesh bones were
+reported missing and the mesh came in unskinned. It now honours the importer's Bone
+Handling choice (default APPEND, which adds the art bones alongside the game skeleton).
+`_read_skeleton_file` still forces NEW_ARMATURE for the *first* skeleton so the model
+gets its own armature instead of merging into an unrelated scene rig, and its
+`find_armature()` fallback is gone - guessing is what caused that merging.
+
+**Not solved:** AnimConstraint nodes are still not imported, so the art rig and the game
+skeleton arrive unlinked whichever mode is chosen. Retargeting between them is a separate
+feature, not an import gap.
+
 ## Next: make DMX prefab import optional (the phase 1.6 question)
 
 `readDMX` still calls `apply_dmx_prefab_data` unconditionally, so importing a model DMX

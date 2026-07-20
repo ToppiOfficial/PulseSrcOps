@@ -18,7 +18,7 @@ from mathutils import Matrix, Euler, Vector
 from .. import keyvalues3
 from ..utils import (REF, ANIM, KeyFrame, SmdInfo, State, printTimeMessage,
                      import_jigglebones_from_kv3, import_hitboxes_from_kv3)
-from .build import truncate_id_name, find_armature, create_armature, apply_frames
+from .build import truncate_id_name, create_armature, apply_frames
 
 
 def local_matrix(origin, angles_deg) -> Matrix:
@@ -163,7 +163,7 @@ def _read_document(ctx, smd, qc, filepath: str, rot_mode: str, seen: set) -> boo
     # at all, and skipping its RenderMeshList would import nothing.
     _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode)
 
-    arm = qc.a or (ctx.smd.a if ctx.smd else None) or find_armature()
+    arm = qc.a or (ctx.smd.a if ctx.smd else None)
     if not arm:
         print(f"- {filename}: no armature, skipping attachments/jigglebones/hitboxes")
         return True
@@ -220,14 +220,19 @@ def _read_skeleton_file(ctx, qc, skeleton_node, filepath, filename, rot_mode):
         if path not in qc.imported_smds:
             qc.imported_smds.append(path)
             prev_append = ctx.append
-            ctx.append = 'VALIDATE' if qc.a else 'NEW_ARMATURE'
+            # Nothing built yet means this is the model's own skeleton: give it its own
+            # armature rather than letting readDMX find some unrelated rig in the scene.
+            if not qc.a:
+                ctx.append = 'NEW_ARMATURE'
             ctx.num_files_imported += ctx.readDMX(path, qc.upAxis, rot_mode, False, REF)
             ctx.append = prev_append
         # readDMX replaced ctx.smd with its own; the armature it built is on that.
         if ctx.smd and ctx.smd.a:
             qc.a = ctx.smd.a
             return qc.a
-    return qc.a or find_armature()
+    # No fallback scan - guessing at a scene armature is how a model ends up merged
+    # into an unrelated rig. The caller warns instead.
+    return qc.a
 
 
 def _build_skeleton(ctx, smd, qc, skeleton_node):
@@ -297,10 +302,11 @@ def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> Non
         if dmx_path in qc.imported_smds:
             continue
         qc.imported_smds.append(dmx_path)
-        prev_append = ctx.append
-        ctx.append = 'VALIDATE'
+        # The importer's Bone Handling choice applies here rather than a forced
+        # VALIDATE. A Source 2 render mesh is often skinned to the art rig, not the
+        # model skeleton - AnimConstraints bridge the two at compile time - so
+        # validating drops every one of its bones.
         ctx.num_files_imported += ctx.readDMX(dmx_path, qc.upAxis, rot_mode, False, REF)
-        ctx.append = prev_append
 
 
 def _read_attachments(ctx, smd, arm, root_node, filename) -> None:
