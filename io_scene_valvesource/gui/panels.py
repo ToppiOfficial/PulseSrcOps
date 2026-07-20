@@ -13,7 +13,6 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
                      is_bypassed_into_parent, parse_order_vg_name, MAX_MESH_SPLIT)
 from ..export import SmdExporter, PrefabExporter
-from ..import_smd import SmdImporter
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors
 from .operators import (
@@ -112,7 +111,7 @@ class SMD_PT_Scene(Panel):
         # Export
         row = l.row(align=True)
         row.scale_y = 1.5
-        row.operator(SmdImporter.bl_idname, text="Import", icon='IMPORT')
+        row.menu("SMD_MT_ImportChoice", text="Import", icon='IMPORT')
         row.operator(SmdExporter.bl_idname, text="Export", icon='EXPORT')
 
         box = l.box()

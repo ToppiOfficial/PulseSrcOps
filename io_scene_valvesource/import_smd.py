@@ -26,7 +26,7 @@ from mathutils import Quaternion, Euler
 from math import ceil, radians
 from typing import cast
 from .utils import *
-from . import datamodel, ordered_set, flex, keyvalues3
+from . import datamodel, ordered_set, flex, keyvalues3, importsrc
 
 from .utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 
@@ -199,10 +199,12 @@ def apply_flex_text_to_object(ob, parsed: dict) -> tuple[int, int]:
     return n_controllers, n_rules
 
 
-class SmdImporter(bpy.types.Operator, Logger):
-    bl_idname = "import_scene.smd"
-    bl_label = get_id("importer_title")
-    bl_description = get_id("importer_tip")
+class ImporterBase(bpy.types.Operator, Logger):
+    """Shared file-browser plumbing and the format readers.
+
+    Subclasses declare bl_idname/bl_label, filter_glob, any format-specific
+    properties, and implement read_file().
+    """
     bl_options = {'UNDO', 'PRESET'}
 
     qc: QcInfo | None = None
@@ -213,12 +215,9 @@ class SmdImporter(bpy.types.Operator, Logger):
     files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={'HIDDEN'})
     directory: StringProperty(maxlen=1024, default="", subtype='FILE_PATH', options={'HIDDEN'})
     filter_folder: BoolProperty(name="Filter Folders", description="", default=True, options={'HIDDEN'})
-    filter_glob: StringProperty(default="*.smd;*.vta;*.dmx;*.qc;*.qci;*.vmdl;*.vmdl_prefab", options={'HIDDEN'})
 
-    # Custom properties
-    doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
+    # Options every format honours
     createCollections: BoolProperty(name=get_id("importer_use_collections"), description=get_id("importer_use_collections_tip"), default=True)
-    makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
     append: EnumProperty(
         name=get_id("importer_bones_mode"),
         description=get_id("importer_bones_mode_desc"),
@@ -259,21 +258,11 @@ class SmdImporter(bpy.types.Operator, Logger):
         self.imported_procbones = 0
 
         for filepath in [os.path.join(self.directory, file.name) for file in self.files] if self.files else [self.filepath]:
-            filepath_lc = filepath.lower()
-            if filepath_lc.endswith(('.qc', '.qci', '.vmdl', '.vmdl_prefab')):
-                self.num_files_imported = self.readQC(filepath, False, self.properties.doAnim, self.properties.makeCamera, self.properties.rotMode, outer_qc=True)
-                bpy.context.view_layer.objects.active = self.qc.a
-            elif filepath_lc.endswith('.smd'):
-                self.num_files_imported = self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode)
-            elif filepath_lc.endswith('.vta'):
-                self.num_files_imported = self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode, smd_type=FLEX)
-            elif filepath_lc.endswith('.dmx'):
-                self.num_files_imported = self.readDMX(filepath, self.properties.upAxis, self.properties.rotMode)
-            else:
-                if len(filepath_lc) == 0:
-                    self.report({'ERROR'}, get_id("importer_err_nofile"))
-                else:
-                    self.report({'ERROR'}, get_id("importer_err_badfile", True).format(os.path.basename(filepath)))
+            # read_file returns None for an unreadable path, leaving the running
+            # count from any earlier file in a multi-file selection untouched
+            count = self.read_file(filepath)
+            if count is not None:
+                self.num_files_imported = count
 
             self.append = pre_append
 
@@ -318,6 +307,15 @@ class SmdImporter(bpy.types.Operator, Logger):
         self.properties.upAxis = context.scene.vs.up_axis
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
+
+    def read_file(self, filepath: str) -> int | None:
+        raise NotImplementedError
+
+    def report_unreadable(self, filepath: str) -> None:
+        if len(filepath) == 0:
+            self.report({'ERROR'}, get_id("importer_err_nofile"))
+        else:
+            self.report({'ERROR'}, get_id("importer_err_badfile", True).format(os.path.basename(filepath)))
 
     def ensureAnimationBonesValidated(self):
         if self.smd.jobType == ANIM and self.append == 'APPEND' and (hasattr(self.smd, "a") or self.findArmature()):
@@ -1528,6 +1526,94 @@ class SmdImporter(bpy.types.Operator, Logger):
     # -------------------------------------------------------------------------
 
     def readDMX(self, filepath: str, upAxis: str, rotMode: str, newscene: bool = False, smd_type=None, target_layer: int = 0) -> int:
+        # KST_OLD_DMX_IMPORT falls back to the pre-importsrc implementation below.
+        # Delete _readDMX_legacy once the new path is verified (mirrors KST_OLD_DMX
+        # on the export rewrite).
+        if os.getenv("KST_OLD_DMX_IMPORT"):
+            return self._readDMX_legacy(filepath, upAxis, rotMode, newscene, smd_type, target_layer)
+
+        smd = self.initSMD(filepath, smd_type, upAxis, rotMode, target_layer)
+        smd.isDMX = 1
+
+        bench = BenchMarker(1, "DMX")
+
+        target_arm = self.findArmature() if self.append != 'NEW_ARMATURE' else None
+        if target_arm:
+            smd.a = target_arm
+
+        smd.atch = None
+        smd.layer = target_layer
+        if bpy.context.active_object:
+            ops.object.mode_set(mode='OBJECT')
+        self.appliedReferencePose = False
+
+        print(f"\nDMX IMPORTER: now working on {os.path.basename(filepath)}")
+
+        try:
+            print("- Loading DMX...")
+            try:
+                parsed = importsrc.load_dmx(filepath, smd_type, smd.upAxis)
+            except IOError as e:
+                self.error(e)
+                return 0
+            bench.report("Load DMX")
+
+            if bpy.context.scene.name.startswith("Scene"):
+                bpy.context.scene.name = smd.jobName
+
+            smd.upAxis = parsed.upAxis
+            smd.jobType = parsed.jobType
+            self.createCollection()
+            self.ensureAnimationBonesValidated()
+
+            ifile = importsrc.read_file(parsed)
+            for version in parsed.version_bumps:
+                self._ensureSceneDmxVersion(version)
+            for message in parsed.warnings:
+                self.warning(message)
+
+            bone_matrices = importsrc.build_skeleton(
+                self, smd, ifile.skeleton, target_arm,
+                parsed.DmeModel.name or smd.jobName)
+            importsrc.apply_rest_pose(self, smd, bone_matrices)
+
+            if smd.a and smd.jobType != ANIM:
+                importsrc.apply_dmx_prefab_data(self, smd, parsed, ifile.skeleton)
+
+            imported_meshes = [
+                importsrc.build_mesh(self, smd, imesh, parsed.corrective_separator)
+                for imesh in ifile.meshes
+            ]
+
+            # Flex controllers are global model data: apply them to every imported mesh
+            # with shape keys, not just the last one parsed. When called from readQC,
+            # defer so readQC can merge QC data on top.
+            if smd.jobType == REF and smd.m:
+                if self.qc:
+                    self.qc.ref_mesh = smd.m
+                flex_meshes = [m for m in imported_meshes if hasShapes(m)]
+                _combo_op = parsed.root.get("combinationOperator")
+                if self.qc:
+                    for m in flex_meshes:
+                        if m not in self.qc.flex_meshes:
+                            self.qc.flex_meshes.append(m)
+                    if _combo_op:
+                        self.qc.pending_combo_op = _combo_op
+                elif _combo_op:
+                    for m in (flex_meshes or [smd.m]):
+                        self._populate_dme_flex_from_dmx(m, _combo_op)
+
+            if smd.jobType == ANIM:
+                importsrc.build_anim(self, smd, ifile.anim)
+
+        except datamodel.AttributeError as e:
+            e.args = [f"Invalid DMX file: {e.args[0] if e.args else 'Unknown error'}"]
+            raise
+
+        bench.report("DMX imported in")
+        return 1
+
+    def _readDMX_legacy(self, filepath: str, upAxis: str, rotMode: str, newscene: bool = False, smd_type=None, target_layer: int = 0) -> int:
         smd = self.initSMD(filepath, smd_type, upAxis, rotMode, target_layer)
         smd.isDMX = 1
 
@@ -2550,3 +2636,44 @@ class SmdImporter(bpy.types.Operator, Logger):
         printTimeMessage(qc.startTime, filename, "import", "VMDL")
         # Count referenced meshes when present, otherwise the VMDL itself.
         return self.num_files_imported or 1
+
+class SmdImporter(ImporterBase):
+    """All formats in one operator. Superseded per-format as each one migrates to
+    importsrc; still the entry point for SMD/VTA/QC/VMDL."""
+    bl_idname = "import_scene.smd"
+    bl_label = get_id("importer_title")
+    bl_description = get_id("importer_tip")
+
+    filter_glob: StringProperty(default="*.smd;*.vta;*.dmx;*.qc;*.qci;*.vmdl;*.vmdl_prefab", options={'HIDDEN'})
+
+    doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
+    makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
+
+    def read_file(self, filepath: str) -> int | None:
+        filepath_lc = filepath.lower()
+        if filepath_lc.endswith(('.qc', '.qci', '.vmdl', '.vmdl_prefab')):
+            count = self.readQC(filepath, False, self.properties.doAnim, self.properties.makeCamera, self.properties.rotMode, outer_qc=True)
+            bpy.context.view_layer.objects.active = self.qc.a
+            return count
+        if filepath_lc.endswith('.smd'):
+            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode)
+        if filepath_lc.endswith('.vta'):
+            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode, smd_type=FLEX)
+        if filepath_lc.endswith('.dmx'):
+            return self.readDMX(filepath, self.properties.upAxis, self.properties.rotMode)
+        self.report_unreadable(filepath_lc)
+        return None
+
+
+class ImportDMX(ImporterBase):
+    bl_idname = "import_scene.kst_dmx"
+    bl_label = get_id("importer_dmx_title")
+    bl_description = get_id("importer_dmx_tip")
+
+    filter_glob: StringProperty(default="*.dmx", options={'HIDDEN'})
+
+    def read_file(self, filepath: str) -> int | None:
+        if not filepath.lower().endswith('.dmx'):
+            self.report_unreadable(filepath)
+            return None
+        return self.readDMX(filepath, self.properties.upAxis, self.properties.rotMode)

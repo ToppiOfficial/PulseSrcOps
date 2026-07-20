@@ -564,6 +564,22 @@ _data = {
         'en': "Export bones using their Blender names, ignoring any export name overrides",
         'ja': "エクスポート名の上書きを無視し、Blenderのボーン名を使用",
     },
+    'importmenu_title': {
+        'en': "Source Engine",
+        'ja': "Source Engine",
+    },
+    'import_menuitem_dmx': {
+        'en': "DMX (.dmx)",
+        'ja': "DMX (.dmx)",
+    },
+    'importer_dmx_title': {
+        'en': "Import DMX",
+        'ja': "インポート DMX",
+    },
+    'importer_dmx_tip': {
+        'en': "Imports an uncompiled Source Engine DMX model or animation",
+        'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
+    },
     'import_menuitem': {
         'en': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
         'ja': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",

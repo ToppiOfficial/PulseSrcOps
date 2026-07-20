@@ -49,7 +49,7 @@ from .utils import *
 from .props import *
 
 def menu_func_import(self, context):
-    self.layout.operator(import_smd.SmdImporter.bl_idname, text=get_id("import_menuitem", True))
+    self.layout.menu("SMD_MT_ImportChoice", text=get_id("importmenu_title"))
 
 def menu_func_export(self, context):
     self.layout.menu("SMD_MT_ExportChoice", text=get_id("export_menuitem"))
@@ -180,6 +180,7 @@ _classes = (
     ValveSource_SceneProps,
 
     # GUI - Scene
+    GUI.SMD_MT_ImportChoice,
     GUI.SMD_MT_ExportChoice,
     GUI.SMD_PT_Scene,
     GUI.SMD_MT_ConfigureScene,
@@ -295,6 +296,7 @@ GUI.SMD_PT_Jigglebones,
     export.SmdExporter,
     export.PrefabExporter,
     import_smd.SmdImporter,
+    import_smd.ImportDMX,
 
     # Updater
     updater.SMD_OT_CheckForUpdates,
