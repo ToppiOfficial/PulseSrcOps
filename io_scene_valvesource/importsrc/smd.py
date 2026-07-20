@@ -19,7 +19,7 @@ from bpy.app.translations import pgettext
 from mathutils import Matrix, Euler, Vector
 
 from ..utils import (REF, ANIM, PHYS, FLEX, get_id, getUpAxisMat, hasShapes,
-                     removeObject, rx90, shape_types, smdBreak, smdContinue)
+                     removeObject, shape_types, smdBreak, smdContinue)
 from .records import ImportedFace, ImportedLoopLayer, ImportedMesh
 
 
@@ -201,8 +201,12 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
     mesh = ImportedMesh(name=mesh_name)
     mesh.has_weightmap = True
     mesh.group_names = list(group_names)
-    # SMD applies the up-axis correction to mesh data rather than the object
-    mesh.data_transform = rx90 if smd.upAxis == 'Y' else None
+    # SMD applies the up-axis correction to mesh data rather than the object.
+    # readPolys only ever handled Y (hardcoded rx90), so an X-up SMD came in unrotated
+    # while its bones and any VTA - both of which go through getUpAxisMat - did not.
+    # getUpAxisMat('Y') is rx90 and getUpAxisMat('Z') is identity, so Y and Z are
+    # unchanged by using it here.
+    mesh.data_transform = getUpAxisMat(smd.upAxis)
     # A duplicate face is resolved by giving it its own vertices, not by dropping it
     mesh.split_duplicate_faces = True
     mesh.materials_are_paths = False

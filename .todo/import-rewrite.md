@@ -44,6 +44,13 @@ Both are deliberate; revert if they turn out to matter.
 
 - `build_mesh` sets `display_type = 'SOLID'` on PHYS meshes. `readPolys` did not (only
   `getMeshMaterial` did, and only when it created a new material).
+- **X up-axis now works for SMD meshes.** `readPolys` hardcoded `rx90` behind
+  `if smd.upAxis == 'Y'`, so an X-up SMD imported unrotated while its bones
+  (`build_smd_anim`) and any VTA (`read_shapes`) were rotated, which also made VTA
+  shrinkwrap matching fail and left a stray "VTA vertices" object behind.
+  `read_polys` now uses `getUpAxisMat(smd.upAxis)`, which is `rx90` for Y and identity
+  for Z, so those two are bit-identical to before. Pre-existing upstream bug, not a
+  rewrite regression.
 - The `ImportedMesh.materials_are_paths` flag exists **because** `build_mesh` splits a
   DMX material path into `scene.vs.material_path` + basename, whereas `readPolys` used
   the whole triangle material line verbatim as the Blender material name. SMD sets the
