@@ -1827,6 +1827,17 @@ class ImportQC(ImporterBase):
 
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
     makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
+    prefabData: EnumProperty(
+        name=get_id("importer_prefabdata"),
+        description=get_id("importer_prefabdata_tip"),
+        items=(
+            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
+            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
+            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
+        ),
+        options={'ENUM_FLAG'},
+        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
+    )
 
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith(('.qc', '.qci')):
@@ -1851,6 +1862,18 @@ class ImportPrefab(ImporterBase):
 
     filter_glob: StringProperty(default="*.qc;*.qci;*.vrd;*.dmx;*.vmdl_prefab", options={'HIDDEN'})
 
+    prefabData: EnumProperty(
+        name=get_id("importer_prefabdata"),
+        description=get_id("importer_prefabdata_tip"),
+        items=(
+            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
+            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
+            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
+        ),
+        options={'ENUM_FLAG'},
+        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
+    )
+
     @classmethod
     def poll(cls, context):
         return findArmatureForPrefab(context) is not None
@@ -1859,6 +1882,8 @@ class ImportPrefab(ImporterBase):
         # Nothing is being built, so the build options (upAxis, append, rotMode,
         # boneMode) do not apply. Hitboxes are the only consumer of createCollections.
         self.layout.prop(self.properties, "createCollections")
+        self.layout.label(text=get_id("importer_prefabdata"))
+        self.layout.prop(self.properties, "prefabData", expand=True)
 
     def read_file(self, filepath: str) -> int | None:
         arm = findArmatureForPrefab(bpy.context)
@@ -1975,6 +2000,17 @@ class ImportVMDL(ImporterBase):
 
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
     contentPath: StringProperty(name=get_id("content_path"), description=get_id("content_path_tip"), subtype='DIR_PATH')
+    prefabData: EnumProperty(
+        name=get_id("importer_prefabdata"),
+        description=get_id("importer_prefabdata_tip"),
+        items=(
+            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
+            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
+            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
+        ),
+        options={'ENUM_FLAG'},
+        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
+    )
 
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith(('.vmdl', '.vmdl_prefab')):
@@ -1994,6 +2030,18 @@ class ImportDMX(ImporterBase):
     bl_description = get_id("importer_dmx_tip")
 
     filter_glob: StringProperty(default="*.dmx", options={'HIDDEN'})
+
+    prefabData: EnumProperty(
+        name=get_id("importer_prefabdata"),
+        description=get_id("importer_prefabdata_tip"),
+        items=(
+            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
+            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
+            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
+        ),
+        options={'ENUM_FLAG'},
+        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
+    )
 
     def read_file(self, filepath: str) -> int | None:
         if not filepath.lower().endswith('.dmx'):

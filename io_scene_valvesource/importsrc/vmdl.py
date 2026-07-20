@@ -19,6 +19,7 @@ from .. import keyvalues3
 from ..utils import (REF, ANIM, KeyFrame, SmdInfo, State, printTimeMessage,
                      import_jigglebones_from_kv3, import_hitboxes_from_kv3)
 from .build import truncate_id_name, create_armature, apply_frames
+from .prefab import wants_prefab
 
 
 def local_matrix(origin, angles_deg) -> Matrix:
@@ -171,20 +172,22 @@ def _read_document(ctx, smd, qc, filepath: str, rot_mode: str, seen: set) -> boo
 
     _read_attachments(ctx, smd, arm, root_node, filename)
 
-    cnt, missing = import_jigglebones_from_kv3(kv_doc, arm)
-    if cnt:
-        ctx.imported_jigglebones += cnt
-        print(f"- Imported {cnt} jigglebone(s) from {filename}")
-    if missing:
-        ctx.warning(f"Could not find bones for {len(missing)} jigglebone(s): {', '.join(missing)}")
+    if wants_prefab(ctx, 'JIGGLEBONES'):
+        cnt, missing = import_jigglebones_from_kv3(kv_doc, arm)
+        if cnt:
+            ctx.imported_jigglebones += cnt
+            print(f"- Imported {cnt} jigglebone(s) from {filename}")
+        if missing:
+            ctx.warning(f"Could not find bones for {len(missing)} jigglebone(s): {', '.join(missing)}")
 
-    hb_created, hb_skipped, hb_bones = import_hitboxes_from_kv3(kv_doc, arm)
-    if hb_created:
-        ctx.imported_hitboxes += hb_created
-        print(f"- Imported {hb_created} hitbox(es) from {filename}")
-    if hb_skipped:
-        missing_names = ', '.join(sorted({b for b in hb_bones if b}))
-        ctx.warning(f"Skipped {hb_skipped} hitbox(es) with missing bones: {missing_names}")
+    if wants_prefab(ctx, 'HITBOXES'):
+        hb_created, hb_skipped, hb_bones = import_hitboxes_from_kv3(kv_doc, arm)
+        if hb_created:
+            ctx.imported_hitboxes += hb_created
+            print(f"- Imported {hb_created} hitbox(es) from {filename}")
+        if hb_skipped:
+            missing_names = ', '.join(sorted({b for b in hb_bones if b}))
+            ctx.warning(f"Skipped {hb_skipped} hitbox(es) with missing bones: {missing_names}")
 
     if getattr(ctx.properties, 'doAnim', True):
         _read_animations(ctx, qc, arm, root_node, filepath, filename, rot_mode)

@@ -546,13 +546,24 @@ gets its own armature instead of merging into an unrelated scene rig, and its
 skeleton arrive unlinked whichever mode is chosen. Retargeting between them is a separate
 feature, not an import gap.
 
-## Next: make DMX prefab import optional (the phase 1.6 question)
+## Prefab data is now a per-kind selection (closes the phase 1.6 question)
 
-`readDMX` still calls `apply_dmx_prefab_data` unconditionally, so importing a model DMX
-always drags in its jigglebones/hitboxes/procbones. Now that `ImportPrefab` is a dedicated
-path, `ImportDMX` should get a toggle for "import prefab data" (default on, to preserve
-current behaviour) so a skeleton+mesh-only import is possible. User asked for this
-explicitly; deferred only to finish phase 5 first.
+`prefabData` is an `ENUM_FLAG` multi-select - Jigglebones / Hitboxes / Procedural Bones,
+all three on by default so existing behaviour is unchanged. Clearing them all gives a
+skeleton+meshes-only import.
+
+Declared on `ImportDMX`, `ImportQC`, `ImportVMDL` and `ImportPrefab`. Gating is per kind
+at every reader, not just the DMX one, because the label promises that:
+
+| Path | Gate |
+|---|---|
+| DMX `apply_dmx_prefab_data` / `read_dmx_prefab` | per kind, all three |
+| VMDL `import_*_from_kv3` | JIGGLEBONES / HITBOXES |
+| QC `$jigglebone` / `$hbox` / `$proceduralbones` | JIGGLEBONES / HITBOXES / PROCEDURAL |
+
+`importsrc.prefab.wants_prefab(ctx, kind)` is the single check. Importers that cannot
+produce prefab data (ImportSMD) do not declare the property, and absent means yes, so
+nothing else has to know about it.
 
 # Phase 6 - Teardown
 

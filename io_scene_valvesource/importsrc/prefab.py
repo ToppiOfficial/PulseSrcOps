@@ -17,6 +17,18 @@ import bpy
 PROC_BONE_TYPES = ("DmeQuatInterpBone", "DmeAimAtBone")
 
 
+PREFAB_KINDS = ('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL')
+
+
+def wants_prefab(ctx, kind: str) -> bool:
+    """Whether the importer's Prefab Data selection includes this kind. Importers that
+    cannot produce prefab data do not declare the property, so absent means yes."""
+    selected = getattr(ctx.properties, 'prefabData', None)
+    if selected is None:
+        return True
+    return kind in selected
+
+
 def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
     """Attach prefab data from a model DMX onto an existing armature.
 
@@ -28,7 +40,8 @@ def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
     skel = read_skeleton(parsed)
 
     jiggle_elems = [(b.element, b.name) for b in skel.bones
-                    if b.element is not None and b.element.type == "DmeJiggleBone"]
+                    if b.element is not None and b.element.type == "DmeJiggleBone"
+                    ] if wants_prefab(ctx, 'JIGGLEBONES') else []
     jb_count = 0
     if jiggle_elems:
         jb_count, jb_missing = import_jigglebones_from_dmx_elements(jiggle_elems, arm)
@@ -36,13 +49,16 @@ def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
             ctx.warning(f"DMX jigglebones: {len(jb_missing)} bone(s) not found on "
                         f"'{arm.name}': {', '.join(jb_missing)}")
 
-    hb_created, hb_skipped, hb_bones = import_hitboxes_from_dmx_root(parsed.root, arm)
+    hb_created, hb_skipped, hb_bones = (
+        import_hitboxes_from_dmx_root(parsed.root, arm)
+        if wants_prefab(ctx, 'HITBOXES') else (0, 0, []))
     if hb_skipped:
         ctx.warning(f"DMX hitboxes: {hb_skipped} skipped, bone(s) not found on "
                     f"'{arm.name}': {', '.join(hb_bones)}")
 
     proc_elems = [(b.element, b.name) for b in skel.bones
-                  if b.element is not None and b.element.type in PROC_BONE_TYPES]
+                  if b.element is not None and b.element.type in PROC_BONE_TYPES
+                  ] if wants_prefab(ctx, 'PROCEDURAL') else []
     proc_attachments: dict[str, tuple] = {}
     for att in skel.attachments:
         parent_name = skel.bones[att.parent].name if att.parent is not None else None
@@ -63,7 +79,7 @@ def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
     jiggle_elems = [
         (b.element, smd.boneIDs.get(b.source_id))
         for b in skel.bones if b.element is not None and b.element.type == "DmeJiggleBone"
-    ]
+    ] if wants_prefab(ctx, 'JIGGLEBONES') else []
     if jiggle_elems:
         jb_count, jb_missing = import_jigglebones_from_dmx_elements(jiggle_elems, smd.a)
         print(f"- Imported {jb_count} jigglebone(s) from DMX")
@@ -71,7 +87,9 @@ def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
             ctx.warning(f"DMX jigglebones: {len(jb_missing)} bone(s) not found on "
                         f"'{smd.a.name}': {', '.join(jb_missing)}")
 
-    hb_created, hb_skipped, hb_bones = import_hitboxes_from_dmx_root(parsed.root, smd.a)
+    hb_created, hb_skipped, hb_bones = (
+        import_hitboxes_from_dmx_root(parsed.root, smd.a)
+        if wants_prefab(ctx, 'HITBOXES') else (0, 0, []))
     if hb_created or hb_skipped:
         print(f"- Imported {hb_created} hitbox(es) from DMX")
         if hb_skipped:
@@ -84,7 +102,7 @@ def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
     proc_elems = [
         (b.element, smd.boneIDs.get(b.source_id))
         for b in skel.bones if b.element is not None and b.element.type in PROC_BONE_TYPES
-    ]
+    ] if wants_prefab(ctx, 'PROCEDURAL') else []
     proc_attachments: dict[str, tuple] = {}
     for att in skel.attachments:
         parent_name = None

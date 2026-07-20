@@ -26,6 +26,7 @@ from ..utils import (REF, ANIM, PHYS, FLEX, QcInfo, appendExt, get_id, getUpAxis
                      import_hitboxes_from_content, import_proc_bones_from_vrd_content)
 from .build import find_armature
 from .flexdata import apply_flex_text_to_object, populate_dme_flex_from_dmx
+from .prefab import wants_prefab
 
 
 # $sequence/$animation option keywords -> how many argument words follow.
@@ -171,7 +172,7 @@ def read_qc(ctx, filepath: str, newscene: bool, do_anim: bool, make_camera: bool
     except IOError:
         text = ""
 
-    if text and '$jigglebone' in text.lower():
+    if text and '$jigglebone' in text.lower() and wants_prefab(ctx, 'JIGGLEBONES'):
         if not qc.a:
             qc.a = find_armature()
         if qc.a:
@@ -261,6 +262,8 @@ def _run(r: _Reader) -> None:
 
         if kw == "$hbox":
             r.rest_of_line(line_no)
+            if not wants_prefab(ctx, 'HITBOXES'):
+                continue
             if not r.require_armature(get_id("qc_warn_noarmature_hbox", True).format(r.filename)):
                 continue
             prev_pose_position = qc.a.data.pose_position
@@ -281,7 +284,7 @@ def _run(r: _Reader) -> None:
 
         if kw in ("$proceduralbones", "$procbones"):
             words = r.rest_of_line(line_no)
-            if not words:
+            if not words or not wants_prefab(ctx, 'PROCEDURAL'):
                 continue
             if not r.require_armature(f"$proceduralbones in {r.filename} but no armature to bind to"):
                 continue

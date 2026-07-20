@@ -588,6 +588,38 @@ _data = {
         'en': "Source 2 content root that VMDL file references are relative to (e.g. .../content/csgo_addons/my_addon). Leave empty to detect it from the VMDL's own location",
         'ja': "VMDLのファイル参照の基準となるSource 2コンテンツルート (例: .../content/csgo_addons/my_addon)。空欄の場合はVMDLの場所から自動検出",
     },
+    'importer_prefabdata': {
+        'en': "Import Prefab Data",
+        'ja': "プレハブデータをインポート",
+    },
+    'importer_prefabdata_tip': {
+        'en': "Which kinds of prefab data to import alongside the model. Clear all to import only the skeleton and meshes",
+        'ja': "モデルと一緒にインポートするプレハブデータの種類。すべて解除するとスケルトンとメッシュのみをインポートします",
+    },
+    'importer_prefabdata_jiggle': {
+        'en': "Jigglebones",
+        'ja': "ジグルボーン",
+    },
+    'importer_prefabdata_jiggle_tip': {
+        'en': "Import jigglebone definitions onto the armature's bones",
+        'ja': "ジグルボーン定義をアーマチュアのボーンにインポート",
+    },
+    'importer_prefabdata_hitbox': {
+        'en': "Hitboxes",
+        'ja': "ヒットボックス",
+    },
+    'importer_prefabdata_hitbox_tip': {
+        'en': "Import hitbox volumes",
+        'ja': "ヒットボックスボリュームをインポート",
+    },
+    'importer_prefabdata_proc': {
+        'en': "Procedural Bones",
+        'ja': "プロシージャルボーン",
+    },
+    'importer_prefabdata_proc_tip': {
+        'en': "Import procedural (helper) bone rules",
+        'ja': "プロシージャル(ヘルパー)ボーンのルールをインポート",
+    },
     'import_menuitem_prefab': {
         'en': "Prefab data only (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
         'ja': "プレハブデータのみ (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
