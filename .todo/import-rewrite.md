@@ -376,6 +376,26 @@ Known limits:
 - A mesh referenced only by `$lod` `replacemodel` is never imported at LOD0, so deltas
   owned by it (facegf2's 236 here) are still dropped.
 
+## VRD proc bones resolve across a stripped namespace (fixes a long-standing bug)
+
+Crowbar writes VRD `<helper>` / `<aimconstraint>` bone names with the namespace stripped
+(`Bip01_Pelvis`) while the armature keeps the full name (`ValveBiped.Bip01_Pelvis`), so
+`_bone_resolver` - exact, then export-name, then lowercase - missed nearly everything and
+`$proceduralbones` reported almost all entries as missing bones.
+
+`prefab_io/proceduralbone.py:_bone_resolver` now also matches namespace-stripped, in both
+directions, using `utils.get_preserved_bone_prefixes()`. That list is `ValveBiped.` plus
+whatever the user registered in add-on preferences, so a custom rig namespace works too.
+Both callers benefit: the VRD reader and the DME proc-bone reader.
+
+Measured on `koleda_dorm.vrd` (32 `<helper>` blocks, 151-bone armature):
+
+    before: 6 of 44 distinct names resolved  (38 reported missing)
+    after: 44 of 44, i.e. 96/96 name slots across all blocks
+
+Not a general problem: QC `$hbox` and `$jigglebone` carry full `ValveBiped.` names, so
+hitbox and jigglebone import were never affected. VRD is the only format that strips.
+
 ## Pre-existing bug this surfaced - decide before phase 6
 
 The `$sequence` option table is incomplete, in the original as much as the port: `fps`,
