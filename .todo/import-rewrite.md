@@ -594,10 +594,13 @@ nothing else has to know about it.
 
 ## Deliberately not done
 
-- **`import_smd.py` is not deleted.** The plan assumed it would be, but what is left is
-  the Blender operator layer, which has to live somewhere; `importsrc/` is deliberately
-  free of operator classes. Renaming it to something like `importers.py` would be
-  honest, but it is a rename for its own sake - not worth the churn now.
+- [x] **`import_smd.py` deleted**, matching what `export_smd.py` did. Its operator layer
+  moved to `imports/importer.py`, mirroring `export/exporter.py`. The package is renamed
+  `importsrc/` -> `imports/`: the original name existed to dodge the `import` keyword,
+  but only bare `import` is reserved - `imports` is a legal module name.
+  `importer.py` imports its siblings aliased (`from . import smd as _smd`) because a
+  bare `smd` would shadow the `smd = self.initSMD(...)` locals throughout the file, and
+  `from .importer import ...` is last in `__init__.py` so the siblings are bound first.
 - **`SmdInfo`'s import-only fields stay.** `file`, `shapeNames`, `phantomParentIDs`,
   `in_block_comment` and `rotMode` are import-side; `amod`, `materials_used`,
   `dmxShapes`, `bakeInfo`, `boneNameToID` are export-side. Splitting them means moving

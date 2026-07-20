@@ -2081,7 +2081,7 @@ def ensure_pulse_collection_at_top(scene, view_layer):
 
 # Jigglebone / hitbox serialization lives in the prefab_io subpackage (both import
 # and export, co-located per format). Re-exported here so existing
-# `from .utils import *` call sites in import_smd keep working unchanged.
+# `from ..utils import *` call sites in the imports package keep working unchanged.
 from .prefab_io import (
     import_jigglebones_from_dmx_elements,
     import_jigglebones_from_content,

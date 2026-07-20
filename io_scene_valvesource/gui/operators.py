@@ -280,7 +280,7 @@ class SMD_OT_ImportFlexControllersFromText(Operator):
         self.layout.prop_search(self, "text_block", bpy.data, "texts", text="")
 
     def execute(self, context) -> set:
-        from ..importsrc.flexdata import parse_flex_text, apply_flex_text_to_object
+        from ..imports.flexdata import parse_flex_text, apply_flex_text_to_object
 
         text = bpy.data.texts.get(self.text_block)
         if not text:

@@ -22,11 +22,13 @@ import bpy, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from bpy.props import StringProperty, CollectionProperty, BoolProperty, EnumProperty
-from .utils import *
-from . import datamodel, keyvalues3, importsrc
+from ..utils import *
+from .. import datamodel, keyvalues3
+from . import anim as _anim, build as _build, dmx as _dmx
+from . import prefab as _prefab, qc as _qc, smd as _smd
 
-from .utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
-from .importsrc.flexdata import populate_dme_flex_from_dmx
+from ..utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
+from .flexdata import populate_dme_flex_from_dmx
 
 
 class ImporterBase(bpy.types.Operator, Logger):
@@ -172,7 +174,7 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.report({'ERROR'}, get_id("importer_err_badfile", True).format(os.path.basename(filepath)))
 
     def ensureAnimationBonesValidated(self):
-        if self.smd.jobType == ANIM and self.append == 'APPEND' and (hasattr(self.smd, "a") or importsrc.find_armature()):
+        if self.smd.jobType == ANIM and self.append == 'APPEND' and (hasattr(self.smd, "a") or _build.find_armature()):
             print("- Appending bones from animations is destructive; switching Bone Append Mode to \"Validate\"")
             self.append = 'VALIDATE'
 
@@ -189,7 +191,7 @@ class ImporterBase(bpy.types.Operator, Logger):
     # -------------------------------------------------------------------------
 
     def readQC(self, filepath: str, newscene: bool, doAnim: bool, makeCamera: bool, rotMode: str, outer_qc: bool = False) -> int:
-        return importsrc.read_qc(self, filepath, newscene, doAnim, makeCamera, rotMode, outer_qc)
+        return _qc.read_qc(self, filepath, newscene, doAnim, makeCamera, rotMode, outer_qc)
 
     # -------------------------------------------------------------------------
     # SMD init helpers
@@ -238,7 +240,7 @@ class ImporterBase(bpy.types.Operator, Logger):
         print(f"\nSMD IMPORTER: now working on {smd.jobName}")
 
         while True:
-            header = importsrc.parse_quote_blocked_line(file.readline(), self.qc)
+            header = _smd.parse_quote_blocked_line(file.readline(), self.qc)
             if header:
                 break
 
@@ -246,21 +248,21 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.warning(get_id("importer_err_smd_ver"))
 
         if smd.jobType is None:
-            importsrc.scan_smd(smd)
+            _smd.scan_smd(smd)
         self.createCollection()
 
         # Order is forced by the format: the node block must be built into an armature
         # before triangle weights can resolve, so this stays a single pass over the file.
         for line in file:
             if line == "nodes\n":
-                importsrc.build_smd_skeleton(self, smd, importsrc.read_nodes(smd, self.qc))
+                _build.build_smd_skeleton(self, smd, _smd.read_nodes(smd, self.qc))
             if line == "skeleton\n":
-                importsrc.build_smd_anim(self, smd, importsrc.read_frames(self, smd, self.qc))
+                _anim.build_smd_anim(self, smd, _smd.read_frames(self, smd, self.qc))
             if line == "triangles\n":
                 group_names = [b.name for b in smd.a.data.bones] if smd.a else []
-                imesh = importsrc.read_polys(self, smd, group_names, self.qc)
+                imesh = _smd.read_polys(self, smd, group_names, self.qc)
                 if imesh:
-                    ob = importsrc.build_mesh(self, smd, imesh)
+                    ob = _build.build_mesh(self, smd, imesh)
                     if smd.jobType == REF and self.qc:
                         self.qc.ref_mesh = ob
                         self.qc.ref_meshes.append(ob)
@@ -273,7 +275,7 @@ class ImporterBase(bpy.types.Operator, Logger):
                     for poly in ob.data.polygons:
                         poly.select = True
             if line == "vertexanimation\n":
-                importsrc.read_shapes(self, smd)
+                _smd.read_shapes(self, smd)
 
         file.close()
         printTimeMessage(smd.startTime, smd.jobName, "import")
@@ -289,7 +291,7 @@ class ImporterBase(bpy.types.Operator, Logger):
 
         bench = BenchMarker(1, "DMX")
 
-        target_arm = importsrc.find_armature() if self.append != 'NEW_ARMATURE' else None
+        target_arm = _build.find_armature() if self.append != 'NEW_ARMATURE' else None
         if target_arm:
             smd.a = target_arm
 
@@ -304,7 +306,7 @@ class ImporterBase(bpy.types.Operator, Logger):
         try:
             print("- Loading DMX...")
             try:
-                parsed = importsrc.load_dmx(filepath, smd_type, smd.upAxis)
+                parsed = _dmx.load_dmx(filepath, smd_type, smd.upAxis)
             except IOError as e:
                 self.error(e)
                 return 0
@@ -318,22 +320,22 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.createCollection()
             self.ensureAnimationBonesValidated()
 
-            ifile = importsrc.read_file(parsed)
+            ifile = _dmx.read_file(parsed)
             for version in parsed.version_bumps:
                 self._ensureSceneDmxVersion(version)
             for message in parsed.warnings:
                 self.warning(message)
 
-            bone_matrices = importsrc.build_skeleton(
+            bone_matrices = _build.build_skeleton(
                 self, smd, ifile.skeleton, target_arm,
                 parsed.DmeModel.name or smd.jobName)
-            importsrc.apply_rest_pose(self, smd, bone_matrices)
+            _build.apply_rest_pose(self, smd, bone_matrices)
 
             if smd.a and smd.jobType != ANIM:
-                importsrc.apply_dmx_prefab_data(self, smd, parsed, ifile.skeleton)
+                _prefab.apply_dmx_prefab_data(self, smd, parsed, ifile.skeleton)
 
             imported_meshes = [
-                importsrc.build_mesh(self, smd, imesh, parsed.corrective_separator)
+                _build.build_mesh(self, smd, imesh, parsed.corrective_separator)
                 for imesh in ifile.meshes
             ]
 
@@ -358,7 +360,7 @@ class ImporterBase(bpy.types.Operator, Logger):
                         self._populate_dme_flex_from_dmx(m, _combo_op)
 
             if smd.jobType == ANIM:
-                importsrc.build_anim(self, smd, ifile.anim)
+                _anim.build_anim(self, smd, ifile.anim)
 
         except datamodel.AttributeError as e:
             e.args = [f"Invalid DMX file: {e.args[0] if e.args else 'Unknown error'}"]
@@ -382,8 +384,8 @@ class ImporterBase(bpy.types.Operator, Logger):
     # -------------------------------------------------------------------------
 
 class SmdImporter(ImporterBase):
-    """All formats in one operator. Superseded per-format as each one migrates to
-    importsrc; still the entry point for SMD/VTA/QC/VMDL."""
+    """All formats in one operator. Superseded per-format as each one migrates to its
+    own operator; still the entry point for any extension."""
     bl_idname = "import_scene.smd"
     bl_label = get_id("importer_title")
     bl_description = get_id("importer_tip")
@@ -580,7 +582,7 @@ def _prefab_read_vrd(op, filepath: str, arm) -> None:
 
 
 def _prefab_read_dmx(op, filepath: str, arm) -> None:
-    jb, hb, pb = importsrc.read_dmx_prefab(op, filepath, arm)
+    jb, hb, pb = _prefab.read_dmx_prefab(op, filepath, arm)
     op.imported_jigglebones += jb
     op.imported_hitboxes += hb
     op.imported_procbones += pb
