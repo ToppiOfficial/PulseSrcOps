@@ -580,6 +580,26 @@ _data = {
         'en': "Imports an uncompiled Source Engine DMX model or animation",
         'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
     },
+    'import_menuitem_prefab': {
+        'en': "Prefab data only (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
+        'ja': "プレハブデータのみ (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
+    },
+    'importer_prefab_title': {
+        'en': "Import Prefab Data",
+        'ja': "プレハブデータをインポート",
+    },
+    'importer_prefab_tip': {
+        'en': "Attaches jigglebones, hitboxes and procedural bones to the active armature without importing geometry",
+        'ja': "ジグルボーン、ヒットボックス、プロシージャルボーンをジオメトリなしでアクティブなアーマチュアに追加",
+    },
+    'importer_err_prefab_noarm': {
+        'en': "Prefab import needs an active armature to attach to",
+        'ja': "プレハブのインポートには、対象となるアクティブなアーマチュアが必要です",
+    },
+    'importer_err_prefab_empty': {
+        'en': "No jigglebones, hitboxes or procedural bones found in {0}",
+        'ja': "{0}にジグルボーン、ヒットボックス、プロシージャルボーンが見つかりません",
+    },
     'import_menuitem_vmdl': {
         'en': "VMDL (.vmdl, .vmdl_prefab)",
         'ja': "VMDL (.vmdl, .vmdl_prefab)",

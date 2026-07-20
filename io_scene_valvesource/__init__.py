@@ -300,6 +300,7 @@ GUI.SMD_PT_Jigglebones,
     import_smd.ImportSMD,
     import_smd.ImportQC,
     import_smd.ImportVMDL,
+    import_smd.ImportPrefab,
 
     # Updater
     updater.SMD_OT_CheckForUpdates,

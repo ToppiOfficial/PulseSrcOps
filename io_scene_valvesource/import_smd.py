@@ -26,7 +26,7 @@ from mathutils import Quaternion, Euler
 from math import ceil
 from typing import cast
 from .utils import *
-from . import datamodel, ordered_set, flex, importsrc
+from . import datamodel, ordered_set, flex, keyvalues3, importsrc
 
 from .utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 from .importsrc.flexdata import apply_flex_text_to_object, populate_dme_flex_from_dmx
@@ -1836,6 +1836,134 @@ class ImportQC(ImporterBase):
                             self.properties.makeCamera, self.properties.rotMode, outer_qc=True)
         bpy.context.view_layer.objects.active = self.qc.a
         return count
+
+
+class ImportPrefab(ImporterBase):
+    """Attaches jigglebones / hitboxes / procedural bones to the active armature.
+
+    Defined by what it does not do: never creates an armature and never creates a mesh.
+    That is the whole distinction from ImportQC / ImportDMX / ImportVMDL, which read the
+    same bytes but build geometry from them.
+    """
+    bl_idname = "import_scene.kst_prefab"
+    bl_label = get_id("importer_prefab_title")
+    bl_description = get_id("importer_prefab_tip")
+
+    filter_glob: StringProperty(default="*.qc;*.qci;*.vrd;*.dmx;*.vmdl_prefab", options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return findArmatureForPrefab(context) is not None
+
+    def draw(self, context):
+        # Nothing is being built, so the build options (upAxis, append, rotMode,
+        # boneMode) do not apply. Hitboxes are the only consumer of createCollections.
+        self.layout.prop(self.properties, "createCollections")
+
+    def read_file(self, filepath: str) -> int | None:
+        arm = findArmatureForPrefab(bpy.context)
+        if not arm:
+            self.error(get_id("importer_err_prefab_noarm"))
+            return None
+
+        ext = os.path.splitext(filepath)[1].lower()
+        try:
+            reader = _PREFAB_READERS[ext]
+        except KeyError:
+            self.report_unreadable(filepath)
+            return None
+
+        prev = (self.imported_jigglebones, self.imported_hitboxes, self.imported_procbones)
+        # Hitbox and proc-bone geometry is authored against the rest pose.
+        prev_pose_position = arm.data.pose_position
+        arm.data.pose_position = 'REST'
+        bpy.context.view_layer.update()
+        try:
+            reader(self, filepath, arm)
+        finally:
+            arm.data.pose_position = prev_pose_position
+            bpy.context.view_layer.update()
+
+        added = (self.imported_jigglebones - prev[0],
+                 self.imported_hitboxes - prev[1],
+                 self.imported_procbones - prev[2])
+        if not any(added):
+            self.warning(get_id("importer_err_prefab_empty", True).format(os.path.basename(filepath)))
+        return 1
+
+
+def findArmatureForPrefab(context) -> bpy.types.Object | None:
+    """Active armature, or the armature of the active mesh. Prefab import has no
+    fallback scan - it must be unambiguous which rig is being modified."""
+    ob = context.active_object
+    if not ob:
+        return None
+    if ob.type == 'ARMATURE':
+        return ob
+    if ob.type == 'MESH':
+        return ob.find_armature()
+    return None
+
+
+def _prefab_read_qc(op, filepath: str, arm) -> None:
+    with open(filepath, 'r') as f:
+        content = f.read()
+    count, missing = import_jigglebones_from_content(content, arm)
+    op.imported_jigglebones += count
+    if missing:
+        op.warning(f"Could not find bones for {len(missing)} jigglebone(s): {', '.join(missing)}")
+
+    hboxset = ""
+    for line in content.splitlines():
+        words = line.split()
+        if len(words) >= 2 and words[0].lower() == "$hboxset":
+            hboxset = words[1].strip('"')
+            break
+    created, skipped, bones = import_hitboxes_from_content(
+        content, arm, bpy.context, op.createCollections, hboxset_name=hboxset)
+    op.imported_hitboxes += created
+    if skipped:
+        op.warning(f"Skipped {skipped} hitbox(es) with missing bones: {', '.join(bones)}")
+
+
+def _prefab_read_vrd(op, filepath: str, arm) -> None:
+    with open(filepath, 'r') as f:
+        content = f.read()
+    count, missing = import_proc_bones_from_vrd_content(content, arm, bpy.context.scene)
+    op.imported_procbones += count
+    if missing:
+        op.warning(f"Could not find bones for {len(missing)} procedural entr(y/ies): "
+                   f"{', '.join(missing)}")
+
+
+def _prefab_read_dmx(op, filepath: str, arm) -> None:
+    jb, hb, pb = importsrc.read_dmx_prefab(op, filepath, arm)
+    op.imported_jigglebones += jb
+    op.imported_hitboxes += hb
+    op.imported_procbones += pb
+
+
+def _prefab_read_kv3(op, filepath: str, arm) -> None:
+    with open(filepath, 'r', encoding='utf-8') as f:
+        kv_doc = keyvalues3.KVParser(f.read()).parse()
+    count, missing = import_jigglebones_from_kv3(kv_doc, arm)
+    op.imported_jigglebones += count
+    if missing:
+        op.warning(f"Could not find bones for {len(missing)} jigglebone(s): {', '.join(missing)}")
+    created, skipped, bones = import_hitboxes_from_kv3(kv_doc, arm)
+    op.imported_hitboxes += created
+    if skipped:
+        op.warning(f"Skipped {skipped} hitbox(es) with missing bones: "
+                   f"{', '.join(sorted({b for b in bones if b}))}")
+
+
+_PREFAB_READERS = {
+    '.qc': _prefab_read_qc,
+    '.qci': _prefab_read_qc,
+    '.vrd': _prefab_read_vrd,
+    '.dmx': _prefab_read_dmx,
+    '.vmdl_prefab': _prefab_read_kv3,
+}
 
 
 class ImportVMDL(ImporterBase):

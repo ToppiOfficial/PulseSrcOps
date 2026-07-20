@@ -3,7 +3,7 @@ from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
 from ..export import SmdExporter, PrefabExporter
-from ..import_smd import SmdImporter, ImportDMX, ImportSMD, ImportQC, ImportVMDL
+from ..import_smd import SmdImporter, ImportDMX, ImportSMD, ImportQC, ImportVMDL, ImportPrefab
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
@@ -41,6 +41,8 @@ class SMD_MT_ImportChoice(Menu):
         l.operator(ImportSMD.bl_idname, text=get_id("import_menuitem_smd", True), icon='MESH_DATA')
         l.operator(ImportQC.bl_idname, text=get_id("import_menuitem_qc", True), icon='TEXT')
         l.operator(ImportVMDL.bl_idname, text=get_id("import_menuitem_vmdl", True), icon='FILE_3D')
+        l.separator()
+        l.operator(ImportPrefab.bl_idname, text=get_id("import_menuitem_prefab", True), icon='CONSTRAINT_BONE')
         l.separator()
         l.operator(SmdImporter.bl_idname, text=get_id("import_menuitem", True))
 

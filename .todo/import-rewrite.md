@@ -463,6 +463,35 @@ geometry from them.
       unconditionally (see 1.6) or gate it behind a toggle now that there is a dedicated
       path for it.
 
+# Phase 5 status
+
+- [x] `ImportPrefab`, `import_scene.kst_prefab`,
+      `*.qc;*.qci;*.vrd;*.dmx;*.vmdl_prefab`. Never creates an armature or a mesh.
+- [x] `poll()` requires an active armature (or an active mesh with one). Deliberately no
+      fallback scan like `find_armature()` does - it must be unambiguous which rig is
+      being modified. `read_file` errors clearly if it is gone by execute time.
+- [x] `draw()` shows only `createCollections`. The build options (upAxis, append,
+      rotMode, boneMode) are inherited from ImporterBase but do not apply, so they are
+      hidden rather than left as dead controls.
+- [x] Dispatch table over the existing `prefab_io` readers. `.dmx` goes through the new
+      `importsrc.prefab.read_dmx_prefab`, which loads and reads the skeleton without
+      building anything and resolves bones by DMX name (there is no `boneIDs` map when
+      no skeleton is being built).
+- [x] Hitbox / proc-bone geometry is authored against the rest pose, so the armature is
+      switched to `pose_position = 'REST'` for the read and restored in a `finally`.
+- [x] Warns when a file yields no jigglebones, hitboxes or procedural bones, rather than
+      silently reporting success.
+- [ ] **Verify in Blender.** Untested end to end. `.vrd` onto an existing rig is the
+      case that motivated it (and the one with no other entry point).
+
+## Next: make DMX prefab import optional (the phase 1.6 question)
+
+`readDMX` still calls `apply_dmx_prefab_data` unconditionally, so importing a model DMX
+always drags in its jigglebones/hitboxes/procbones. Now that `ImportPrefab` is a dedicated
+path, `ImportDMX` should get a toggle for "import prefab data" (default on, to preserve
+current behaviour) so a skeleton+mesh-only import is possible. User asked for this
+explicitly; deferred only to finish phase 5 first.
+
 # Phase 6 - Teardown
 
 - [ ] Delete `import_smd.py` once every format has migrated.

@@ -1,8 +1,12 @@
 """Jigglebone / hitbox / procedural-bone import from a model DMX.
 
-Moved verbatim from readDMX (1756-1802). These are no-ops when the DMX lacks
-DmeJiggleBone joints / a hitboxSetList, so they stay safe to attempt on any
-skeletal reference import. Whether this should be opt-in is a phase 5 question.
+`apply_dmx_prefab_data` moved verbatim from readDMX (1756-1802). It is a no-op when the
+DMX lacks DmeJiggleBone joints / a hitboxSetList, so it stays safe to attempt on any
+skeletal reference import.
+
+`read_dmx_prefab` is the standalone form used by ImportPrefab: same readers, but against
+an armature that already exists, so it resolves bones by their DMX names instead of the
+boneIDs map that only exists while a skeleton is being built.
 """
 
 from ..utils import (import_jigglebones_from_dmx_elements, import_hitboxes_from_dmx_root,
@@ -11,6 +15,48 @@ from ..utils import (import_jigglebones_from_dmx_elements, import_hitboxes_from_
 import bpy
 
 PROC_BONE_TYPES = ("DmeQuatInterpBone", "DmeAimAtBone")
+
+
+def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
+    """Attach prefab data from a model DMX onto an existing armature.
+
+    Returns (jigglebones, hitboxes, procbones).
+    """
+    from .dmx import load_dmx, read_skeleton
+
+    parsed = load_dmx(filepath)
+    skel = read_skeleton(parsed)
+
+    jiggle_elems = [(b.element, b.name) for b in skel.bones
+                    if b.element is not None and b.element.type == "DmeJiggleBone"]
+    jb_count = 0
+    if jiggle_elems:
+        jb_count, jb_missing = import_jigglebones_from_dmx_elements(jiggle_elems, arm)
+        if jb_missing:
+            ctx.warning(f"DMX jigglebones: {len(jb_missing)} bone(s) not found on "
+                        f"'{arm.name}': {', '.join(jb_missing)}")
+
+    hb_created, hb_skipped, hb_bones = import_hitboxes_from_dmx_root(parsed.root, arm)
+    if hb_skipped:
+        ctx.warning(f"DMX hitboxes: {hb_skipped} skipped, bone(s) not found on "
+                    f"'{arm.name}': {', '.join(hb_bones)}")
+
+    proc_elems = [(b.element, b.name) for b in skel.bones
+                  if b.element is not None and b.element.type in PROC_BONE_TYPES]
+    proc_attachments: dict[str, tuple] = {}
+    for att in skel.attachments:
+        parent_name = skel.bones[att.parent].name if att.parent is not None else None
+        proc_attachments[att.name] = (parent_name, att.matrix.to_translation())
+
+    pb_count = 0
+    if proc_elems:
+        pb_count, pb_missing = import_proc_bones_from_dmx_elements(
+            proc_elems, arm, bpy.context.scene, proc_attachments)
+        if pb_missing:
+            ctx.warning(f"DMX procedural bones: {len(pb_missing)} entr(y/ies) skipped, "
+                        f"bone(s) not found on '{arm.name}': {', '.join(pb_missing)}")
+
+    return jb_count, hb_created, pb_count
 
 
 def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
