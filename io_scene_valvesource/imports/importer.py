@@ -21,14 +21,34 @@
 import bpy, os
 from bpy import ops
 from bpy.app.translations import pgettext
-from bpy.props import StringProperty, CollectionProperty, BoolProperty, EnumProperty
+from bpy.props import StringProperty, CollectionProperty, BoolProperty, EnumProperty, FloatProperty
 from ..utils import *
 from .. import datamodel, keyvalues3
 from . import anim as _anim, build as _build, dmx as _dmx
-from . import prefab as _prefab, qc as _qc, smd as _smd
+from . import prefab as _prefab, qc as _qc, smd as _smd, vmdl as _vmdl
 
 from ..utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 from .flexdata import populate_dme_flex_from_dmx
+
+
+_PREFAB_DATA_ITEMS = {
+    'JIGGLEBONES': (get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
+    'HITBOXES':    (get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
+    'PROCEDURAL':  (get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
+    'ATTACHMENTS': (get_id("importer_prefabdata_attach"), get_id("importer_prefabdata_attach_tip")),
+}
+
+
+def prefabDataProperty(*kinds: str):
+    """The prefabData toggles, declared per importer because the kinds differ:
+    ImportPrefab only ever writes onto an existing armature, so it has no attachments."""
+    return EnumProperty(
+        name=get_id("importer_prefabdata"),
+        description=get_id("importer_prefabdata_tip"),
+        items=tuple((k,) + _PREFAB_DATA_ITEMS[k] for k in kinds),
+        options={'ENUM_FLAG'},
+        default=set(kinds),
+    )
 
 
 class ImporterBase(bpy.types.Operator, Logger):
@@ -40,7 +60,7 @@ class ImporterBase(bpy.types.Operator, Logger):
     bl_options = {'UNDO', 'PRESET'}
 
     qc: QcInfo | None = None
-    smd: SmdInfo
+    smd: SmdInfo | None = None  # ImportPrefab builds no skeleton, so it never sets one
 
     # Properties used by the file browser
     filepath: StringProperty(name="File Path", description="File filepath used for importing the SMD/VTA/DMX/QC file", maxlen=1024, default="", options={'HIDDEN'})
@@ -61,6 +81,8 @@ class ImporterBase(bpy.types.Operator, Logger):
         default='APPEND',
     )
     upAxis: EnumProperty(name="Up Axis", items=axes, default='Z', description=get_id("importer_up_tip"))
+    forwardAxis: EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("importer_forward_tip"))
+    upAxisOffset: FloatProperty(name=get_id("up_axis_offset"), description=get_id("importer_up_offset_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     rotMode: EnumProperty(
         name=get_id("importer_rotmode"),
         items=(('XYZ', "Euler", ''), ('QUATERNION', "Quaternion", "")),
@@ -88,6 +110,7 @@ class ImporterBase(bpy.types.Operator, Logger):
         self.imported_jigglebones = 0
         self.imported_hitboxes = 0
         self.imported_procbones = 0
+        self.imported_attachments = 0
 
         for filepath in [os.path.join(self.directory, file.name) for file in self.files] if self.files else [self.filepath]:
             # read_file returns None for an unreadable path, leaving the running
@@ -106,6 +129,8 @@ class ImporterBase(bpy.types.Operator, Logger):
             details.append(f"{self.imported_jigglebones} jigglebones")
         if self.imported_procbones > 0:
             details.append(f"{self.imported_procbones} procedural bones")
+        if self.imported_attachments > 0:
+            details.append(f"{self.imported_attachments} attachments")
         if details:
             report_message += f" ({', '.join(details)})"
 
@@ -113,6 +138,7 @@ class ImporterBase(bpy.types.Operator, Logger):
         if self.num_files_imported:
             if bpy.context.active_object and bpy.context.active_object.mode != 'OBJECT':
                 ops.object.mode_set(mode='OBJECT')
+            prev_active = bpy.context.view_layer.objects.active
             ops.object.select_all(action='DESELECT')
             new_obs = set(bpy.context.scene.objects).difference(pre_obs)
             xy = xyz = 0
@@ -120,7 +146,10 @@ class ImporterBase(bpy.types.Operator, Logger):
                 ob.select_set(True)
                 xy  = max(xy,  int(max(ob.dimensions[0], ob.dimensions[1])))
                 xyz = max(xyz, max(xy, int(ob.dimensions[2])))
-            bpy.context.view_layer.objects.active = self.qc.a if self.qc else self.smd.a
+            # ImportPrefab has no armature of its own to make active - it writes onto the
+            # one already selected, so leave that one active.
+            armature = (self.qc.a if self.qc else None) or (self.smd.a if self.smd else None)
+            bpy.context.view_layer.objects.active = armature or prev_active
             for area in context.screen.areas:
                 if area.type == 'VIEW_3D':
                     area.spaces.active.clip_end = max(area.spaces.active.clip_end, xyz * 2)
@@ -137,6 +166,8 @@ class ImporterBase(bpy.types.Operator, Logger):
 
     def invoke(self, context, event):
         self.properties.upAxis = context.scene.vs.up_axis
+        self.properties.forwardAxis = context.scene.vs.forward_axis
+        self.properties.upAxisOffset = context.scene.vs.up_axis_offset
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
 
@@ -148,7 +179,8 @@ class ImporterBase(bpy.types.Operator, Logger):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
-        for prop in ("createCollections", "append", "upAxis", "rotMode", "boneMode"):
+        for prop in ("createCollections", "append", "upAxis", "forwardAxis",
+                     "upAxisOffset", "rotMode", "boneMode"):
             layout.prop(self.properties, prop)
         self.draw_options(layout)
 
@@ -157,8 +189,8 @@ class ImporterBase(bpy.types.Operator, Logger):
         properties must draw them here."""
 
     def draw_prefab_data(self, layout) -> None:
-        """Stacked, not the default expanded row - three horizontal toggles get their
-        labels truncated to 'Jiggl.../Hitb.../Proc...' in the file browser sidebar."""
+        """Stacked, not the default expanded row - horizontal toggles get their labels
+        truncated to 'Jiggl.../Hitb.../Proc...' in the file browser sidebar."""
         col = layout.column(align=True)
         col.use_property_split = False
         col.label(text=get_id("importer_prefabdata"))
@@ -208,6 +240,10 @@ class ImporterBase(bpy.types.Operator, Logger):
             smd.a = self.qc.a
         if upAxis:
             smd.upAxis = upAxis
+        # No format carries these, so they always come from the import options.
+        # $upaxis aside, a QC has nothing to say about them either.
+        smd.forwardAxis = self.properties.forwardAxis
+        smd.upAxisOffset = self.properties.upAxisOffset
         return smd
 
     def createCollection(self):
@@ -411,17 +447,7 @@ class ImportQC(ImporterBase):
 
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
     makeCamera: BoolProperty(name=get_id("importer_makecamera"), description=get_id("importer_makecamera_tip"), default=False)
-    prefabData: EnumProperty(
-        name=get_id("importer_prefabdata"),
-        description=get_id("importer_prefabdata_tip"),
-        items=(
-            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
-            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
-            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
-        ),
-        options={'ENUM_FLAG'},
-        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
-    )
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
     def draw_options(self, layout) -> None:
         layout.prop(self.properties, "doAnim")
@@ -439,11 +465,13 @@ class ImportQC(ImporterBase):
 
 
 class ImportPrefab(ImporterBase):
-    """Attaches jigglebones / hitboxes / procedural bones to the active armature.
+    """Attaches jigglebones / hitboxes / procedural bones / attachments to the active
+    armature.
 
     Defined by what it does not do: never creates an armature and never creates a mesh.
     That is the whole distinction from ImportQC / ImportDMX / ImportVMDL, which read the
-    same bytes but build geometry from them.
+    same bytes but build geometry from them. Attachment empties are not geometry - they
+    parent onto the armature that is already there.
     """
     bl_idname = "import_scene.kst_prefab"
     bl_label = get_id("importer_prefab_title")
@@ -451,25 +479,16 @@ class ImportPrefab(ImporterBase):
 
     filter_glob: StringProperty(default="*.qc;*.qci;*.vrd;*.dmx;*.vmdl_prefab", options={'HIDDEN'})
 
-    prefabData: EnumProperty(
-        name=get_id("importer_prefabdata"),
-        description=get_id("importer_prefabdata_tip"),
-        items=(
-            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
-            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
-            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
-        ),
-        options={'ENUM_FLAG'},
-        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
-    )
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
     @classmethod
     def poll(cls, context):
         return findArmatureForPrefab(context) is not None
 
     def draw(self, context):
-        # Nothing is being built, so the build options (upAxis, append, rotMode,
-        # boneMode) do not apply. Hitboxes are the only consumer of createCollections.
+        # No skeleton or mesh is being built, so the build options (upAxis, forwardAxis,
+        # append, rotMode, boneMode) do not apply. Hitboxes are the only consumer of
+        # createCollections.
         self.layout.use_property_split = True
         self.layout.use_property_decorate = False
         self.layout.prop(self.properties, "createCollections")
@@ -488,7 +507,8 @@ class ImportPrefab(ImporterBase):
             self.report_unreadable(filepath)
             return None
 
-        prev = (self.imported_jigglebones, self.imported_hitboxes, self.imported_procbones)
+        prev = (self.imported_jigglebones, self.imported_hitboxes,
+                self.imported_procbones, self.imported_attachments)
         # Hitbox and proc-bone geometry is authored against the rest pose.
         prev_pose_position = arm.data.pose_position
         arm.data.pose_position = 'REST'
@@ -501,7 +521,8 @@ class ImportPrefab(ImporterBase):
 
         added = (self.imported_jigglebones - prev[0],
                  self.imported_hitboxes - prev[1],
-                 self.imported_procbones - prev[2])
+                 self.imported_procbones - prev[2],
+                 self.imported_attachments - prev[3])
         if not any(added):
             self.warning(get_id("importer_err_prefab_empty", True).format(os.path.basename(filepath)))
         return 1
@@ -552,15 +573,20 @@ def _prefab_read_vrd(op, filepath: str, arm) -> None:
 
 
 def _prefab_read_dmx(op, filepath: str, arm) -> None:
-    jb, hb, pb = _prefab.read_dmx_prefab(op, filepath, arm)
+    jb, hb, pb, at = _prefab.read_dmx_prefab(op, filepath, arm)
     op.imported_jigglebones += jb
     op.imported_hitboxes += hb
     op.imported_procbones += pb
+    op.imported_attachments += at
 
 
 def _prefab_read_kv3(op, filepath: str, arm) -> None:
     with open(filepath, 'r', encoding='utf-8') as f:
         kv_doc = keyvalues3.KVParser(f.read()).parse()
+    root_node = kv_doc.roots.get("rootNode")
+    if root_node and _prefab.wants_prefab(op, 'ATTACHMENTS'):
+        op.imported_attachments += _vmdl.read_attachments(
+            op, bpy.context.scene.collection, arm, root_node, os.path.basename(filepath))
     count, missing = import_jigglebones_from_kv3(kv_doc, arm)
     op.imported_jigglebones += count
     if missing:
@@ -590,17 +616,7 @@ class ImportVMDL(ImporterBase):
 
     doAnim: BoolProperty(name=get_id("importer_doanims"), default=True)
     contentPath: StringProperty(name=get_id("content_path"), description=get_id("content_path_tip"), subtype='DIR_PATH')
-    prefabData: EnumProperty(
-        name=get_id("importer_prefabdata"),
-        description=get_id("importer_prefabdata_tip"),
-        items=(
-            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
-            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
-            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
-        ),
-        options={'ENUM_FLAG'},
-        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
-    )
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
     # Set once the content-path popup has been answered; the file browser is stage two.
     contentPathChosen: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
@@ -610,6 +626,8 @@ class ImportVMDL(ImporterBase):
         # once one is already open. The content root is collected in a popup first, then
         # Blender's file browser opens for the VMDL itself.
         self.properties.upAxis = context.scene.vs.up_axis
+        self.properties.forwardAxis = context.scene.vs.forward_axis
+        self.properties.upAxisOffset = context.scene.vs.up_axis_offset
         self.properties.contentPathChosen = False
         return context.window_manager.invoke_props_dialog(self, width=460)
 
@@ -655,17 +673,7 @@ class ImportDMX(ImporterBase):
 
     filter_glob: StringProperty(default="*.dmx", options={'HIDDEN'})
 
-    prefabData: EnumProperty(
-        name=get_id("importer_prefabdata"),
-        description=get_id("importer_prefabdata_tip"),
-        items=(
-            ('JIGGLEBONES', get_id("importer_prefabdata_jiggle"), get_id("importer_prefabdata_jiggle_tip")),
-            ('HITBOXES',    get_id("importer_prefabdata_hitbox"), get_id("importer_prefabdata_hitbox_tip")),
-            ('PROCEDURAL',  get_id("importer_prefabdata_proc"),   get_id("importer_prefabdata_proc_tip")),
-        ),
-        options={'ENUM_FLAG'},
-        default={'JIGGLEBONES', 'HITBOXES', 'PROCEDURAL'},
-    )
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
     def draw_options(self, layout) -> None:
         self.draw_prefab_data(layout)

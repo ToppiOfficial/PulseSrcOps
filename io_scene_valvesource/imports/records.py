@@ -119,10 +119,6 @@ class ImportedMesh:
     matrix: Matrix = field(default_factory=Matrix)
     parent_bone: str | None = None
 
-    # Format differences build_mesh has to honour, rather than branching on format:
-    # SMD corrects a Y-up file by transforming mesh data (readPolys 912); DMX does it
-    # via the object matrix.
-    data_transform: Matrix | None = None
     # SMD gives a duplicate face its own vertices (readPolys createFace(use_cache=False));
     # DMX drops it.
     split_duplicate_faces: bool = False

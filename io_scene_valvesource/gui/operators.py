@@ -2104,6 +2104,11 @@ class SMD_OT_CopySourceBoneProps(Operator):
             if self.copy_location:
                 self._copy_location(src, pb)
 
+        # Values are set dict-style above, so nothing dirties the viewport on its own.
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
         self.report({'INFO'}, f"Copied bone properties to {len(targets)} bone(s)")
         return {'FINISHED'}
 

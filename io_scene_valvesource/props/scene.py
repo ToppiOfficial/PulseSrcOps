@@ -210,10 +210,6 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
         default='POSE',
     )
 
-    show_flex_items : BoolProperty(default=False)
-    show_flex_rules_items : BoolProperty(default=True)
-    show_flex_delta_overrides : BoolProperty(default=False)
-
     arm_items_view : EnumProperty(name=get_id('prop_arm_items_view'), items=[
         ('JIGGLEBONES', get_id('label_all_jigglebones'), '', 'BONE_DATA',  0),
         ('ATTACHMENTS', get_id('label_all_attachments'), '', 'EMPTY_DATA', 1),

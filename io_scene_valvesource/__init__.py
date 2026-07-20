@@ -43,7 +43,7 @@ for collection in [bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load
         if func.__module__.startswith(pkg_name):
             collection.remove(func)
 
-from . import datamodel, imports, exports, flex, procbones_sim, updater
+from . import datamodel, imports, exports, flex, procbones_sim, updater, icons
 from . import gui as GUI
 from .utils import *
 from .props import *
@@ -191,6 +191,10 @@ _classes = (
     GUI.SMD_UL_MaterialPaths,
     GUI.SMD_OT_MaterialPathAdd,
     GUI.SMD_OT_MaterialPathRemove,
+    GUI.SMD_PT_SceneMaterialPaths,
+    GUI.SMD_PT_SceneEncodingOptions,
+    GUI.SMD_PT_SceneTransform,
+    GUI.SMD_PT_SceneModelOptions,
     GUI.SMD_PT_Exportables,
     GUI.SMD_PT_ViewportSimulation,
 
@@ -202,6 +206,9 @@ _classes = (
     GUI.SMD_PT_Mesh,
     GUI.SMD_PT_Material,
     GUI.SMD_PT_Shapekey,
+    GUI.SMD_PT_DmeFlexControllers,
+    GUI.SMD_PT_DmeFlexRules,
+    GUI.SMD_PT_DmeDeltaMap,
     GUI.SMD_PT_Vertexmap,
     GUI.SMD_PT_Vertexfloatmap,
     GUI.SMD_PT_Vertexanimations,
@@ -247,6 +254,7 @@ GUI.SMD_PT_Jigglebones,
     GUI.SMD_UL_DmeFlexControllers,
     GUI.SMD_UL_DmeFlexRules,
     GUI.SMD_MT_FlexControllerSpecials,
+    GUI.SMD_MT_FlexRuleSpecials,
     GUI.SMD_OT_AutoAssignFlexGroups,
     GUI.SMD_OT_AddFlexController,
     GUI.SMD_OT_AddAllFlexControllers,
@@ -314,6 +322,8 @@ GUI.SMD_PT_Jigglebones,
 )
 
 def register():
+    icons.register()
+
     for cls in _classes:
         bpy.utils.register_class(cls)
 
@@ -411,6 +421,8 @@ def unregister():
     del bpy.types.Text.vs
     del bpy.types.Bone.vs
     del bpy.types.Material.vs
+
+    icons.unregister()
 
 if __name__ == "__main__":
     register()

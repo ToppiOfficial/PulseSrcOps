@@ -17,7 +17,7 @@ import bpy
 PROC_BONE_TYPES = ("DmeQuatInterpBone", "DmeAimAtBone")
 
 
-PREFAB_KINDS = ('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL')
+PREFAB_KINDS = ('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
 
 def wants_prefab(ctx, kind: str) -> bool:
@@ -29,10 +29,10 @@ def wants_prefab(ctx, kind: str) -> bool:
     return kind in selected
 
 
-def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
+def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int, int]:
     """Attach prefab data from a model DMX onto an existing armature.
 
-    Returns (jigglebones, hitboxes, procbones).
+    Returns (jigglebones, hitboxes, procbones, attachments).
     """
     from .dmx import load_dmx, read_skeleton
 
@@ -72,7 +72,37 @@ def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int]:
             ctx.warning(f"DMX procedural bones: {len(pb_missing)} entr(y/ies) skipped, "
                         f"bone(s) not found on '{arm.name}': {', '.join(pb_missing)}")
 
-    return jb_count, hb_created, pb_count
+    at_count = (_build_dmx_attachments(ctx, skel, arm)
+                if wants_prefab(ctx, 'ATTACHMENTS') else 0)
+
+    return jb_count, hb_created, pb_count, at_count
+
+
+def _build_dmx_attachments(ctx, skel, arm) -> int:
+    """Unlike the model-import path, bones are resolved by name - there is no boneIDs map
+    when the armature was not built from this file."""
+    from .build import build_attachment_empty
+
+    bone_lower = {b.name.lower(): b.name for b in arm.data.bones}
+    coll = bpy.context.scene.collection
+    created = 0
+    missing: list[str] = []
+    for att in skel.attachments:
+        dmx_bone = skel.bones[att.parent].name if att.parent is not None else None
+        if not dmx_bone:
+            ctx.warning(f"Attachment '{att.name}' has no parent bone - skipped")
+            continue
+        resolved = (arm.data.bones[dmx_bone].name if dmx_bone in arm.data.bones
+                    else bone_lower.get(dmx_bone.lower()))
+        if not resolved:
+            missing.append(dmx_bone)
+            continue
+        build_attachment_empty(ctx, coll, arm, att.name, resolved, att.matrix)
+        created += 1
+    if missing:
+        ctx.warning(f"DMX attachments: {len(missing)} skipped, bone(s) not found on "
+                    f"'{arm.name}': {', '.join(sorted(set(missing)))}")
+    return created
 
 
 def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:

@@ -18,7 +18,7 @@ from mathutils import Matrix, Euler, Vector
 from .. import keyvalues3
 from ..utils import (REF, ANIM, KeyFrame, SmdInfo, State, printTimeMessage,
                      import_jigglebones_from_kv3, import_hitboxes_from_kv3)
-from .build import truncate_id_name, create_armature, apply_frames
+from .build import truncate_id_name, create_armature, apply_frames, build_attachment_empty
 from .prefab import wants_prefab
 
 
@@ -170,7 +170,9 @@ def _read_document(ctx, smd, qc, filepath: str, rot_mode: str, seen: set) -> boo
         return True
     qc.a = smd.a = arm
 
-    _read_attachments(ctx, smd, arm, root_node, filename)
+    if wants_prefab(ctx, 'ATTACHMENTS'):
+        ctx.imported_attachments += read_attachments(
+            ctx, smd.g if smd.g else bpy.context.scene.collection, arm, root_node, filename)
 
     if wants_prefab(ctx, 'JIGGLEBONES'):
         cnt, missing = import_jigglebones_from_kv3(kv_doc, arm)
@@ -312,11 +314,12 @@ def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> Non
         ctx.num_files_imported += ctx.readDMX(dmx_path, qc.upAxis, rot_mode, False, REF)
 
 
-def _read_attachments(ctx, smd, arm, root_node, filename) -> None:
+def read_attachments(ctx, coll, arm, root_node, filename) -> int:
+    """Returns the number of attachments created. Shared with ImportPrefab, which reads
+    a .vmdl_prefab against an existing armature rather than one it just built."""
     att_list = root_node.get(recursive=False, _class="AttachmentList")
     if not att_list:
-        return
-    coll = smd.g if smd.g else bpy.context.scene.collection
+        return 0
     # Source bone names are case-insensitive; map them to the real bones.
     bone_lower = {b.name.lower(): b.name for b in arm.data.bones}
     imported_att = 0
@@ -337,20 +340,12 @@ def _read_attachments(ctx, smd, arm, root_node, filename) -> None:
                 continue
         origin = att.properties.get("relative_origin", [0.0, 0.0, 0.0])
         angles_deg = att.properties.get("relative_angles", [0.0, 0.0, 0.0])
-        atch = bpy.data.objects.new(
-            name=truncate_id_name(ctx, att_name, "Attachment"), object_data=None)
-        coll.objects.link(atch)
-        atch.show_in_front = True
-        atch.empty_display_type = 'ARROWS'
-        atch.parent = arm
-        if resolved_bone:
-            atch.parent_type = 'BONE'
-            atch.parent_bone = resolved_bone
-        atch.vs.dmx_attachment = True
-        atch.matrix_local = local_matrix(origin, angles_deg)
+        build_attachment_empty(ctx, coll, arm, att_name, resolved_bone,
+                               local_matrix(origin, angles_deg))
         imported_att += 1
     if imported_att:
         print(f"- Imported {imported_att} attachment(s)")
+    return imported_att
 
 
 def _read_animations(ctx, qc, arm, root_node, filepath, filename, rot_mode) -> None:

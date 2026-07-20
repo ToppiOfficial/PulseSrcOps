@@ -2,6 +2,7 @@ import bpy
 from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
+from ..icons import icon
 from ..exports import SmdExporter, PrefabExporter
 from ..imports import ImportDMX, ImportSMD, ImportQC, ImportVMDL, ImportPrefab
 from .operators import (
@@ -13,6 +14,8 @@ from .operators import (
     SMD_OT_CopyFlexControllers,
     SMD_OT_ClearFlexControllers,
     SMD_OT_MigrateQCDeltasToOverrides,
+    SMD_OT_FlexRuleRegexReplace,
+    SMD_OT_ClearFlexRules,
     SMD_OT_ProcBoneDuplicate,
     SMD_OT_ProcBoneCopyActive,
     SMD_OT_ProcBoneCopyByDriverBone,
@@ -38,8 +41,8 @@ class SMD_MT_ImportChoice(Menu):
         # One entry per format - picking the format is the user's choice, not a guess.
         l.operator(ImportDMX.bl_idname, text=get_id("import_menuitem_dmx", True), icon='MESH_DATA')
         l.operator(ImportSMD.bl_idname, text=get_id("import_menuitem_smd", True), icon='MESH_DATA')
-        l.operator(ImportQC.bl_idname, text=get_id("import_menuitem_qc", True), icon='TEXT')
-        l.operator(ImportVMDL.bl_idname, text=get_id("import_menuitem_vmdl", True), icon='FILE_3D')
+        l.operator(ImportQC.bl_idname, text=get_id("import_menuitem_qc", True), icon_value=icon('source1'))
+        l.operator(ImportVMDL.bl_idname, text=get_id("import_menuitem_vmdl", True), icon_value=icon('source2'))
         l.separator()
         l.operator(ImportPrefab.bl_idname, text=get_id("import_menuitem_prefab", True), icon='CONSTRAINT_BONE')
 
@@ -134,6 +137,19 @@ class SMD_MT_FlexControllerSpecials(Menu):
         layout.operator(SMD_OT_MigrateQCDeltasToOverrides.bl_idname, icon='FORWARD', text="Migrate QC Deltas to Overrides")
         layout.separator()
         layout.operator(SMD_OT_ClearFlexControllers.bl_idname,  icon='TRASH',       text="Delete All")
+
+
+class SMD_MT_FlexRuleSpecials(Menu):
+    bl_label = "Flex Rule Specials"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(SMD_OT_FlexRuleRegexReplace.bl_idname, icon='VIEWZOOM')
+        layout.separator()
+        layout.operator(SMD_OT_ClearFlexRules.bl_idname, icon='TRASH', text="Delete All")
+        layout.separator()
+        layout.operator("wm.url_open", icon='HELP', text=get_id('label_dme_flex_help', True)
+                        ).url = "https://developer.valvesoftware.com/wiki/Flex_animation"
 
 
 class SMD_MT_HitboxSpecials(Menu):

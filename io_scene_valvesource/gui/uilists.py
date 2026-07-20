@@ -1,6 +1,7 @@
 import bpy
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
-from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, validate_flex_expression, validate_corrective_components, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_delta_override_conflicts, get_dme_renamed_delta_names, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable
+from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable
+from .helpers import build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
 
 
 class SMD_UL_ExportItems(UIList):
@@ -167,24 +168,15 @@ class SMD_UL_DmeFlexRules(UIList):
         type_icon = self._ICONS.get(item.rule_type, 'QUESTION')
         row.label(text="", icon=type_icon)
 
-        sk = ob.data.shape_keys if (ob.data and hasattr(ob.data, 'shape_keys')) else None
-        sk_names = set(sk.key_blocks.keys()) if sk else set()
-        ctrl_names = _build_dme_ctrl_names(ob.vs)
-        localvar_names = {r.name for r in ob.vs.dme_flex_rules if r.rule_type == 'LOCALVAR' and r.name}
-        stereo_delta_names = _build_stereo_delta_names(ob.vs)
-        renamed_delta_names = get_dme_renamed_delta_names(ob)
-
-        has_error = False
+        ctx = build_flex_rule_context(ob)
+        has_error = flex_rule_has_error(item, ctx)
 
         if item.rule_type == 'CORRECTIVE':
-            comp_str = item.components.strip()
-            has_error = not comp_str or bool(validate_corrective_components(comp_str, sk_names))
             name_row = row.row(align=True)
             name_row.alert = has_error
             name_row.label(text=item.components if item.components else "(no components)")
 
         elif item.rule_type == 'DOMINATION':
-            has_error = not item.dominator_names or not item.suppressed_names
             dom_label = item.dominator_names[:24] + ("…" if len(item.dominator_names) > 24 else "") if item.dominator_names else "(no dominators)"
             sup_label = item.suppressed_names[:20] + ("…" if len(item.suppressed_names) > 20 else "") if item.suppressed_names else ""
             name_col = row.row(align=True)
@@ -195,29 +187,7 @@ class SMD_UL_DmeFlexRules(UIList):
                 right.alignment = 'RIGHT'
                 right.label(text="-> " + sup_label)
         else:
-            name_alert = False
-            if item.rule_type == 'PASSTHROUGH':
-                name_alert = not item.name or item.name not in ctrl_names
-                has_error = name_alert
-            elif item.rule_type == 'EXPRESSION':
-                if not item.name:
-                    name_alert = True
-                else:
-                    in_shapekeys = sk is not None and (
-                        item.name in sk.key_blocks or
-                        any(item.name in key.name.split('+') for key in sk.key_blocks)
-                    )
-                    name_alert = (not in_shapekeys and item.name not in localvar_names
-                                  and item.name not in stereo_delta_names
-                                  and item.name not in renamed_delta_names)
-                if name_alert:
-                    has_error = True
-                elif item.expression:
-                    d_errs, c_errs = validate_flex_expression(item.expression.strip(), sk_names, ctrl_names, localvar_names, stereo_delta_names, renamed_delta_names)
-                    has_error = bool(d_errs or c_errs)
-            elif item.rule_type == 'LOCALVAR':
-                name_alert = not item.name
-                has_error = name_alert
+            name_alert = flex_rule_name_error(item, ctx)
 
             name_row = row.row(align=True)
             name_row.alert = name_alert

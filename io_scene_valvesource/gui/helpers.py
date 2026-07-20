@@ -1,4 +1,5 @@
 import bpy, math
+from typing import NamedTuple
 from ..utils import get_armature, vertex_float_maps, validate_corrective_components, validate_flex_expression, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_renamed_delta_names
 from .. import procbones_sim as _procbones_sim
 
@@ -8,7 +9,7 @@ def _mesh_type_allows(ob, feature: str) -> bool:
     if mt == 'DEFAULT':
         return True
     if mt == 'CLOTHPROXY':
-        return feature in ('vertexmap', 'vertexfloatmap')
+        return feature == 'vertexmap'
     return False  # COLLISION blocks everything
 
 
@@ -36,43 +37,76 @@ def _ensure_cloth_remaps():
     return None
 
 
+class FlexRuleContext(NamedTuple):
+    """Name sets a flex rule is validated against. Build once per object, not per rule."""
+    sk: object
+    sk_names: set
+    ctrl_names: set
+    localvar_names: set
+    stereo_delta_names: set
+    renamed_delta_names: set
+
+
+def build_flex_rule_context(ob) -> FlexRuleContext:
+    vs = ob.vs
+    sk = ob.data.shape_keys if (ob.data and hasattr(ob.data, 'shape_keys')) else None
+    rules = getattr(vs, 'dme_flex_rules', None) or ()
+    return FlexRuleContext(
+        sk=sk,
+        sk_names=set(sk.key_blocks.keys()) if sk else set(),
+        ctrl_names=_build_dme_ctrl_names(vs),
+        localvar_names={r.name for r in rules if r.rule_type == 'LOCALVAR' and r.name},
+        stereo_delta_names=_build_stereo_delta_names(vs),
+        renamed_delta_names=get_dme_renamed_delta_names(ob),
+    )
+
+
+def flex_rule_name_error(rule, ctx: FlexRuleContext) -> bool:
+    """True when the rule's name field does not resolve to a valid target."""
+    rt = rule.rule_type
+    if rt == 'PASSTHROUGH':
+        return not rule.name or rule.name not in ctx.ctrl_names
+    if rt == 'LOCALVAR':
+        return not rule.name
+    if rt == 'EXPRESSION':
+        if not rule.name:
+            return True
+        in_shapekeys = ctx.sk is not None and (
+            rule.name in ctx.sk.key_blocks or
+            any(rule.name in key.name.split('+') for key in ctx.sk.key_blocks)
+        )
+        return (not in_shapekeys and rule.name not in ctx.localvar_names
+                and rule.name not in ctx.stereo_delta_names
+                and rule.name not in ctx.renamed_delta_names)
+    return False
+
+
+def flex_rule_has_error(rule, ctx: FlexRuleContext) -> bool:
+    """Single source of truth for the UIList row icon and the panel header count."""
+    rt = rule.rule_type
+    if rt == 'CORRECTIVE':
+        comp_str = rule.components.strip()
+        return not comp_str or bool(validate_corrective_components(comp_str, ctx.sk_names))
+    if rt == 'DOMINATION':
+        return not rule.dominator_names or not rule.suppressed_names
+    if flex_rule_name_error(rule, ctx):
+        return True
+    if rt == 'EXPRESSION' and rule.expression:
+        d_errs, c_errs = validate_flex_expression(
+            rule.expression.strip(), ctx.sk_names, ctx.ctrl_names,
+            ctx.localvar_names, ctx.stereo_delta_names, ctx.renamed_delta_names)
+        return bool(d_errs or c_errs)
+    return False
+
+
 def _count_flex_rule_errors(ob) -> int:
     if not ob or not hasattr(ob, 'vs'):
         return 0
-    vs = ob.vs
-    rules = getattr(vs, 'dme_flex_rules', None)
+    rules = getattr(ob.vs, 'dme_flex_rules', None)
     if not rules:
         return 0
-    sk = ob.data.shape_keys if (ob.data and hasattr(ob.data, 'shape_keys')) else None
-    sk_names = set(sk.key_blocks.keys()) if sk else set()
-    ctrl_names = _build_dme_ctrl_names(vs)
-    localvar_names = {r.name for r in rules if r.rule_type == 'LOCALVAR' and r.name}
-    stereo_delta_names = _build_stereo_delta_names(vs)
-    renamed_delta_names = get_dme_renamed_delta_names(ob)
-    count = 0
-    for rule in rules:
-        rt = rule.rule_type
-        if rt == 'CORRECTIVE':
-            comp_str = rule.components.strip()
-            if not comp_str or validate_corrective_components(comp_str, sk_names):
-                count += 1
-        elif rt == 'DOMINATION':
-            if not rule.dominator_names or not rule.suppressed_names:
-                count += 1
-        elif rt == 'PASSTHROUGH':
-            if not rule.name or rule.name not in ctrl_names:
-                count += 1
-        elif rt == 'EXPRESSION':
-            if not rule.name:
-                count += 1
-            elif rule.expression:
-                d_errs, c_errs = validate_flex_expression(rule.expression.strip(), sk_names, ctrl_names, localvar_names, stereo_delta_names, renamed_delta_names)
-                if d_errs or c_errs:
-                    count += 1
-        elif rt == 'LOCALVAR':
-            if not rule.name:
-                count += 1
-    return count
+    ctx = build_flex_rule_context(ob)
+    return sum(flex_rule_has_error(rule, ctx) for rule in rules)
 
 
 _get_or_create_proc_tol_fcurve = _procbones_sim._get_or_create_proc_tol_fcurve

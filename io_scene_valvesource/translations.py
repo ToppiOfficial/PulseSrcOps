@@ -106,10 +106,6 @@ _data = {
         'en': "Define flex controllers and flex rules following the DMX model spec (DMX export only)",
         'ja': "DMXモデル仕様に従いフレックスコントローラーとルールを定義（DMXエクスポート専用）",
     },
-    'controllers_builder_tip': {
-        'en': "Only shapekeys explicitly listed as flex controllers will be exported. All other shapekeys are ignored.",
-        'ja': "明示的にリストされたシェイプキーのみエクスポート",
-    },
     'curve_poly_side': {
         'en': "Polygon Generation",
         'ja': "ポリゴン生成",
@@ -191,8 +187,8 @@ _data = {
         'ja': "シーンエクスポーターが書き込むファイル形式",
     },
     'export_menuitem': {
-        'en': "Source Engine (.smd, .vta, .dmx)",
-        'ja': "Source Engine (.smd, .vta, .dmx)",
+        'en': "Source Engine",
+        'ja': "Source Engine",
     },
     'exportables_arm_filter_result': {
         'en': "{0}: \"{1}\" actions ({2})",
@@ -201,14 +197,6 @@ _data = {
     'exportables_arm_no_slot_filter': {
         'en': "{0}: All action slots ({1})",
         'ja': "{0}: すべてのアクションスロット（{1}）",
-    },
-    'exportables_flex_count': {
-        'en': "Shapes: {0}",
-        'ja': "シェイプ：{0}",
-    },
-    'exportables_flex_count_corrective': {
-        'en': "Corrective Shapes: {0}",
-        'ja': "是正シェイプ：{0}",
     },
     'exportables_flex_generate': {
         'en': "Generate Controllers",
@@ -636,6 +624,14 @@ _data = {
         'en': "Import procedural (helper) bone rules",
         'ja': "プロシージャル(ヘルパー)ボーンのルールをインポート",
     },
+    'importer_prefabdata_attach': {
+        'en': "Attachments",
+        'ja': "アタッチメント",
+    },
+    'importer_prefabdata_attach_tip': {
+        'en': "Import attachment points as empties parented to their bone",
+        'ja': "アタッチメントポイントをボーンにペアレントしたエンプティとしてインポート",
+    },
     'import_menuitem_prefab': {
         'en': "Prefab data only (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
         'ja': "プレハブデータのみ (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
@@ -691,10 +687,6 @@ _data = {
     'importer_smd_tip': {
         'en': "Imports an uncompiled Source Engine SMD model, animation or VTA flex library",
         'ja': "未コンパイルのSource Engine SMDモデル、アニメーションまたはVTAフレックスライブラリをインポート",
-    },
-    'import_menuitem': {
-        'en': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
-        'ja': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
     },
     'importer_balance_group': {
         'en': "DMX Stereo Balance",
@@ -828,17 +820,17 @@ _data = {
         'en': "Determines the type of rotation Keyframes created when importing bones or animation",
         'ja': "ボーンまたはアニメーションのインポート時に作成されるキーフレームの回転タイプ",
     },
-    'importer_tip': {
-        'en': "Imports uncompiled Source Engine model data",
-        'ja': "未コンパイルのSource Engineモデルデータをインポート",
-    },
-    'importer_title': {
-        'en': "Import SMD/VTA, DMX, QC",
-        'ja': "インポート SMD/VTA, DMX, QC",
-    },
     'importer_up_tip': {
         'en': "Which axis represents 'up' (ignored for QCs)",
         'ja': "上方向軸を設定（QCは無視）",
+    },
+    'importer_forward_tip': {
+        'en': "Which axis the model faces. Match the Forward Axis it was exported with",
+        'ja': "モデルの正面軸。エクスポート時の前方向軸に合わせてください",
+    },
+    'importer_up_offset_tip': {
+        'en': "Vertical offset to undo. Match the Up Axis Offset it was exported with",
+        'ja': "打ち消す垂直オフセット。エクスポート時の上方向軸オフセットに合わせてください",
     },
     'importer_use_collections': {
         'en': "Create Collections",
@@ -855,14 +847,6 @@ _data = {
     'insert_uuid_tip': {
         'en': "Inserts a random UUID at the current location",
         'ja': "現在の位置にランダムなUUIDを挿入",
-    },
-    'label_armature_data': {
-        'en': "Armature Data",
-        'jp': "アーマチュアデータ"
-    },
-    'label_activate': {
-        'en': "Activate",
-        'ja': "有効化",
     },
     'label_add_all': {
         'en': "Add All",
@@ -892,10 +876,6 @@ _data = {
         'en': "All Attachments",
         'ja': "すべてのアタッチメント",
     },
-    'label_all_hitboxes': {
-        'en': "All Hitboxes",
-        'ja': "すべてのヒットボックス",
-    },
     'label_all_jigglebones': {
         'en': "All Jigglebones",
         'ja': "すべてのジグルボーン",
@@ -908,10 +888,6 @@ _data = {
         'en': "Angle Constraints:",
         'ja': "角度制約:",
     },
-    'label_attachment_no_parent': {
-        'en': "Attachment cannot be a parent",
-        'ja': "アタッチメントは親になれません",
-    },
     'label_base_spring_properties': {
         'en': "Base Spring Properties:",
         'ja': "ベーススプリングプロパティ:",
@@ -920,28 +896,13 @@ _data = {
         'en': "Boing Properties:",
         'ja': "バネ動作プロパティ:",
     },
-    'label_controller_name': {
-        'en': "Controller Name",
-        'ja': "コントローラー名",
-    },
     'label_damping': {
         'en': "Damping",
         'ja': "減衰",
     },
-    'label_delete_all': {
-        'en': "Delete All",
-        'ja': "すべて削除",
-    },
-    'label_delta_name': {
-        'en': "Delta Name",
-        'ja': "デルタ名",
-    },
     'label_direction_naming': {
         'en': "Direction Naming:",
         'ja': "方向命名:",
-    },
-    'label_dme_components_valid': {
-        'en': "Components valid",
     },
     'label_dme_override_conflict': {
         'en': "Conflict: renames to an existing or duplicated delta name",
@@ -977,11 +938,9 @@ _data = {
     'label_dme_dominator_hint': {
         'en': "Dominators: controller names, comma-separated",
     },
-    'label_dme_expression_hint': {
-        'en': "%localvar  or  controller:  + - * / () min() max() sqrt()",
-    },
-    'label_dme_expression_valid': {
-        'en': "Expression valid",
+    'label_dme_flex_help': {
+        'en': "Flex Animation Reference",
+        'ja': "Flex アニメーション リファレンス",
     },
     'label_dme_flex_controllers': {
         'en': "Flex Controllers",
@@ -994,6 +953,9 @@ _data = {
     },
     'label_dme_unknown_controller': {
         'en': "{0}: unknown controller",
+    },
+    'label_dme_unknown_target': {
+        'en': "{0}: not a shape key, delta or local var",
     },
     'label_dme_unknown_delta': {
         'en': "%{0}: unknown shape key or local var",
@@ -1009,14 +971,6 @@ _data = {
         'en': "Export Name",
         'ja': "エクスポート名",
     },
-    'label_extra_args': {
-        'en': "Extra Args",
-        'ja': "追加引数",
-    },
-    'label_flex_type': {
-        'en': "Flex Type",
-        'ja': "フレックスタイプ",
-    },
     'label_forward': {
         'en': "Forward",
         'ja': "前方",
@@ -1029,29 +983,9 @@ _data = {
         'en': "Friction",
         'ja': "摩擦",
     },
-    'label_generate_lods': {
-        'en': "Generate LODs on export",
-        'ja': "エクスポート時にLODを生成",
-    },
-    'label_hitbox_group': {
-        'en': "Hitbox Group",
-        'ja': "ヒットボックスグループ",
-    },
-    'label_ignore': {
-        'en': "Ignore",
-        'ja': "無視",
-    },
     'label_in_multiple_collection': {
         'en': "In Multiple Collections",
         'ja': "複数のコレクションに存在",
-    },
-    'label_is_eyelid': {
-        'en': "Is Eyelid",
-        'ja': "まぶた",
-    },
-    'label_is_stereo': {
-        'en': "Is Stereo",
-        'ja': "ステレオ",
     },
     'label_jiggle_flexibility': {
         'en': "Flexibility",
@@ -1081,25 +1015,9 @@ _data = {
         'en': "Min",
         'ja': "最小",
     },
-    'label_no_attachments': {
-        'en': "No Attachments",
-        'ja': "アタッチメントなし",
-    },
-    'label_no_hitboxes': {
-        'en': "No Hitboxes",
-        'ja': "ヒットボックスなし",
-    },
-    'label_no_jigglebones': {
-        'en': "No Jigglebones",
-        'ja': "ジグルボーンなし",
-    },
     'label_not_in_collection': {
         'en': "Not in Collection",
         'ja': "コレクションに未登録",
-    },
-    'label_options': {
-        'en': "Options",
-        'ja': "オプション",
     },
     'label_physical_properties': {
         'en': "Physical Properties:",
@@ -1113,18 +1031,6 @@ _data = {
         'en': "Pitch Limits:",
         'ja': "ピッチ制限:",
     },
-    'label_preview_additive': {
-        'en': "Preview (Additive)",
-        'ja': "プレビュー (加算)",
-    },
-    'label_preview_reset': {
-        'en': "Preview (Reset)",
-        'ja': "プレビュー (リセット)",
-    },
-    'label_properties_to_copy': {
-        'en': "Properties to copy:",
-        'ja': "コピーするプロパティ:",
-    },
     'label_rotation_offset': {
         'en': "Rotation Offset:",
         'ja': "回転オフセット:",
@@ -1132,10 +1038,6 @@ _data = {
     'label_select_valid_bone': {
         'en': "Select a Valid Bone",
         'ja': "有効なボーンを選択",
-    },
-    'label_shapekey': {
-        'en': "Shapekey",
-        'ja': "シェイプキー",
     },
     'label_side': {
         'en': "Side",
@@ -1205,13 +1107,9 @@ _data = {
         'en': "Use Bone Length",
         'ja': "ボーンの長さを使用",
     },
-    'label_vertex_animations_help': {
-        'en': "Vertex Animations Help",
-        'ja': "頂点アニメーションのヘルプ",
-    },
     'label_vertex_float_maps': {
-        'en': "Vertex Float Maps:",
-        'ja': "頂点フロートマップ:",
+        'en': "Cloth Proxy Mesh:",
+        'ja': "クロスプロキシメッシュ:",
     },
     'label_vertex_maps': {
         'en': "Vertex Maps:",
@@ -1228,10 +1126,6 @@ _data = {
     'valvesource_vertex_blend1': {
         'en': "Paint Blend Params 1",
         'ja': "ペイントブレンドパラメータ 1",
-    },
-    'label_y_to': {
-        'en': "Y to...",
-        'ja': "Yを...",
     },
     'label_yaw': {
         'en': "Yaw",
@@ -1260,66 +1154,6 @@ _data = {
     'vertex_influence_limit_mode_manual_tip': {
         'en': "Manually set the vertex influence limit",
         'ja': "頂点ウェイトの上限を手動で設定",
-    },
-    'menu_flex_controller_specials': {
-        'en': "Flex Controller Specials",
-        'ja': "フレックスコントローラー特別メニュー",
-    },
-    'op_add_all_flex_controllers': {
-        'en': "Add All Flex Controllers",
-        'ja': "すべてのフレックスコントローラーを追加",
-    },
-    'op_add_flex_controller': {
-        'en': "Add Flex Controller",
-        'ja': "フレックスコントローラーを追加",
-    },
-    'op_apply_remap_range': {
-        'en': "Apply Remap Range",
-        'ja': "リマップ範囲を適用",
-    },
-    'op_assign_bone_rot_export_offset': {
-        'en': "Assign Bone Target Forward",
-        'ja': "ボーンターゲット前方を割り当て",
-    },
-    'op_auto_assign_flex_groups': {
-        'en': "Auto Assign Flex Groups",
-        'ja': "フレックスグループを自動割り当て",
-    },
-    'op_auto_assign_flex_groups_tip': {
-        'en': "Automatically categorize flex controllers based on keywords",
-        'ja': "キーワードに基づいてフレックスコントローラーを自動分類",
-    },
-    'op_clear_flex_controllers': {
-        'en': "Clear All Flex Controllers",
-        'ja': "すべてのフレックスコントローラーをクリア",
-    },
-    'op_copy_bone_export_name': {
-        'en': "Copy Name to Clipboard",
-        'ja': "クリップボードに名前をコピー",
-    },
-    'op_copy_flex_controllers': {
-        'en': "Copy Flex Data to Selected",
-        'ja': "選択オブジェクトにフレックスデータをコピー",
-    },
-    'op_copy_flex_controllers_tip': {
-        'en': "Copy flex controllers, rules, and delta overrides from the active object to other selected mesh objects",
-        'ja': "アクティブオブジェクトのフレックスコントローラー、ルール、デルタ上書きを選択メッシュにコピー",
-    },
-    'op_copy_jigglebone_props': {
-        'en': "Copy Jigglebone Properties",
-        'ja': "ジグルボーンプロパティをコピー",
-    },
-    'op_copy_source_bone_props': {
-        'en': "Copy Source Bone Properties",
-        'ja': "Sourceボーンプロパティをコピー",
-    },
-    'op_move_flex_controller': {
-        'en': "Move Flex Controller",
-        'ja': "フレックスコントローラーを移動",
-    },
-    'op_preview_flex_controller': {
-        'en': "Preview Flex Controller",
-        'ja': "フレックスコントローラーをプレビュー",
     },
     'op_proc_bone_copy_tolerance': {
         'en': "Copy Tolerance",
@@ -1389,10 +1223,6 @@ _data = {
         'en': "Add each selected bone as a helper bone for new LookAt Procedural Bone entries, aiming at a chosen bone or attachment",
         'ja': "選択した各ボーンを新しいLookAt Procedural Boneのエントリとして追加し、選択したボーンまたはアタッチメントを向かせます。",
     },
-    'op_remove_flex_controller': {
-        'en': "Remove Flex Controller",
-        'ja': "フレックスコントローラーを削除",
-    },
     'op_reset_jiggle_simulation': {
         'en': "Reset Simulation",
         'ja': "シミュレーションをリセット",
@@ -1416,21 +1246,33 @@ _data = {
     'op_copy_jigglebones_only_selected_tip': {
         'en': "Only copy onto the currently selected bones instead of every matching bone in this armature",
     },
-    'op_sort_flex_controllers': {
-        'en': "Sort Flex Controllers",
-        'ja': "フレックスコントローラーをソート",
-    },
     'panel_backface': {
         'en': "Backface",
         'ja': "裏面",
     },
-    'panel_bone_data': {
-        'en': "Bone Data",
-        'ja': "ボーンデータ",
-    },
     'panel_jigglebones': {
         'en': "Jigglebones",
         'ja': "ジグルボーン",
+    },
+    'panel_material_paths': {
+        'en': "Material Paths",
+        'ja': "マテリアルパス",
+    },
+    'label_dme_delta_map': {
+        'en': "Delta Map",
+        'ja': "デルタマップ",
+    },
+    'panel_encoding_options': {
+        'en': "Encoding Options",
+        'ja': "エンコードオプション",
+    },
+    'panel_scene_transform': {
+        'en': "Orientation & Scale",
+        'ja': "向きとスケール",
+    },
+    'panel_model_options': {
+        'en': "Model Options",
+        'ja': "モデルオプション",
     },
     'panel_level_of_detail': {
         'en': "Level Of Detail",
@@ -1463,18 +1305,6 @@ _data = {
     'panel_toon_outline_edgeline': {
         'en': "Toon Outline/Edgeline",
         'ja': "トゥーンアウトライン/エッジライン",
-    },
-    'panel_vertex_animations': {
-        'en': "Vertex Animations",
-        'ja': "頂点アニメーション",
-    },
-    'panel_vertex_float_maps': {
-        'en': "Vertex Float Maps",
-        'ja': "頂点フロートマップ",
-    },
-    'panel_vertex_maps': {
-        'en': "Vertex Maps",
-        'ja': "頂点マップ",
     },
     'panel_viewport_simulation': {
         'en': "Source Engine Preview & Simulation",
@@ -1631,10 +1461,6 @@ _data = {
     'prop_delta_override_name_tip': {
         'en': "Delta name to use in the exported DMX instead of the shape key name",
         'ja': "シェイプキー名の代わりにDMXエクスポートで使用するデルタ名",
-    },
-    'prop_dme_flexcontrollers': {
-        'en': "Flex Controllers",
-        'ja': "フレックスコントローラー",
     },
     'prop_dmx_attachment': {
         'en': "Is Attachment",
@@ -1834,20 +1660,11 @@ _data = {
     'op_hitbox_mirror_x': {
         'en': "Mirror X",
     },
-    'op_hitbox_mirror_x_tip': {
-        'en': "Mirror the active hitbox along the X axis",
-    },
     'op_hitbox_mirror_y': {
         'en': "Mirror Y",
     },
-    'op_hitbox_mirror_y_tip': {
-        'en': "Mirror the active hitbox along the Y axis",
-    },
     'op_hitbox_mirror_z': {
         'en': "Mirror Z",
-    },
-    'op_hitbox_mirror_z_tip': {
-        'en': "Mirror the active hitbox along the Z axis",
     },
     'prop_hitbox_sync_pose': {
         'en': "Pose Sync",
@@ -2605,10 +2422,6 @@ _data = {
         'en': "Target Bone",
         'ja': "ターゲットボーン",
     },
-    'prop_proc_bone_lookat_target_tip': {
-        'en': "Bone whose head position this bone aims at",
-        'ja': "このボーンが向くヘッド位置を持つボーン",
-    },
     'prop_proc_bone_lookat_target_type': {
         'en': "Target Type",
         'ja': "ターゲットタイプ",
@@ -2700,10 +2513,6 @@ _data = {
     'prop_rotation_copy_target_tip': {
         'en': "When set, X/Y/Z rotation offset values are mirrored from this bone, adjusted for any difference in rest-pose orientation. Clear to set offsets manually",
         'ja': "設定すると、このボーンからX/Y/Z回転オフセットが自動的にコピーされ、レストポーズの向きの差に応じて調整されます。手動設定する場合は空欄にしてください",
-    },
-    'prop_shapekey': {
-        'en': "ShapeKey",
-        'ja': "シェイプキー",
     },
     'prop_sim_jiggle_bones': {
         'en': "Simulate Jiggle Bones",

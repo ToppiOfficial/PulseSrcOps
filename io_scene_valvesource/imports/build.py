@@ -15,8 +15,9 @@ from bpy.app.translations import pgettext
 from mathutils import Matrix, Vector
 
 from .. import flex, ordered_set
-from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id, getUpAxisMat,
+from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id,
                      channelBagForNewActionSlot, find_or_add_material_path)
+from .prefab import wants_prefab
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +214,7 @@ def apply_frames(ctx, smd, keyframes: dict, num_frames: int):
                         parentMat = bone.parent.matrix
                         bone.matrix = parentMat @ keyframe.matrix
                     else:
-                        bone.matrix = getUpAxisMat(smd.upAxis) @ keyframe.matrix
+                        bone.matrix = smd.axisMat @ keyframe.matrix
 
                     if keyframe.pos:
                         if curvesLoc is None:
@@ -351,20 +352,22 @@ def build_skeleton(ctx, smd, skel, target_arm, model_name: str) -> dict:
         bpy.context.view_layer.objects.active = smd.a
         ops.object.mode_set(mode='EDIT')
 
-        smd.a.matrix_world = getUpAxisMat(smd.upAxis)
+        # Root bones carry the axis correction, so it ends up in the rest pose instead
+        # of on the armature object where Clear Transform would wipe it.
+        axis_mat = smd.axisMat
 
         for i, ibone in enumerate(skel.bones):
             bone = smd.a.data.edit_bones.new(truncate_id_name(ctx, ibone.name, bpy.types.Bone))
             bone.parent = parent_edit_bone(ibone.parent)
             bone.tail = (0, 5, 0)
-            bone_matrices[bone.name] = ibone.matrix
+            bone_matrices[bone.name] = ibone.matrix if ibone.parent is not None else axis_mat @ ibone.matrix
             bone_names[i] = bone.name
             smd.boneIDs[ibone.source_id] = bone.name
             smd.boneTransformIDs[ibone.transform_id] = bone.name
 
         build_attachments(ctx, smd, skel, bone_names)
 
-    elif skel.attachments:
+    elif skel.attachments and wants_prefab(ctx, 'ATTACHMENTS'):
         # Attachments with no skeleton - nothing to parent them to
         ctx.warning(
             f"DMX '{smd.jobName}' contains {len(skel.attachments)} attachment(s) "
@@ -373,22 +376,35 @@ def build_skeleton(ctx, smd, skel, target_arm, model_name: str) -> dict:
     return bone_matrices
 
 
+def build_attachment_empty(ctx, coll, arm, name: str, bone_name, matrix):
+    """The attachment object every format produces: an ARROWS empty on its parent bone.
+    Whether a missing bone is an error is left to the caller - DMX requires one, a VMDL
+    attachment may sit on the model root."""
+    atch = bpy.data.objects.new(
+        name=truncate_id_name(ctx, name, "Attachment"), object_data=None)
+    coll.objects.link(atch)
+    atch.show_in_front = True
+    atch.empty_display_type = 'ARROWS'
+    atch.parent = arm
+    if bone_name:
+        atch.parent_type = 'BONE'
+        atch.parent_bone = bone_name
+    atch.vs.dmx_attachment = True
+    atch.matrix_local = matrix
+    return atch
+
+
 def build_attachments(ctx, smd, skel, bone_names) -> None:
+    if not wants_prefab(ctx, 'ATTACHMENTS'):
+        return
+    coll = smd.g if smd.g else bpy.context.scene.collection
     for att in skel.attachments:
         parent_name = bone_names[att.parent] if att.parent is not None else None
         if parent_name is None:
             ctx.warning(f"Attachment '{att.name}' has no parent bone - skipped")
             continue
-        atch = smd.atch = bpy.data.objects.new(
-            name=truncate_id_name(ctx, att.name, "Attachment"), object_data=None)
-        (smd.g if smd.g else bpy.context.scene.collection).objects.link(atch)
-        atch.show_in_front = True
-        atch.empty_display_type = 'ARROWS'
-        atch.parent = smd.a
-        atch.parent_type = 'BONE'
-        atch.parent_bone = parent_name
-        atch.vs.dmx_attachment = True
-        atch.matrix_local = att.matrix
+        smd.atch = build_attachment_empty(
+            ctx, coll, smd.a, att.name, parent_name, att.matrix)
 
 
 def build_smd_skeleton(ctx, smd, nodes) -> None:
@@ -516,8 +532,6 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
             amod = ob.modifiers.new(name="Armature", type='ARMATURE')
             amod.object = smd.a
             amod.use_bone_envelopes = False
-    else:
-        ob.matrix_local = getUpAxisMat(smd.upAxis)
 
     print(f"Importing mesh \"{imesh.name}\"")
 
@@ -624,30 +638,41 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     bm.to_mesh(ob.data)
     del bm
     ob.data.update()
-    ob.matrix_world @= imesh.matrix
     if ob.parent_bone:
+        # A bone parent is deliberate structure, so the placement stays on the object and
+        # the data stays raw - the bone's rest matrix already carries the up-axis correction.
+        data_transform = None
         ob.matrix_world = (ob.parent.matrix_world
                            @ ob.parent.data.bones[ob.parent_bone].matrix_local
-                           @ ob.matrix_world)
-    elif ob.parent:
-        ob.matrix_world = ob.parent.matrix_world @ ob.matrix_world
+                           @ imesh.matrix)
+    else:
+        # Everything else goes into the mesh data, leaving an identity object
+        # transform that Clear Transform cannot break.
+        data_transform = smd.axisMat @ imesh.matrix
+
+    if data_transform == Matrix():
+        data_transform = None
+
     if smd.jobType == PHYS:
         ob.display_type = 'SOLID'
 
-    if normals_layer_name:
-        normalsAttr = ob.data.attributes[normals_layer_name]
-        ob.data.normals_split_custom_set([v.vector for v in normalsAttr.data])
-        ob.data.attributes.remove(ob.data.attributes[normals_layer_name])
-
-    if imesh.data_transform is not None:
-        ob.data.transform(imesh.data_transform)
+    if data_transform is not None:
+        ob.data.transform(data_transform)
         ob.data.update()
+
+    if normals_layer_name:
+        # Set after the data transform, so rotate the stored normals to match it
+        normalsAttr = ob.data.attributes[normals_layer_name]
+        rot = data_transform.to_3x3() if data_transform is not None else None
+        ob.data.normals_split_custom_set(
+            [(rot @ v.vector if rot else v.vector) for v in normalsAttr.data])
+        ob.data.attributes.remove(ob.data.attributes[normals_layer_name])
 
     if imesh.balance:
         _build_balance_group(ob, *imesh.balance)
 
     if imesh.shapes:
-        build_shape_keys(ob, imesh, corrective_separator)
+        build_shape_keys(ob, imesh, corrective_separator, data_transform)
 
     return ob
 
@@ -668,7 +693,9 @@ def _build_balance_group(ob, balance, balanceIndices) -> None:
     ob.data.vs.flex_stereo_vg = vg.name
 
 
-def build_shape_keys(ob, imesh, corrective_separator: str) -> None:
+def build_shape_keys(ob, imesh, corrective_separator: str, data_transform=None) -> None:
+    # Offsets are deltas, so only the rotation half of the mesh-data transform applies.
+    delta_mat = data_transform.to_3x3() if data_transform is not None else None
     for shape in imesh.shapes:
         if not ob.data.shape_keys:
             ob.shape_key_add(name="Basis")
@@ -677,7 +704,8 @@ def build_shape_keys(ob, imesh, corrective_separator: str) -> None:
         shape_key = ob.shape_key_add(name=shape.name)
         shape_key.value = 0.0
         for i, posIndex in enumerate(shape.indices):
-            shape_key.data[posIndex].co += Vector(shape.offsets[i])
+            offset = Vector(shape.offsets[i])
+            shape_key.data[posIndex].co += delta_mat @ offset if delta_mat else offset
         if corrective_separator in shape.name:
             flex.AddCorrectiveShapeDrivers.addDrivers(
                 shape_key, shape.name.split(corrective_separator))

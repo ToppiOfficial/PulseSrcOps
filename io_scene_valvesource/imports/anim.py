@@ -12,7 +12,7 @@ from bpy import ops
 from mathutils import Matrix
 
 from .. import datamodel
-from ..utils import REF, KeyFrame, get_id, getUpAxisMat
+from ..utils import REF, KeyFrame, get_id
 from .dmx import blender_quat
 from .build import apply_frames
 
@@ -42,7 +42,7 @@ def build_smd_anim(ctx, smd, parsed) -> None:
                 # a parent.
                 is_root = (not bone.parent) if bone else (not smd.phantomParentIDs.get(bone_id))
                 if is_root:
-                    keyframe.matrix = getUpAxisMat(smd.upAxis) @ keyframe.matrix
+                    keyframe.matrix = smd.axisMat @ keyframe.matrix
 
             if not is_phantom:
                 keyframes[bone].append(keyframe)
@@ -89,7 +89,7 @@ def build_anim(ctx, smd, ianim) -> None:
             lastFrameIndex = max(lastFrameIndex, keyframe.frame)
 
             if not (bone.parent or keyframe.pos or keyframe.rot or keyframe.scale):
-                keyframe.matrix = getUpAxisMat(smd.upAxis).inverted()
+                keyframe.matrix = smd.axisMat.inverted()
 
             if is_position_channel and not keyframe.pos:
                 keyframe.matrix @= Matrix.Translation(frame_value)

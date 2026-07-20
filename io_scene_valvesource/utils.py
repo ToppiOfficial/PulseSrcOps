@@ -606,6 +606,16 @@ def getForwardAxisMat(axis: str) -> Matrix:
         case _:
             raise AttributeError(f"getForwardAxisMat got invalid axis argument '{axis}'")
 
+def getImportAxisMat(up_axis, forward_axis='-Y', up_axis_offset=0.0) -> Matrix:
+    """Undoes the axis transform the exporter applies in bake.py, world scale aside.
+
+    Export is up^-1 @ forward^-1 @ offset, so an import needs offset^-1 @ forward @ up.
+    With the default -Y forward and no offset this reduces to getUpAxisMat(up_axis).
+    """
+    return (getUpAxisOffsetMat(up_axis, up_axis_offset).inverted()
+            @ getForwardAxisMat(forward_axis)
+            @ getUpAxisMat(up_axis))
+
 def MakeObjectIcon(object,prefix=None,suffix=None):
     if not (prefix or suffix):
         raise TypeError("A prefix or suffix is required")
@@ -1082,6 +1092,8 @@ class SmdInfo:
     def __init__(self, jobName : str):
         self.jobName = jobName
         self.upAxis = bpy.context.scene.vs.up_axis
+        self.forwardAxis = bpy.context.scene.vs.forward_axis
+        self.upAxisOffset = bpy.context.scene.vs.up_axis_offset
         self.materials_used = set() # printed to the console for users' benefit
 
         # DMX stuff
@@ -1094,6 +1106,12 @@ class SmdInfo:
         # - Value: bone name (storing object itself is not safe)
         self.boneIDs = {}
         self.phantomParentIDs = {} # for bones in animation SMDs but not the ref skeleton
+
+    @property
+    def axisMat(self) -> Matrix:
+        """Axis correction an import applies. A property rather than a cached value:
+        a DMX file's own axisSystem can overwrite upAxis after the reader has started."""
+        return getImportAxisMat(self.upAxis, self.forwardAxis, self.upAxisOffset)
 
 class QcInfo:
     startTime = 0
