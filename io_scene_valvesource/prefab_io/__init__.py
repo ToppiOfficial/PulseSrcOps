@@ -2,12 +2,12 @@
 
 Each feature module owns both directions (import + export) for all three on-disk
 formats (QC text, DME model-DMX, KV3 .vmdl), so a format's writer and reader can
-no longer drift apart across files. ``export.prefab`` calls the ``*_kwargs`` /
+no longer drift apart across files. ``exports.prefab`` calls the ``*_kwargs`` /
 ``qc_*`` / ``write_dme_*`` builders; ``imports`` (via ``utils``) calls the
 ``import_*`` entry points.
 
 ``proceduralbone`` shares its trigger transform math with
-``export.prefab.PrefabExporter._write_proc_vrd`` so the VRD and DME procedural-bone
+``exports.prefab.PrefabExporter._write_proc_vrd`` so the VRD and DME procedural-bone
 export paths can't drift; its ``import_*`` readers invert that same math to
 rebuild ``vs.proc_bones`` entries + slot actions from a DME or VRD source.
 """

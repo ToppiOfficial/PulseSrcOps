@@ -2,7 +2,7 @@ import bpy
 from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
-from ..export import SmdExporter, PrefabExporter
+from ..exports import SmdExporter, PrefabExporter
 from ..imports import SmdImporter, ImportDMX, ImportSMD, ImportQC, ImportVMDL, ImportPrefab
 from .operators import (
     SMD_OT_AddAllFlexControllers,
@@ -60,12 +60,9 @@ class SMD_MT_ExportChoice(Menu):
             groups = list([ex for ex in exportables if ex.ob_type == 'COLLECTION'])
             groups.sort(key=lambda g: g.name.lower())
 
-            group_layout = l
-            for i,group in enumerate(groups): # always display all possible groups, as an object could be part of several
-                if type(self).__name__ == 'SMD_PT_Scene':
-                    if i == 0: group_col = l.column(align=True)
-                    if i % 2 == 0: group_layout = group_col.row(align=True)
-                group_layout.operator(SmdExporter.bl_idname, text=group.name, icon='GROUP').collection = group.item.name
+            # always display all possible groups, as an object could be part of several
+            for group in groups:
+                l.operator(SmdExporter.bl_idname, text=group.name, icon='GROUP').collection = group.item.name
 
             if len(exportables) - len(groups) > 1:
                 l.operator(SmdExporter.bl_idname, text=get_id("exportmenu_selected", True).format(len(exportables)), icon='OBJECT_DATA')

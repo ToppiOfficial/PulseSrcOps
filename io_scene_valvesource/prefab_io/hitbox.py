@@ -8,7 +8,7 @@ Converts between the armature's ``vs.hitboxes`` collection entries and:
 
 A hitbox entry stores ``vec_min`` / ``vec_max`` (bone-local box), ``rotation``
 (radians) and ``scale`` (capsule radius; ``0`` or negative = oriented box). Each format's
-writer (called by ``export.prefab.PrefabExporter``) sits next to its reader so the
+writer (called by ``exports.prefab.PrefabExporter``) sits next to its reader so the
 two halves stay in sync.
 """
 

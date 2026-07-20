@@ -10,7 +10,7 @@ The helper bone's own joint element is promoted to one of these types, so no
 separate ``.vrd`` is needed in DME prefab mode.
 
 The per-trigger transform math is shared with the text/VRD writer
-(``export.prefab.PrefabExporter._write_proc_vrd``) via ``build_trigger_transforms``
+(``exports.prefab.PrefabExporter._write_proc_vrd``) via ``build_trigger_transforms``
 and the helpers below, so the two paths can't drift: the VRD path converts the
 matrices to Euler degrees, this module to DMX quaternions.
 
@@ -26,7 +26,7 @@ from .. import utils, datamodel
 
 
 # -----------------------------------------------------------------------------
-# Shared transform helpers (also used by export.prefab.PrefabExporter._write_proc_vrd)
+# Shared transform helpers (also used by exports.prefab.PrefabExporter._write_proc_vrd)
 # -----------------------------------------------------------------------------
 
 _AXIS_VEC = {
