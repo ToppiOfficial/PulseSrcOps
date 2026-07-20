@@ -580,6 +580,18 @@ _data = {
         'en': "Imports an uncompiled Source Engine DMX model or animation",
         'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
     },
+    'import_menuitem_qc': {
+        'en': "QC / QCI (.qc, .qci)",
+        'ja': "QC / QCI (.qc, .qci)",
+    },
+    'importer_qc_title': {
+        'en': "Import QC",
+        'ja': "インポート QC",
+    },
+    'importer_qc_tip': {
+        'en': "Imports a Source Engine QC compile script and the models it references",
+        'ja': "Source Engine QCコンパイルスクリプトと参照モデルをインポート",
+    },
     'import_menuitem_smd': {
         'en': "SMD / VTA (.smd, .vta)",
         'ja': "SMD / VTA (.smd, .vta)",

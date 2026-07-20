@@ -322,17 +322,43 @@ lines, plus `num_words_to_skip` counters walking `$sequence` options.
       (`Tokenize` -> `Cur`/`Next`/`Eof` cursor, braces consumed inline). No `bpy` import,
       so it is testable outside Blender - 20 unit checks plus a tokenize-everything pass
       over the BlenderSourceTools and PulseMDL sample QCs (all balance to depth 0).
-- [ ] Rebuild `readQC`'s dispatch on `Cursor.block()`, retiring the brace booleans and
-      `num_words_to_skip`.
-      **Blocker to respect:** several handlers need the raw line, not tokens - `localvar`
-      and `%expr` are regexed off `line_str`, `$hbox` passes the whole raw line to
-      `import_hitboxes_from_content`, and `$definemacro` skips `\\` continuations. Tokens
-      carry 1-based line numbers for exactly this; keep `text.splitlines()` addressable.
-      `$var$` substitution and the `/`->`\` + lowercase normalisation stay in the QC
-      layer, above the lexer.
-- [ ] Keep the old `readQC` behind `KST_OLD_QC` while the new one is unproven. Phase 2
-      deleted the SMD fallback and then hit two bugs with nothing to diff against; do not
-      repeat that on the hairiest format.
+- [x] `importsrc/flexdata.py` (phase 1.4) - `parse_flex_text`,
+      `apply_flex_text_to_object`, `set_flexgroup_from_qc`, `populate_dme_flex_from_dmx`.
+      Named flexdata, not flex, to stay distinct from the add-on's top-level `flex.py`.
+      The originals are deleted from `import_smd.py`; `_populate_dme_flex_from_dmx` is now
+      a one-line delegate, and `gui/operators.py` imports from the new home.
+- [x] `importsrc/qc.py` - dispatch rebuilt on `Cursor.block()`. The in_bodygroup / in_lod
+      / in_sequence booleans and `num_words_to_skip` are gone; `$lod`, `$bodygroup` and
+      braced `$sequence` read their bodies through `block()`. Raw-line handlers
+      (`localvar`, `%expr`, `$hbox`, `$definemacro`) reach back via `Token.line`.
+      `$var$` substitution and the lowercase + `/`->`\` normalisation sit in
+      `_normalise_word`, above the lexer.
+- [x] `ImportQC` operator, `import_scene.kst_qc`, `*.qc;*.qci`, in the import menu.
+- [x] Old body kept as `_readQC_legacy` behind `KST_OLD_QC` (its `$include` recursion
+      rewired to stay on the legacy path). Do not delete until verified - phase 2 deleted
+      the SMD fallback and then hit two bugs with nothing to diff against.
+- [ ] **Verify in Blender.** Untested: a QC with `$body` + `$sequence`, a braced
+      `$bodygroup`, `$lod` / `replacemodel`, `flexfile` + `flexcontroller` accumulation,
+      `$include` into a QCI, `$hbox`, `$proceduralbones`, `$origin`.
+
+Checked without Blender: `scratchpad/qcwalk.py` replays the new token dispatch over the
+BlenderSourceTools and PulseMDL sample QCs and prints what each `$body` / `$bodygroup` /
+`$lod` / `$sequence` / `$collisionmodel` / `flexfile` would import. The BST QCs resolve to
+their real files only. It caught one regression (a dropped `xfade` option, restored).
+
+## Pre-existing bug this surfaced - decide before phase 6
+
+The `$sequence` option table is incomplete, in the original as much as the port: `fps`,
+`loop`, `weightlist`, `subtract`, `iklock`, `ikrule` are not listed. In an *inline*
+`$sequence idle anims/idle fps 30 loop` this is harmless - the file is found first and
+the rest of the line is dropped. In a *braced* sequence each line is scanned
+independently, so `fps 30` on its own line makes `fps` look like an animation filename
+and the importer tries to load `fps.smd` / `fps.dmx` and errors.
+
+PulseMDL-style QCs use the braced form heavily, so this is likely to bite. Preserved
+as-is under the behaviour freeze rather than fixed silently: adding the keywords changes
+which files get imported, and an animation legitimately named `loop` would change
+meaning. Worth a deliberate decision.
 - [ ] Format readers must stay plain callables - QC cannot invoke operators.
 - [ ] Revisit `QcInfo`'s `*_pending` accumulator lists (`utils.py:1099-1105`); suspected
       latent ordering bugs in the flex flush. Cheapest to fix here.
