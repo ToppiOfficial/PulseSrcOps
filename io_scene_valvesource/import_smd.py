@@ -142,6 +142,10 @@ class ImporterBase(bpy.types.Operator, Logger):
         return {'RUNNING_MODAL'}
 
     def draw(self, context):
+        """Defining this replaces Blender's automatic property layout, so a new property
+        will NOT appear in the file browser until it is drawn here or in draw_options.
+        Worth the trade: auto-layout renders an ENUM_FLAG as a horizontal row, which
+        truncates the prefab data labels to 'Jiggl.../Hitb.../Proc...'."""
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
@@ -150,7 +154,8 @@ class ImporterBase(bpy.types.Operator, Logger):
         self.draw_options(layout)
 
     def draw_options(self, layout) -> None:
-        """Format-specific controls, drawn under the shared ones."""
+        """Format-specific controls, drawn under the shared ones. Subclasses that add
+        properties must draw them here."""
 
     def draw_prefab_data(self, layout) -> None:
         """Stacked, not the default expanded row - three horizontal toggles get their
