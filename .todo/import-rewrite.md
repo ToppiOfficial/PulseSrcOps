@@ -16,27 +16,34 @@ Branch `rewrite-export-smd`.
 
 - **Phase 1 (DMX) is committed** (`Split DMX import into importsrc package`) and
   hand-verified in Blender. `KST_OLD_DMX_IMPORT=1` still falls back to `_readDMX_legacy`.
-- **Phase 2 (SMD/VTA) is code-complete and wired, but NOT yet verified in Blender.**
-  `readSMD` now drives `importsrc`; the old `scanSMD` / `readNodes` / `readFrames` /
-  `readPolys` / `readShapes` methods are deleted, so there is no fallback - if SMD
-  import is broken, it is broken. Verify before building anything on top.
+- **Phase 2 (SMD/VTA) is wired and partly verified in Blender.** `readSMD` now drives
+  `importsrc`; the old `scanSMD` / `readNodes` / `readFrames` / `readPolys` /
+  `readShapes` methods are deleted, so there is no fallback - if SMD import is broken,
+  it is broken.
 
-## Do first
+Verification so far, by hand in Blender:
 
-1. **Verify SMD/VTA import in Blender.** No legacy path survives, so this is the gate
-   on everything below. Cases that matter most, worst first:
-   - [ ] Reference SMD, new armature (exercises `build_smd_skeleton` new-armature branch)
-   - [ ] SMD with `upAxis = Y` (`data_transform` - mesh-data rx90, not object matrix)
-   - [ ] SMD with a duplicate face (`split_duplicate_faces` - **new code, first time it
-         ever runs**; phase 1 could not reach it)
-   - [ ] Animation SMD into an existing armature, `append = APPEND` and `VALIDATE`
-   - [ ] VTA against an imported reference mesh (`read_shapes` shrinkwrap path)
-   - [ ] Physics SMD (PHYS: `show_wire`, one bone per vertex)
-   - [ ] A QC that pulls in SMD bodies + a VTA (`qc.ref_mesh` handoff)
+- [x] Reference SMD, new armature (`build_smd_skeleton` new-armature branch)
+- [x] SMD + VTA imported together in one go (`read_shapes` shrinkwrap path, and the
+      selection handoff between the two files - see "Watch out for")
+- [x] Up axis X and Y on the mesh (`data_transform`)
+- [ ] SMD with a duplicate face (`split_duplicate_faces` - **new code, still has never
+      run**; phase 1 could not reach it and none of the above hit it)
+- [ ] Animation SMD into an existing armature, `append = APPEND` and `VALIDATE`
+      (the validate/append branch of `build_smd_skeleton` - the runs above only
+      validated against an armature the importer had just created itself)
+- [ ] Physics SMD (PHYS: `show_wire`, one bone per vertex)
+- [ ] A QC that pulls in SMD bodies + a VTA (`qc.ref_mesh` handoff - a different path
+      from the selection scan that was fixed above)
 
 ## Then
 
-2. Phase 3 (QC/QCI) - see below. Nothing else is blocked on phase 2 once verified.
+Phase 3 (QC/QCI) - see below. Not blocked on the remaining boxes above.
+
+While in phase 3: the legacy `applyFrames` in `import_smd.py` and `apply_frames` in
+`importsrc/build.py` are now duplicate implementations, both live. The old one survives
+only for `readQC`, `_readDMX_legacy` and `_import_vmdl`. They are identical today and
+will drift. Phase 3 removes the last non-legacy caller, so fold them then.
 
 ## Behaviour changes made in phase 2
 
