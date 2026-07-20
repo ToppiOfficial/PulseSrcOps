@@ -579,6 +579,32 @@ nothing else has to know about it.
 
 # Phase 6 - Teardown
 
-- [ ] Delete `import_smd.py` once every format has migrated.
-- [ ] Drop import-only fields from `SmdInfo` in `utils.py`.
-- [ ] Update `CLAUDE.md` module layout table.
+- [x] Deleted `_readDMX_legacy` (690 lines) and `_readQC_legacy` (406) plus the
+      `KST_OLD_DMX_IMPORT` / `KST_OLD_QC` env guards. **No fallback remains for any
+      format** - git is the only way back.
+- [x] Deleted six helpers that only the legacy bodies used, or that `importsrc` now
+      owns: `truncate_id_name`, `parseQuoteBlockedLine`, `findArmature`,
+      `createArmature`, `applyFrames`, `getMeshMaterial`. The three surviving call sites
+      point at `importsrc` equivalents.
+- [x] `import_smd.py`: **2093 -> 708 lines**, now just the operator classes plus the
+      `readSMD` / `readDMX` / `readQC` entry points they share.
+- [x] `CLAUDE.md` module table updated: `export/` and `importsrc/` packages,
+      `keyvalues1.py`, an `importsrc/` module table, and the stale `export_smd.py`
+      references in the prefab section.
+
+## Deliberately not done
+
+- **`import_smd.py` is not deleted.** The plan assumed it would be, but what is left is
+  the Blender operator layer, which has to live somewhere; `importsrc/` is deliberately
+  free of operator classes. Renaming it to something like `importers.py` would be
+  honest, but it is a rename for its own sake - not worth the churn now.
+- **`SmdInfo`'s import-only fields stay.** `file`, `shapeNames`, `phantomParentIDs`,
+  `in_block_comment` and `rotMode` are import-side; `amod`, `materials_used`,
+  `dmxShapes`, `bakeInfo`, `boneNameToID` are export-side. Splitting them means moving
+  import onto `records.ImportInfo` (which exists but is unused by `readSMD`/`readDMX`),
+  and that edits a class the *exporter* depends on. Pure cleanup, no user-visible gain,
+  real regression risk in export. Left alone on purpose.
+- **`SmdImporter` stays registered.** It is the all-formats catch-all on
+  `import_scene.smd` - the upstream Blender Source Tools operator id, so scripts and
+  muscle memory may depend on it, and it is still the only entry point that takes any
+  extension. Removing it is a user-visible decision, not cleanup.
