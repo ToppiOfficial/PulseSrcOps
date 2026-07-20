@@ -126,6 +126,10 @@ class ImportedMesh:
     # SMD gives a duplicate face its own vertices (readPolys createFace(use_cache=False));
     # DMX drops it.
     split_duplicate_faces: bool = False
+    # DMX material entries are paths: the directory sets scene.vs.material_path and the
+    # basename names the material. SMD names a material per triangle and uses the whole
+    # string verbatim.
+    materials_are_paths: bool = True
 
 
 # ---------------------------------------------------------------------------

@@ -580,6 +580,18 @@ _data = {
         'en': "Imports an uncompiled Source Engine DMX model or animation",
         'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
     },
+    'import_menuitem_smd': {
+        'en': "SMD / VTA (.smd, .vta)",
+        'ja': "SMD / VTA (.smd, .vta)",
+    },
+    'importer_smd_title': {
+        'en': "Import SMD",
+        'ja': "インポート SMD",
+    },
+    'importer_smd_tip': {
+        'en': "Imports an uncompiled Source Engine SMD model, animation or VTA flex library",
+        'ja': "未コンパイルのSource Engine SMDモデル、アニメーションまたはVTAフレックスライブラリをインポート",
+    },
     'import_menuitem': {
         'en': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
         'ja': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",

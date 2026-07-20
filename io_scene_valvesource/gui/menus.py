@@ -3,7 +3,7 @@ from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
 from ..export import SmdExporter, PrefabExporter
-from ..import_smd import SmdImporter, ImportDMX
+from ..import_smd import SmdImporter, ImportDMX, ImportSMD
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
@@ -38,6 +38,7 @@ class SMD_MT_ImportChoice(Menu):
         # Per-format entries as each one migrates to importsrc; the catch-all below
         # still handles everything that has not moved yet.
         l.operator(ImportDMX.bl_idname, text=get_id("import_menuitem_dmx", True), icon='MESH_DATA')
+        l.operator(ImportSMD.bl_idname, text=get_id("import_menuitem_smd", True), icon='MESH_DATA')
         l.separator()
         l.operator(SmdImporter.bl_idname, text=get_id("import_menuitem", True))
 

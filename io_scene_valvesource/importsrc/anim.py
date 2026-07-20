@@ -8,12 +8,46 @@ import collections
 from math import ceil
 
 import bpy
+from bpy import ops
 from mathutils import Matrix
 
 from .. import datamodel
-from ..utils import KeyFrame, get_id, getUpAxisMat
+from ..utils import REF, KeyFrame, get_id, getUpAxisMat
 from .dmx import blender_quat
 from .build import apply_frames
+
+
+def build_smd_anim(ctx, smd, parsed) -> None:
+    """ParsedFrames (bone id -> matrices) -> pose keyframes."""
+    if parsed is None or not smd.a:
+        return
+    bpy.context.view_layer.objects.active = smd.a
+    ops.object.mode_set(mode='POSE')
+
+    keyframes: dict = collections.defaultdict(list)
+    for bone_id, entries in parsed.frames.items():
+        bone_name = smd.boneIDs.get(bone_id)
+        bone = smd.a.pose.bones.get(bone_name) if bone_name else None
+        is_phantom = bone is None
+
+        for frame, matrix in entries:
+            keyframe = KeyFrame()
+            keyframe.frame = frame
+            keyframe.matrix = matrix
+            keyframe.pos = keyframe.rot = True
+
+            if smd.jobType == REF:
+                # Root bones carry the up-axis correction. A phantom id (one the
+                # armature has no bone for) counts as a root unless the file gave it
+                # a parent.
+                is_root = (not bone.parent) if bone else (not smd.phantomParentIDs.get(bone_id))
+                if is_root:
+                    keyframe.matrix = getUpAxisMat(smd.upAxis) @ keyframe.matrix
+
+            if not is_phantom:
+                keyframes[bone].append(keyframe)
+
+    apply_frames(ctx, smd, keyframes, parsed.num_frames)
 
 
 def build_anim(ctx, smd, ianim) -> None:

@@ -15,7 +15,7 @@ from bpy.app.translations import pgettext
 from mathutils import Matrix, Vector
 
 from .. import flex, ordered_set
-from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id, getUpAxisMat, hasShapes,
+from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id, getUpAxisMat,
                      channelBagForNewActionSlot)
 
 
@@ -391,6 +391,71 @@ def build_attachments(ctx, smd, skel, bone_names) -> None:
         atch.matrix_local = att.matrix
 
 
+def build_smd_skeleton(ctx, smd, nodes) -> None:
+    """SMD node block -> bones on smd.a, creating the armature if there is none.
+
+    Separate from build_skeleton because SMD has no rest matrices here - they come
+    from frame 0 of the skeleton block, applied later via apply_frames.
+    """
+    bone_parents: dict[str, int] = {}
+
+    def add_bone(node):
+        bone = smd.a.data.edit_bones.new(truncate_id_name(ctx, node.name, bpy.types.Bone))
+        bone.tail = 0, 5, 0
+        smd.boneIDs[node.id] = bone.name
+        bone_parents[bone.name] = node.parent
+        return bone
+
+    if ctx.append != 'NEW_ARMATURE':
+        smd.a = smd.a or find_armature()
+        if smd.a:
+            append = ctx.append == 'APPEND' and smd.jobType in [REF, ANIM]
+            if append:
+                bpy.context.view_layer.objects.active = smd.a
+                smd.a.hide_set(False)
+                ops.object.mode_set(mode='EDIT', toggle=False)
+                ctx.existingBones.extend([b.name for b in smd.a.data.bones])
+
+            missing = validated = 0
+            for node in nodes:
+                target_bone = smd.a.data.bones.get(node.name)
+                if target_bone:
+                    validated += 1
+                elif append:
+                    target_bone = add_bone(node)
+                else:
+                    missing += 1
+                if not smd.boneIDs.get(node.parent):
+                    smd.phantomParentIDs[node.id] = node.parent
+                smd.boneIDs[node.id] = target_bone.name if target_bone else node.name
+
+            print("- Validated {} bones against armature \"{}\"{}".format(
+                validated, smd.a.name,
+                " (could not find {})".format(missing) if missing > 0 else ""))
+
+    if not smd.a:
+        smd.a = create_armature(smd, truncate_id_name(
+            ctx, (ctx.qc.jobName if ctx.qc else smd.jobName) + "_skeleton", bpy.types.Armature))
+        if ctx.qc:
+            ctx.qc.a = smd.a
+        smd.a.data.vs.implicit_zero_bone = False
+
+        ops.object.mode_set(mode='EDIT', toggle=False)
+        for node in nodes:
+            add_bone(node)
+
+    for bone_name, parent_id in bone_parents.items():
+        if parent_id != -1:
+            smd.a.data.edit_bones[bone_name].parent = smd.a.data.edit_bones[smd.boneIDs[parent_id]]
+
+    ops.object.mode_set(mode='OBJECT')
+    if bone_parents:
+        print(f"- Imported {len(bone_parents)} new bones")
+
+    if len(smd.a.data.bones) > 128:
+        ctx.warning(get_id("importer_err_bonelimit_smd"))
+
+
 def apply_rest_pose(ctx, smd, bone_matrices: dict) -> None:
     if not smd.a:
         return
@@ -454,7 +519,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     else:
         ob.matrix_local = getUpAxisMat(smd.upAxis)
 
-    print(f"Importing DMX mesh \"{imesh.name}\"")
+    print(f"Importing mesh \"{imesh.name}\"")
 
     bm = bmesh.new()
     bm.from_mesh(ob.data)
@@ -492,8 +557,12 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     # land in one slot.
     slot_for_face_set: list[int] = []
     for mat_path in imesh.materials:
-        bpy.context.scene.vs.material_path = os.path.dirname(mat_path).replace("\\", "/")
-        _mat, mat_ind = get_mesh_material(ctx, smd, os.path.basename(mat_path))
+        if imesh.materials_are_paths:
+            bpy.context.scene.vs.material_path = os.path.dirname(mat_path).replace("\\", "/")
+            mat_name = os.path.basename(mat_path)
+        else:
+            mat_name = mat_path
+        _mat, mat_ind = get_mesh_material(ctx, smd, mat_name)
         slot_for_face_set.append(mat_ind)
 
     deform_layer = bm.verts.layers.deform.active

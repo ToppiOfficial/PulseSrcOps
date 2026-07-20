@@ -297,6 +297,7 @@ GUI.SMD_PT_Jigglebones,
     export.PrefabExporter,
     import_smd.SmdImporter,
     import_smd.ImportDMX,
+    import_smd.ImportSMD,
 
     # Updater
     updater.SMD_OT_CheckForUpdates,

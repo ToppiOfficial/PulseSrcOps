@@ -8,56 +8,52 @@ Order is **format by format**. DMX first. Nothing else moves until DMX lands.
 
 ---
 
-# RESUME HERE (handoff, end of session 1)
+# RESUME HERE (handoff, end of session 2)
 
 ## State
 
-Branch `rewrite-export-smd`. **Nothing is committed.** Working tree:
+Branch `rewrite-export-smd`.
 
-```
- M io_scene_valvesource/__init__.py        menu_func_import -> menu; ImportDMX registered
- M io_scene_valvesource/gui/menus.py       SMD_MT_ImportChoice added
- M io_scene_valvesource/gui/panels.py      Import button -> menu; unused import removed
- M io_scene_valvesource/import_smd.py      ImporterBase/SmdImporter/ImportDMX split;
-                                           readDMX rewired; _readDMX_legacy kept
- M io_scene_valvesource/translations.py    4 new keys
-?? io_scene_valvesource/importsrc/         new package (7 modules)
-?? .todo/                                  this file
-?? tools/dmx_import_parity.py              new-vs-legacy differ (unused, user verified by hand)
-```
-
-- **Phase 1 (DMX) is done and hand-verified in Blender.** Import routes through
-  `importsrc`; `KST_OLD_DMX_IMPORT=1` still falls back to `_readDMX_legacy`.
-- **Phase 2 (SMD) is half done and NOT wired.** `importsrc/smd.py` exists and
-  `build_mesh` supports both formats, but `readSMD` still calls the old readers, so
-  SMD behaviour is unchanged. Nothing is broken by the half-finished state.
+- **Phase 1 (DMX) is committed** (`Split DMX import into importsrc package`) and
+  hand-verified in Blender. `KST_OLD_DMX_IMPORT=1` still falls back to `_readDMX_legacy`.
+- **Phase 2 (SMD/VTA) is code-complete and wired, but NOT yet verified in Blender.**
+  `readSMD` now drives `importsrc`; the old `scanSMD` / `readNodes` / `readFrames` /
+  `readPolys` / `readShapes` methods are deleted, so there is no fallback - if SMD
+  import is broken, it is broken. Verify before building anything on top.
 
 ## Do first
 
-1. **Commit phase 1** before touching anything else. It is verified and independent;
-   leaving it entangled with unfinished SMD work is the main risk right now.
+1. **Verify SMD/VTA import in Blender.** No legacy path survives, so this is the gate
+   on everything below. Cases that matter most, worst first:
+   - [ ] Reference SMD, new armature (exercises `build_smd_skeleton` new-armature branch)
+   - [ ] SMD with `upAxis = Y` (`data_transform` - mesh-data rx90, not object matrix)
+   - [ ] SMD with a duplicate face (`split_duplicate_faces` - **new code, first time it
+         ever runs**; phase 1 could not reach it)
+   - [ ] Animation SMD into an existing armature, `append = APPEND` and `VALIDATE`
+   - [ ] VTA against an imported reference mesh (`read_shapes` shrinkwrap path)
+   - [ ] Physics SMD (PHYS: `show_wire`, one bone per vertex)
+   - [ ] A QC that pulls in SMD bodies + a VTA (`qc.ref_mesh` handoff)
 
-## Then, to finish phase 2
+## Then
 
-2. `read_shapes` (VTA) in `importsrc/smd.py` - **not started.** Port from `readShapes`
-   (import_smd.py 924-1046). It builds a temp object, shrinkwraps it against the mesh
-   and maps coordinates back; it has no DMX counterpart, so give it its own builder
-   rather than forcing it through `build_mesh`.
-3. Wire `readSMD` to the new readers. Order is forced: node block -> build armature ->
-   `read_polys(ctx, smd, group_names)`, because `group_names` must be the armature's
-   bone list. See the `importsrc/smd.py` docstring.
-4. SMD needs its own `build_smd_skeleton` - `build_skeleton` is DMX-shaped (matrices
-   from `DmeTransform`, `boneTransformIDs`). SMD gets rest matrices from frame 0 of the
-   skeleton block via `apply_frames`, which is already shared.
-5. `ImportSMD` operator (`*.smd;*.vta`), takes `import_scene.smd` from `SmdImporter`;
-   add it to `SMD_MT_ImportChoice`.
-6. Verify against a file imported by the old reader. `tools/dmx_import_parity.py`
-   generalises to SMD with a one-line change to the operator call.
+2. Phase 3 (QC/QCI) - see below. Nothing else is blocked on phase 2 once verified.
+
+## Behaviour changes made in phase 2
+
+Both are deliberate; revert if they turn out to matter.
+
+- `build_mesh` sets `display_type = 'SOLID'` on PHYS meshes. `readPolys` did not (only
+  `getMeshMaterial` did, and only when it created a new material).
+- The `ImportedMesh.materials_are_paths` flag exists **because** `build_mesh` splits a
+  DMX material path into `scene.vs.material_path` + basename, whereas `readPolys` used
+  the whole triangle material line verbatim as the Blender material name. SMD sets the
+  flag `False` to keep the old naming. In practice the SMD exporter writes a bare
+  material name, so this only shows up on third-party / decompiled SMDs.
 
 ## Watch out for
 
-- `build_mesh`'s `split_duplicate_faces` branch is **new code, never executed.** It is
-  only reachable from SMD, so phase 1 did not exercise it.
+- `build_mesh`'s `split_duplicate_faces` branch is **new code, never executed.** SMD is
+  the only caller that enables it, so it first runs during phase 2 verification.
 - The cloth-group `loop_i` counter in `build_mesh` walks `bm.faces` and drifts if any
   face failed to build. Pre-existing bug, faithfully preserved - do not "fix" it while
   chasing an unrelated SMD problem.
@@ -256,14 +252,21 @@ not restructure the logic in this phase.
       matrix) and `split_duplicate_faces` (SMD gives a duplicate face its own vertices,
       DMX drops it). The "vertex groups for every bone" difference dissolved on its own -
       `group_names` just means "groups to create", and each format fills it differently.
-- [ ] `read_shapes` (VTA) - **not started.** The shrinkwrap-based vertex matching in
-      `readShapes` (924-1046) has no DMX counterpart and does not fit `build_mesh`;
-      it likely stays its own builder.
-- [ ] Wire `readSMD` to the new path. `read_polys` needs `group_names` in armature bone
-      order, so the node block must be built first - the interleaving is inherent to the
-      format, see the module docstring.
-- [ ] `ImportSMD` operator, `*.smd;*.vta`, takes over `import_scene.smd`.
-- [ ] Verify against the same file imported by the old reader.
+- [x] `read_shapes` (VTA) in `importsrc/smd.py`. Kept out of `build_mesh` as predicted:
+      VTA carries no topology, only positions in an id space that is not the target
+      mesh's, matched by shrinkwrapping a throwaway point cloud.
+- [x] `build_smd_skeleton` in `build.py`. Separate from `build_skeleton` because SMD has
+      no rest matrices in the node block - they come from frame 0 of the skeleton block,
+      applied through the shared `apply_frames`.
+- [x] `build_smd_anim` in `anim.py`. `read_frames` returns `None` (not an empty
+      `ParsedFrames`) when the block carries no pose, so VTA/PHYS skip the pose apply
+      exactly as `readFrames`' early return did.
+- [x] Wire `readSMD` to the new path; delete `scanSMD`/`readNodes`/`readFrames`/
+      `readPolys`/`readShapes` (-405 lines).
+- [x] `ImportSMD` operator, `import_scene.kst_smd`, `*.smd;*.vta`, in the import menu.
+      `SmdImporter` keeps `import_scene.smd` and still handles SMD/VTA via the same
+      `readSMD`, so QC-driven SMD imports exercise the new path too.
+- [ ] **Verify in Blender.** See the resume block at the top - no legacy SMD path exists.
 
 **Structural finding.** SMD cannot be cleanly parse-then-build the way DMX was. Weight
 resolution needs the target armature: groups are created for every bone on `smd.a`

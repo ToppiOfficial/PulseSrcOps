@@ -14,10 +14,12 @@ build.build_mesh, so SMD and DMX share one bmesh path.
 import os
 from dataclasses import dataclass, field
 
+import bpy
+from bpy.app.translations import pgettext
 from mathutils import Matrix, Euler, Vector
 
-from ..utils import (REF, ANIM, PHYS, FLEX, KeyFrame, get_id, getUpAxisMat, rx90,
-                     smdBreak, smdContinue)
+from ..utils import (REF, ANIM, PHYS, FLEX, get_id, getUpAxisMat, hasShapes,
+                     removeObject, rx90, shape_types, smdBreak, smdContinue)
 from .records import ImportedFace, ImportedLoopLayer, ImportedMesh
 
 
@@ -131,14 +133,15 @@ def read_nodes(smd, qc=None) -> list[SmdNode]:
 # Skeleton block
 # ---------------------------------------------------------------------------
 
-def read_frames(ctx, smd, qc=None) -> ParsedFrames:
-    """Reads the skeleton block into per-bone-id matrices. Shape names are harvested
-    from the comment on each `time` line when this is a VTA."""
+def read_frames(ctx, smd, qc=None) -> ParsedFrames | None:
+    """Reads the skeleton block into per-bone-id matrices, or None when the block
+    carries no pose to apply. Shape names are harvested from the comment on each
+    `time` line when this is a VTA."""
     if smd.jobType not in [REF, ANIM]:
         for line in smd.file:
             line = line.strip()
             if smdBreak(line):
-                return ParsedFrames()
+                return None
             if smd.jobType == FLEX and line.startswith("time"):
                 smd.shapeNames = smd.shapeNames or {}
                 for c in line:
@@ -202,6 +205,7 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
     mesh.data_transform = rx90 if smd.upAxis == 'Y' else None
     # A duplicate face is resolved by giving it its own vertices, not by dropping it
     mesh.split_duplicate_faces = True
+    mesh.materials_are_paths = False
 
     group_index = {name: i for i, name in enumerate(group_names)}
     normals: list = []
@@ -217,7 +221,7 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
         if smdContinue(line):
             continue
 
-        mat_path = line if line else get_id("importer_name_nomat", data=True)
+        mat_path = line if line else pgettext(get_id("importer_name_nomat", data=True))
         face_set = _face_set_for(mesh, mat_path)
 
         vertex_count = 0
@@ -277,6 +281,144 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
     print(f"- Imported {count_polys} polys")
 
     return mesh
+
+
+# ---------------------------------------------------------------------------
+# VTA shapes
+# ---------------------------------------------------------------------------
+
+def read_shapes(ctx, smd) -> None:
+    """Reads a VTA vertex-animation block onto smd.m as shape keys.
+
+    This one does not go through build_mesh: VTA gives no topology, only positions
+    keyed by an id space that is not the target mesh's. Matching is done by
+    shrinkwrapping a throwaway point cloud onto the mesh, which has no DMX analogue.
+    """
+    if smd.jobType is not FLEX:
+        return
+
+    if not smd.m:
+        if ctx.qc:
+            smd.m = ctx.qc.ref_mesh
+        else:
+            if bpy.context.active_object.type in shape_types:
+                smd.m = bpy.context.active_object
+            else:
+                for obj in bpy.context.selected_objects:
+                    if obj.type in shape_types:
+                        smd.m = obj
+
+    if not smd.m:
+        ctx.error(get_id("importer_err_shapetarget"))
+        return
+
+    if hasShapes(smd.m):
+        smd.m.active_shape_key_index = 0
+    smd.m.show_only_shape_key = True
+
+    def vec_round(v):
+        return Vector([round(co, 3) for co in v])
+
+    co_map: dict[int, int] = {}
+    mesh_cos = [vert.co for vert in smd.m.data.vertices]
+    mesh_cos_rnd = None
+
+    smd.vta_ref = None
+    vta_cos = []
+    vta_ids = []
+
+    making_base_shape = True
+    bad_vta_verts = []
+    num_shapes = 0
+    md = smd.m.data
+
+    for line in smd.file:
+        line = line.rstrip("\n")
+        if smdBreak(line):
+            break
+        if smdContinue(line):
+            continue
+
+        values = line.split()
+
+        if values[0] == "time":
+            shape_name = smd.shapeNames.get(values[1])
+            if smd.vta_ref is None:
+                if not hasShapes(smd.m, False):
+                    smd.m.shape_key_add(name=shape_name if shape_name else "Basis")
+                vd = bpy.data.meshes.new(name="VTA vertices")
+                vta_ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
+                vta_ref.matrix_world = smd.m.matrix_world
+                smd.g.objects.link(vta_ref)
+                vta_err_vg = vta_ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
+            elif making_base_shape:
+                vd.vertices.add(int(len(vta_cos) / 3))
+                vd.vertices.foreach_set("co", vta_cos)
+                num_vta_verts = len(vd.vertices)
+                del vta_cos
+
+                mod = vta_ref.modifiers.new(name="VTA Shrinkwrap", type='SHRINKWRAP')
+                mod.target = smd.m
+                mod.wrap_method = 'NEAREST_VERTEX'
+
+                vd = bpy.data.meshes.new_from_object(
+                    vta_ref.evaluated_get(bpy.context.evaluated_depsgraph_get()))
+                vta_ref.modifiers.remove(mod)
+                del mod
+
+                for i in range(len(vd.vertices)):
+                    id = vta_ids[i]
+                    co = vd.vertices[i].co
+                    map_id = None
+                    try:
+                        map_id = mesh_cos.index(co)
+                    except ValueError:
+                        if not mesh_cos_rnd:
+                            mesh_cos_rnd = [vec_round(co) for co in mesh_cos]
+                        try:
+                            map_id = mesh_cos_rnd.index(vec_round(co))
+                        except ValueError:
+                            bad_vta_verts.append(i)
+                            continue
+                    co_map[id] = map_id
+
+                bpy.data.meshes.remove(vd)
+                del vd
+
+                if bad_vta_verts:
+                    err_ratio = len(bad_vta_verts) / num_vta_verts
+                    vta_err_vg.add(bad_vta_verts, 1.0, 'REPLACE')
+                    message = get_id("importer_err_unmatched_mesh", True).format(
+                        len(bad_vta_verts), int(err_ratio * 100))
+                    if err_ratio == 1:
+                        ctx.error(message)
+                        return
+                    else:
+                        ctx.warning(message)
+                else:
+                    removeObject(vta_ref)
+                making_base_shape = False
+
+            if not making_base_shape:
+                sk = smd.m.shape_key_add(name=shape_name if shape_name else values[1])
+                sk.value = 0.0
+                num_shapes += 1
+
+            continue
+
+        cur_id = int(values[0])
+        vta_co = getUpAxisMat(smd.upAxis) @ Vector([float(values[1]), float(values[2]), float(values[3])])
+
+        if making_base_shape:
+            vta_ids.append(cur_id)
+            vta_cos.extend(vta_co)
+        else:
+            try:
+                md.shape_keys.key_blocks[-1].data[co_map[cur_id]].co = vta_co
+            except KeyError:
+                pass
+
+    print(f"- Imported {num_shapes} flex shapes")
 
 
 def _face_set_for(mesh: ImportedMesh, mat_path: str) -> int:

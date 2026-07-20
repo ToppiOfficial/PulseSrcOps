@@ -336,23 +336,6 @@ class ImporterBase(bpy.types.Operator, Logger):
         self.error(get_id("importer_err_namelength", True).format(pgettext(id_type if isinstance(id_type, str) else id_type.__name__), name, truncated))
         return str(truncated)
 
-    def scanSMD(self):
-        smd = self.smd
-        for line in smd.file:
-            if line == "triangles\n":
-                smd.jobType = REF
-                print("- This is a mesh")
-                break
-            if line == "vertexanimation\n":
-                print("- This is a flex animation library")
-                smd.jobType = FLEX
-                break
-        if smd.jobType is None:
-            print("- This is a skeletal animation or pose")
-            smd.jobType = ANIM
-            self.ensureAnimationBonesValidated()
-        smd.file.seek(0, 0)
-
     def parseQuoteBlockedLine(self, line, lower=True):
         if len(line) == 0:
             return ["\n"]
@@ -412,73 +395,6 @@ class ImporterBase(bpy.types.Operator, Logger):
     # Bones
     # -------------------------------------------------------------------------
 
-    def readNodes(self):
-        smd = self.smd
-        boneParents: dict[str, int] = {}
-
-        def addBone(id, name, parent):
-            bone = smd.a.data.edit_bones.new(self.truncate_id_name(name, bpy.types.Bone))
-            bone.tail = 0, 5, 0
-            smd.boneIDs[int(id)] = bone.name
-            boneParents[bone.name] = int(parent)
-            return bone
-
-        if self.append != 'NEW_ARMATURE':
-            smd.a = smd.a or self.findArmature()
-            if smd.a:
-                append = self.append == 'APPEND' and smd.jobType in [REF, ANIM]
-                if append:
-                    bpy.context.view_layer.objects.active = smd.a
-                    smd.a.hide_set(False)
-                    ops.object.mode_set(mode='EDIT', toggle=False)
-                    self.existingBones.extend([b.name for b in smd.a.data.bones])
-
-                missing = validated = 0
-                for line in smd.file:
-                    if smdBreak(line): break
-                    if smdContinue(line): continue
-                    id, name, parent = self.parseQuoteBlockedLine(line, lower=False)[:3]
-                    id, parent = int(id), int(parent)
-                    targetBone = smd.a.data.bones.get(name)
-                    if targetBone:
-                        validated += 1
-                    elif append:
-                        targetBone = addBone(id, name, parent)
-                    else:
-                        missing += 1
-                    if not smd.boneIDs.get(parent):
-                        smd.phantomParentIDs[id] = parent
-                    smd.boneIDs[id] = targetBone.name if targetBone else name
-
-                print("- Validated {} bones against armature \"{}\"{}".format(
-                    validated, smd.a.name,
-                    " (could not find {})".format(missing) if missing > 0 else ""))
-
-        if not smd.a:
-            smd.a = self.createArmature(self.truncate_id_name(
-                (self.qc.jobName if self.qc else smd.jobName) + "_skeleton", bpy.types.Armature))
-            if self.qc:
-                self.qc.a = smd.a
-            smd.a.data.vs.implicit_zero_bone = False
-
-            ops.object.mode_set(mode='EDIT', toggle=False)
-            for line in smd.file:
-                if smdBreak(line): break
-                if smdContinue(line): continue
-                id, name, parent = self.parseQuoteBlockedLine(line, lower=False)[:3]
-                addBone(id, name, parent)
-
-        for bone_name, parent_id in boneParents.items():
-            if parent_id != -1:
-                smd.a.data.edit_bones[bone_name].parent = smd.a.data.edit_bones[smd.boneIDs[parent_id]]
-
-        ops.object.mode_set(mode='OBJECT')
-        if boneParents:
-            print(f"- Imported {len(boneParents)} new bones")
-
-        if len(smd.a.data.bones) > 128:
-            self.warning(get_id("importer_err_bonelimit_smd"))
-
     @classmethod
     def findArmature(cls) -> bpy.types.Object | None:
         if bpy.context.active_object and bpy.context.active_object.type == 'ARMATURE':
@@ -518,68 +434,6 @@ class ImporterBase(bpy.types.Operator, Logger):
     # -------------------------------------------------------------------------
     # Frames / animation
     # -------------------------------------------------------------------------
-
-    def readFrames(self):
-        smd = self.smd
-        if smd.jobType not in [REF, ANIM]:
-            for line in smd.file:
-                line = line.strip()
-                if smdBreak(line):
-                    return
-                if smd.jobType == FLEX and line.startswith("time"):
-                    smd.shapeNames = smd.shapeNames or {}
-                    for c in line:
-                        if c in ['#', ';', '/']:
-                            pos = line.index(c)
-                            frame = line[:pos].split()[1]
-                            if c == '/':
-                                pos += 1
-                            smd.shapeNames[frame] = line[pos + 1:].strip()
-
-        bpy.context.view_layer.objects.active = smd.a
-        ops.object.mode_set(mode='POSE')
-
-        num_frames = 0
-        keyframes: dict[bpy.types.PoseBone, list[KeyFrame]] = collections.defaultdict(list)
-        phantom_keyframes: dict[int, list[KeyFrame]] = collections.defaultdict(list)
-
-        for line in smd.file:
-            if smdBreak(line):
-                break
-            if smdContinue(line):
-                continue
-
-            values = line.split()
-            if values[0] == "time":
-                if num_frames > 0:
-                    if smd.jobType == REF:
-                        self.warning(get_id("importer_err_refanim", True).format(smd.jobName))
-                        for line in smd.file:
-                            if smdBreak(line): break
-                            if smdContinue(line): continue
-                num_frames += 1
-                continue
-
-            pos = Vector([float(values[1]), float(values[2]), float(values[3])])
-            rot = Euler([float(values[4]), float(values[5]), float(values[6])])
-
-            keyframe = KeyFrame()
-            keyframe.frame = num_frames - 1
-            keyframe.matrix = Matrix.Translation(pos) @ rot.to_matrix().to_4x4()
-            keyframe.pos = keyframe.rot = True
-
-            frameIndex = int(values[0])
-            try:
-                bone = smd.a.pose.bones[smd.boneIDs[frameIndex]]
-                if smd.jobType == REF and not bone.parent:
-                    keyframe.matrix = getUpAxisMat(smd.upAxis) @ keyframe.matrix
-                keyframes[bone].append(keyframe)
-            except KeyError:
-                if smd.jobType == REF and not smd.phantomParentIDs.get(frameIndex):
-                    keyframe.matrix = getUpAxisMat(smd.upAxis) @ keyframe.matrix
-                phantom_keyframes[frameIndex].append(keyframe)
-
-        self.applyFrames(keyframes, num_frames)
 
     def applyFrames(self, keyframes: dict[bpy.types.PoseBone, list[KeyFrame]], num_frames: int):
         smd = self.smd
@@ -787,265 +641,6 @@ class ImporterBase(bpy.types.Operator, Logger):
             mat_ind = len(md.materials) - 1
 
         return mat, mat_ind
-
-    def readPolys(self):
-        smd = self.smd
-        if smd.jobType not in [REF, PHYS]:
-            return
-
-        mesh_name = smd.jobName
-        if smd.jobType == REF and "reference" not in smd.jobName.lower() and not smd.jobName.lower().endswith("ref"):
-            mesh_name += " ref"
-        mesh_name = self.truncate_id_name(mesh_name, bpy.types.Mesh)
-
-        smd.m = bpy.data.objects.new(mesh_name, bpy.data.meshes.new(mesh_name))
-        smd.m.parent = smd.a
-        smd.g.objects.link(smd.m)
-        if smd.jobType == REF:
-            if self.qc:
-                self.qc.ref_mesh = smd.m
-
-        for bone in smd.a.data.bones.values():
-            smd.m.vertex_groups.new(name=bone.name)
-
-        modifier = smd.m.modifiers.new(type="ARMATURE", name=pgettext("Armature"))
-        modifier.object = smd.a
-
-        md = cast(bpy.types.Mesh, smd.m.data)
-        norms = []
-
-        bm = bmesh.new()
-        bm.from_mesh(md)
-        weightLayer = bm.verts.layers.deform.new()
-        uvLayer = bm.loops.layers.uv.new()
-
-        countPolys = 0
-        badWeights = 0
-        vertMap: dict = {}
-
-        for line in smd.file:
-            line = line.rstrip("\n")
-            if line and smdBreak(line):
-                break
-            if smdContinue(line):
-                continue
-
-            mat, mat_ind = self.getMeshMaterial(line if line else pgettext(get_id("importer_name_nomat", data=True)))
-
-            vertexCount = 0
-            faceUVs = []
-            vertKeys = []
-            for line in smd.file:
-                if smdBreak(line):
-                    break
-                if smdContinue(line):
-                    continue
-                values = line.split()
-
-                vertexCount += 1
-                co = tuple(float(v) for v in values[1:4])
-                norms.append(tuple(float(v) for v in values[4:7]))
-                faceUVs.append((float(values[7]), float(values[8])))
-
-                vertWeights = []
-                if len(values) > 10 and values[9] != "0":
-                    for i in range(10, 10 + (int(values[9]) * 2), 2):
-                        try:
-                            bone = smd.a.data.bones[smd.boneIDs[int(values[i])]]
-                            vertWeights.append((smd.m.vertex_groups.find(bone.name), float(values[i + 1])))
-                        except KeyError:
-                            badWeights += 1
-                else:
-                    try:
-                        bone = smd.a.data.bones[smd.boneIDs[int(values[0])]]
-                        vertWeights.append((smd.m.vertex_groups.find(bone.name), 1.0))
-                    except KeyError:
-                        badWeights += 1
-
-                vertKeys.append((co, tuple(vertWeights)))
-
-                if vertexCount == 3:
-                    def createFace(use_cache=True):
-                        bmVerts = []
-                        for vertKey in vertKeys:
-                            bmv = vertMap.get(vertKey, None) if use_cache else None
-                            if bmv is None:
-                                bmv = bm.verts.new(vertKey[0])
-                                for (bone_idx, weight) in vertKey[1]:
-                                    bmv[weightLayer][bone_idx] = weight
-                                vertMap[vertKey] = bmv
-                            bmVerts.append(bmv)
-                        face = bm.faces.new(bmVerts)
-                        face.material_index = mat_ind
-                        for i in range(3):
-                            face.loops[i][uvLayer].uv = faceUVs[i]
-
-                    try:
-                        createFace()
-                    except ValueError:
-                        createFace(use_cache=False)
-                    break
-
-            countPolys += 1
-
-        bm.to_mesh(md)
-        del vertMap
-        bm.free()
-        md.update()
-
-        if countPolys:
-            ops.object.select_all(action="DESELECT")
-            smd.m.select_set(True)
-            bpy.context.view_layer.objects.active = smd.m
-            ops.object.shade_smooth()
-
-            for poly in smd.m.data.polygons:
-                poly.select = True
-
-            smd.m.show_wire = smd.jobType == PHYS
-
-            # Blender 4.2+: normals_split_custom_set does not require use_auto_smooth
-            md.normals_split_custom_set(norms)
-
-            if smd.upAxis == 'Y':
-                md.transform(rx90)
-                md.update()
-
-            if badWeights:
-                self.warning(get_id("importer_err_badweights", True).format(badWeights, smd.jobName))
-            print(f"- Imported {countPolys} polys")
-
-    # -------------------------------------------------------------------------
-    # Flex / VTA shapes
-    # -------------------------------------------------------------------------
-
-    def readShapes(self):
-        smd = self.smd
-        if smd.jobType is not FLEX:
-            return
-
-        if not smd.m:
-            if self.qc:
-                smd.m = self.qc.ref_mesh
-            else:
-                if bpy.context.active_object.type in shape_types:
-                    smd.m = bpy.context.active_object
-                else:
-                    for obj in bpy.context.selected_objects:
-                        if obj.type in shape_types:
-                            smd.m = obj
-
-        if not smd.m:
-            self.error(get_id("importer_err_shapetarget"))
-            return
-
-        if hasShapes(smd.m):
-            smd.m.active_shape_key_index = 0
-        smd.m.show_only_shape_key = True
-
-        def vec_round(v):
-            return Vector([round(co, 3) for co in v])
-
-        co_map: dict[int, int] = {}
-        mesh_cos = [vert.co for vert in smd.m.data.vertices]
-        mesh_cos_rnd = None
-
-        smd.vta_ref = None
-        vta_cos = []
-        vta_ids = []
-
-        making_base_shape = True
-        bad_vta_verts = []
-        num_shapes = 0
-        md = smd.m.data
-
-        for line in smd.file:
-            line = line.rstrip("\n")
-            if smdBreak(line): break
-            if smdContinue(line): continue
-
-            values = line.split()
-
-            if values[0] == "time":
-                shape_name = smd.shapeNames.get(values[1])
-                if smd.vta_ref is None:
-                    if not hasShapes(smd.m, False):
-                        smd.m.shape_key_add(name=shape_name if shape_name else "Basis")
-                    vd = bpy.data.meshes.new(name="VTA vertices")
-                    vta_ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
-                    vta_ref.matrix_world = smd.m.matrix_world
-                    smd.g.objects.link(vta_ref)
-                    vta_err_vg = vta_ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
-                elif making_base_shape:
-                    vd.vertices.add(int(len(vta_cos) / 3))
-                    vd.vertices.foreach_set("co", vta_cos)
-                    num_vta_verts = len(vd.vertices)
-                    del vta_cos
-
-                    mod = vta_ref.modifiers.new(name="VTA Shrinkwrap", type='SHRINKWRAP')
-                    mod.target = smd.m
-                    mod.wrap_method = 'NEAREST_VERTEX'
-
-                    vd = bpy.data.meshes.new_from_object(vta_ref.evaluated_get(bpy.context.evaluated_depsgraph_get()))
-                    vta_ref.modifiers.remove(mod)
-                    del mod
-
-                    for i in range(len(vd.vertices)):
-                        id = vta_ids[i]
-                        co = vd.vertices[i].co
-                        map_id = None
-                        try:
-                            map_id = mesh_cos.index(co)
-                        except ValueError:
-                            if not mesh_cos_rnd:
-                                mesh_cos_rnd = [vec_round(co) for co in mesh_cos]
-                            try:
-                                map_id = mesh_cos_rnd.index(vec_round(co))
-                            except ValueError:
-                                bad_vta_verts.append(i)
-                                continue
-                        co_map[id] = map_id
-
-                    bpy.data.meshes.remove(vd)
-                    del vd
-
-                    if bad_vta_verts:
-                        err_ratio = len(bad_vta_verts) / num_vta_verts
-                        vta_err_vg.add(bad_vta_verts, 1.0, 'REPLACE')
-                        message = get_id("importer_err_unmatched_mesh", True).format(len(bad_vta_verts), int(err_ratio * 100))
-                        if err_ratio == 1:
-                            self.error(message)
-                            return
-                        else:
-                            self.warning(message)
-                    else:
-                        removeObject(vta_ref)
-                    making_base_shape = False
-
-                if not making_base_shape:
-                    sk = smd.m.shape_key_add(name=shape_name if shape_name else values[1])
-                    sk.value = 0.0
-                    num_shapes += 1
-
-                continue
-
-            cur_id = int(values[0])
-            vta_co = getUpAxisMat(smd.upAxis) @ Vector([float(values[1]), float(values[2]), float(values[3])])
-
-            if making_base_shape:
-                vta_ids.append(cur_id)
-                vta_cos.extend(vta_co)
-            else:
-                try:
-                    md.shape_keys.key_blocks[-1].data[co_map[cur_id]].co = vta_co
-                except KeyError:
-                    pass
-
-        print(f"- Imported {num_shapes} flex shapes")
-
-    # -------------------------------------------------------------------------
-    # QC
-    # -------------------------------------------------------------------------
 
     def readQC(self, filepath: str, newscene: bool, doAnim: bool, makeCamera: bool, rotMode: str, outer_qc: bool = False) -> int:
         filename = os.path.basename(filepath)
@@ -1508,14 +1103,25 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.warning(get_id("importer_err_smd_ver"))
 
         if smd.jobType is None:
-            self.scanSMD()
+            importsrc.scan_smd(smd)
         self.createCollection()
 
+        # Order is forced by the format: the node block must be built into an armature
+        # before triangle weights can resolve, so this stays a single pass over the file.
         for line in file:
-            if line == "nodes\n":     self.readNodes()
-            if line == "skeleton\n":  self.readFrames()
-            if line == "triangles\n": self.readPolys()
-            if line == "vertexanimation\n": self.readShapes()
+            if line == "nodes\n":
+                importsrc.build_smd_skeleton(self, smd, importsrc.read_nodes(smd, self.qc))
+            if line == "skeleton\n":
+                importsrc.build_smd_anim(self, smd, importsrc.read_frames(self, smd, self.qc))
+            if line == "triangles\n":
+                group_names = [b.name for b in smd.a.data.bones] if smd.a else []
+                imesh = importsrc.read_polys(self, smd, group_names, self.qc)
+                if imesh:
+                    ob = importsrc.build_mesh(self, smd, imesh)
+                    if smd.jobType == REF and self.qc:
+                        self.qc.ref_mesh = ob
+            if line == "vertexanimation\n":
+                importsrc.read_shapes(self, smd)
 
         file.close()
         printTimeMessage(smd.startTime, smd.jobName, "import")
@@ -2662,6 +2268,23 @@ class SmdImporter(ImporterBase):
         if filepath_lc.endswith('.dmx'):
             return self.readDMX(filepath, self.properties.upAxis, self.properties.rotMode)
         self.report_unreadable(filepath_lc)
+        return None
+
+
+class ImportSMD(ImporterBase):
+    bl_idname = "import_scene.kst_smd"
+    bl_label = get_id("importer_smd_title")
+    bl_description = get_id("importer_smd_tip")
+
+    filter_glob: StringProperty(default="*.smd;*.vta", options={'HIDDEN'})
+
+    def read_file(self, filepath: str) -> int | None:
+        filepath_lc = filepath.lower()
+        if filepath_lc.endswith('.smd'):
+            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode)
+        if filepath_lc.endswith('.vta'):
+            return self.readSMD(filepath, self.properties.upAxis, self.properties.rotMode, smd_type=FLEX)
+        self.report_unreadable(filepath)
         return None
 
 
