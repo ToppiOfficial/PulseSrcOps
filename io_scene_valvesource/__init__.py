@@ -299,6 +299,7 @@ GUI.SMD_PT_Jigglebones,
     import_smd.ImportDMX,
     import_smd.ImportSMD,
     import_smd.ImportQC,
+    import_smd.ImportVMDL,
 
     # Updater
     updater.SMD_OT_CheckForUpdates,

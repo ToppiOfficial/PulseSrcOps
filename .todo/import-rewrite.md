@@ -396,9 +396,26 @@ meaning. Worth a deliberate decision.
 
 # Phase 4 - VMDL
 
-- [ ] Extract `_import_vmdl` (2335) and `_extract_vmdl_bones` / `_vmdl_local_matrix` /
-      `_resolve_dmx_ref` out of the QC path they are currently bolted onto (1083).
-- [ ] `ImportVMDL` operator, `*.vmdl;*.vmdl_prefab`.
+- [x] `importsrc/vmdl.py` - `read_vmdl` plus `local_matrix` / `extract_bones` /
+      `resolve_dmx_ref`, lifted out of the QC path they were bolted onto. The 219-line
+      `_import_vmdl` is split into `_build_skeleton` / `_read_render_meshes` /
+      `_read_attachments` / `_read_animations`. No lexer work needed - VMDL is KV3, so
+      `keyvalues3.py` already parses it and this module is extraction plus orchestration.
+- [x] `ImportVMDL` operator, `import_scene.kst_vmdl`, `*.vmdl;*.vmdl_prefab`.
+      It routes through `readQC` because `read_vmdl` needs the `QcInfo` that `read_qc`
+      builds (job name, up axis, `imported_smds`); `read_qc` then dispatches by extension.
+- [x] The old methods are deleted from `import_smd.py` (-258 lines, now 1873). The
+      `_readQC_legacy` call site was repointed at `importsrc.read_vmdl` rather than left
+      dangling - there is only one VMDL implementation now, no legacy copy.
+- [ ] **Verify in Blender.** Untested: a VMDL with a Skeleton + RenderMeshList, an
+      AttachmentList, jigglebones/hitboxes, and an AnimationList with nested Folders.
+
+**`.vmdl_prefab` ownership (was an open question).** Both `ImportVMDL` and phase 5's
+`ImportPrefab` accept the extension, and that is fine: the user picks the operator, so
+the extension is not owned - the *intent* differs. `ImportVMDL` builds a skeleton and
+pulls in referenced geometry; `ImportPrefab` will only attach prefab data to an existing
+armature. A `.vmdl_prefab` with no Skeleton already takes the jigglebone-only path in
+`read_vmdl`, which is the overlap in practice.
 
 # Phase 5 - Prefab
 

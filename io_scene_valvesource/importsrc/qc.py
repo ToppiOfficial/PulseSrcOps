@@ -162,7 +162,8 @@ def read_qc(ctx, filepath: str, newscene: bool, do_anim: bool, make_camera: bool
         qc = ctx.qc
 
     if filepath.lower().endswith(('.vmdl', '.vmdl_prefab')):
-        return ctx._import_vmdl(filepath, qc, rot_mode)
+        from .vmdl import read_vmdl
+        return read_vmdl(ctx, filepath, qc, rot_mode)
 
     try:
         with open(filepath, 'r') as f:

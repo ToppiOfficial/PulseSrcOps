@@ -580,6 +580,18 @@ _data = {
         'en': "Imports an uncompiled Source Engine DMX model or animation",
         'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
     },
+    'import_menuitem_vmdl': {
+        'en': "VMDL (.vmdl, .vmdl_prefab)",
+        'ja': "VMDL (.vmdl, .vmdl_prefab)",
+    },
+    'importer_vmdl_title': {
+        'en': "Import VMDL",
+        'ja': "インポート VMDL",
+    },
+    'importer_vmdl_tip': {
+        'en': "Imports a Source 2 VMDL model definition and the DMX files it references",
+        'ja': "Source 2 VMDLモデル定義と参照DMXファイルをインポート",
+    },
     'import_menuitem_qc': {
         'en': "QC / QCI (.qc, .qci)",
         'ja': "QC / QCI (.qc, .qci)",
