@@ -456,14 +456,14 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if source.data.vs.action_selection == "FILTERED":
                 for slot in actionSlotsForFilter(baked_armature):
                     if isProcBoneAnimSkipped(source, None, slot.name_display):
-                        self.warning(get_id("exporter_warn_procbone_anim", True).format(slot.name_display, source.name))
+                        print(f" Skipping proc bone animation \"{slot.name_display}\"")
                         continue
                     baked_armature.animation_data.action_slot = slot
                     self.files_exported += write_func(source, bake_results, self.sanitiseFilename(slot.name_display), path)
             else:
                 for action in actionsForFilter(baked_armature.vs.action_filter):
                     if isProcBoneAnimSkipped(source, action.name):
-                        self.warning(get_id("exporter_warn_procbone_anim", True).format(action.name, source.name))
+                        print(f" Skipping proc bone animation \"{action.name}\"")
                         continue
                     baked_armature.animation_data.action = action
                     self.files_exported += write_func(source, bake_results, self.sanitiseFilename(action.name), path)
@@ -471,7 +471,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
               and source.animation_data and source.animation_data.action_slot
               and isProcBoneAnimSkipped(source, None, source.animation_data.action_slot.name_display)):
             self.warning(get_id("exporter_warn_procbone_anim", True).format(
-                source.animation_data.action_slot.name_display, source.name))
+                source.animation_data.action_slot.name_display))
         else:
             self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
 
@@ -762,6 +762,21 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 names.add(m.group(1))
         return names
 
+    def _drivenBoneNames(self) -> set:
+        # Bones with a driver on a transform channel. Drivers write matrix_basis, so these
+        # look "posed" to the check below - but they re-evaluate on every frame_set() during
+        # sampling, so the reset never actually loses them.
+        src = self.armature_src
+        ad = src.animation_data if src else None
+        if not ad:
+            return set()
+        names = set()
+        for fcurve in ad.drivers:
+            m = re.match(r'pose\.bones\["(.+?)"\]', fcurve.data_path)
+            if m:
+                names.add(m.group(1))
+        return names
+
     def warnUnkeyframedPose(self, anim_name: str):
         # reset_pose_per_anim zeroes every pose bone's matrix_basis before sampling, so a
         # bone the user posed but never keyframed silently snaps back to rest - a common
@@ -775,6 +790,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         if not src:
             return
         keyframed = self._keyframedBoneNames()
+        keyframed |= self._drivenBoneNames()
+        # Procedural helpers are driven by the compiler, so their sampled pose is moot.
+        keyframed.update(e.helper_bone for e in src.data.vs.proc_bones if e.helper_bone)
         posed = []
         for pb in self.exportable_bones:
             if pb.name in keyframed:

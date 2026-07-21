@@ -226,7 +226,11 @@ class ExportPlanner:
 
         plans: dict[bpy.types.Object, _MeshPlan] = {}
         for ob in export_objects:
-            if not ob.vs.export:
+            # Never copy an object that yields no geometry. ob.copy() keeps the parent
+            # pointer, so a copied attachment empty still resolves to the original armature
+            # and gets written a second time. Instancer empties are exempt - the baker
+            # turns their dupli geometry real.
+            if not ob.vs.export or (ob.type not in exportable_types and ob.instance_type == 'NONE'):
                 continue
             plans[ob] = self._plan_mesh_ob(ob, ob.name, for_collection=True)
 
@@ -333,7 +337,8 @@ class ExportPlanner:
         effective_copies = {}
 
         for ob in source_col.objects:
-            if ob.vs.export and not ob.vs.generate_lods:
+            if ob.vs.export and not ob.vs.generate_lods \
+                    and (ob.type in exportable_types or ob.instance_type != 'NONE'):
                 copy = ob.copy()
                 if ob.data:
                     copy.data = ob.data.copy()

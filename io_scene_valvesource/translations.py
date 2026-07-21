@@ -437,8 +437,8 @@ _data = {
         'ja': "エクスポート名「{0}」を「{1}」にサニタイズしました",
     },
     'exporter_warn_procbone_anim': {
-        'en': "Skipped \"{0}\": it drives a procedural bone of \"{1}\". Enable 'Export Procedural Bone Animations' to export it anyway.",
-        'ja': "「{0}」をスキップしました: 「{1}」のプロシージャルボーンを駆動しています。エクスポートするには「プロシージャルボーンのアニメーションをエクスポート」を有効にしてください。",
+        'en': "Nothing exported for \"{0}\": it drives a procedural bone. Enable 'Export Procedural Bone Animations' to export it anyway.",
+        'ja': "「{0}」はエクスポートされませんでした: プロシージャルボーンを駆動しています。エクスポートするには「プロシージャルボーンのアニメーションをエクスポート」を有効にしてください。",
     },
     'exporter_warn_source2names': {
         'en': "Consider renaming \"{0}\": in Source 2, model names can contain only lower-case characters, digits, and/or underscores.",
