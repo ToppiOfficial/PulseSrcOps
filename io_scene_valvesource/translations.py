@@ -868,6 +868,10 @@ _data = {
         'en': "Merge left_/right_ controller pairs into a single base-named stereo controller (e.g. left_lid_raise + right_lid_raise -> lid_raise)",
         'ja': "left_/right_ コントローラーのペアを単一のベース名ステレオコントローラーに統合 (例: left_lid_raise + right_lid_raise -> lid_raise)",
     },
+    'op_flex_auto_name_tip': {
+        'en': "Name each new controller after its shape key, sanitised to a lowercase legal name",
+        'ja': "新しい各コントローラーにシェイプキー名を設定し、小文字の有効な名前に整形します",
+    },
     'op_import_flex_text_tip': {
         'en': "Import flex controllers and rules from QC-style text in a Blender text block",
         'ja': "BlenderのテキストブロックのQC形式テキストからフレックスコントローラーとルールをインポート",
@@ -1249,6 +1253,12 @@ _data = {
     },
     'op_copy_jigglebones_only_selected_tip': {
         'en': "Only copy onto the currently selected bones instead of every matching bone in this armature",
+    },
+    'op_copy_bone_props_from_armature': {
+        'en': "Copy Bone Props From Armature",
+    },
+    'op_copy_bone_props_from_armature_tip': {
+        'en': "Copy export name and export rotation/location offsets from another armature onto this armature's bones, matched by bone name (and optionally export name)",
     },
     'panel_backface': {
         'en': "Backface",

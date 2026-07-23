@@ -154,7 +154,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.error(get_id("exporter_err_groupmuted", True).format(col.name))
             elif is_bypassed_into_parent(col):
                 self.error(get_id("exporter_err_groupbypassed", True).format(col.name))
-            elif not col.objects:
+            elif not get_collection_export_objects(col):
                 self.error(get_id("exporter_err_groupempty", True).format(col.name))
             else:
                 ids.append(col)

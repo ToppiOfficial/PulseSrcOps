@@ -27,8 +27,6 @@ import math
 import bpy
 from mathutils import Vector, Matrix, Quaternion
 
-# FIXME: When the driver bone is also the parent of the helper, the procedural simulation just borked. WHY!?
-
 # -- Per-bone simulation state -------------------------------------------------
 
 class BoneSimState:
