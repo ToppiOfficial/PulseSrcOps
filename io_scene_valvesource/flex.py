@@ -39,7 +39,7 @@ class DmxWriteFlexControllers(bpy.types.Operator):
         objects = []
         shapes = set()
         seen_controller_names = set()
-        seen_rule_names = set()
+        seen_rule_names = {}
         seen_dom_rules = set()
         
         if type(id) == bpy.types.Collection:
@@ -126,8 +126,10 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     if dom_key in seen_dom_rules:
                         continue
                     seen_dom_rules.add(dom_key)
+                    # id must cover both sides - two rules can share a dominator list while
+                    # suppressing different deltas, and a repeated id is a hard IDCollisionError
                     dom_elem = dm.add_element("", "DmeCombinationDominationRule",
-                                             id=ob.name + rule.dominator_names + "dom")
+                                             id=ob.name + rule.dominator_names + rule.suppressed_names + "dom")
                     dom_elem["dominators"] = datamodel.make_array(d_names, str)
                     dom_elem["supressed"]  = datamodel.make_array(s_names, str)
                     dom_array.append(dom_elem)
@@ -138,10 +140,20 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     flex_rules_elem = None
                     for rule in non_dom:
                         delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
-                        if delta_name in seen_rule_names:
-                            print(f"- Skipping duplicate flex rule '{delta_name}' on '{ob.name}' (already defined by another mesh)")
+                        # localvars are their own namespace: a localvar declaration and the
+                        # expression that assigns it deliberately share a name
+                        rule_key = (rule.rule_type == 'LOCALVAR', delta_name)
+                        # split/edgeline copies carry the original's rules verbatim, so an
+                        # identical redefinition is expected and silently dropped. Differing
+                        # content under one name is a real clash - a rule name is the delta it
+                        # drives, so DMX cannot hold both.
+                        rule_sig = sanitize_flex_expression_deltas(rule.expression.strip(), delta_name_map) \
+                            if rule.rule_type == 'EXPRESSION' else ''
+                        if rule_key in seen_rule_names:
+                            if seen_rule_names[rule_key] != rule_sig:
+                                print(f"- WARNING: flex rule '{delta_name}' on '{ob.name}' clashes with a different rule of the same name on an earlier mesh; keeping the first. Rename one of them.")
                             continue
-                        seen_rule_names.add(delta_name)
+                        seen_rule_names[rule_key] = rule_sig
 
                         if flex_rules_elem is None:
                             flex_rules_elem = dm.add_element("flexRules", "DmeFlexRules",

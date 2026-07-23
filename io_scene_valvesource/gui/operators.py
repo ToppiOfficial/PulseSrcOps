@@ -223,6 +223,12 @@ class SMD_OT_AddAllFlexControllers(Operator):
         default='MISSING',
     )
 
+    auto_name: BoolProperty(
+        name="Auto Name Controllers",
+        description=get_id("op_flex_auto_name_tip"),
+        default=True,
+    )
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
@@ -243,6 +249,8 @@ class SMD_OT_AddAllFlexControllers(Operator):
             new_item = ob.vs.dme_flexcontrollers.add()
             new_item.shapekey = key.name
             new_item.raw_delta_name = key.name
+            if self.auto_name:
+                new_item.controller_name = key.name  # sanitised by the property's update callback
             added += 1
 
         if added:
@@ -280,7 +288,7 @@ class SMD_OT_ImportFlexControllersFromText(Operator):
         self.layout.prop_search(self, "text_block", bpy.data, "texts", text="")
 
     def execute(self, context) -> set:
-        from ..import_smd import parse_flex_text, apply_flex_text_to_object
+        from ..imports.flexdata import parse_flex_text, apply_flex_text_to_object
 
         text = bpy.data.texts.get(self.text_block)
         if not text:
@@ -1477,6 +1485,11 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
 
         action = bpy.data.actions.get(self.action_name) if self.action_name else None
 
+        if action and not getattr(action, 'is_action_legacy', True) \
+                and _procbones_sim._find_action_slot(action, self.action_slot_name) is None:
+            self.report({'ERROR'}, f"Action '{action.name}' needs a slot - pick one, or leave the action unset")
+            return {'CANCELLED'}
+
         ref_arm = bpy.data.objects.get(self.reference_armature) if self.reference_armature else None
         if self.reference_armature and (ref_arm is None or ref_arm.type != 'ARMATURE'):
             self.report({'ERROR'}, "Reference armature must be an armature object")
@@ -1985,6 +1998,63 @@ class SMD_OT_ProcBonePasteEntries(Operator):
         return {'FINISHED'}
 
 
+def _copy_rotation_offset(src, pb, arm_ob):
+    """Copy rotation-offset settings from bone.vs `src` onto pose bone pb.
+
+    rotation_copy_target and the offset values are rest-pose dependent, so when the
+    source follows a copy target we recompute the offset for pb's own rest matrix
+    instead of copying the source's numbers verbatim. The target is looked up in
+    arm_ob, so a cross-armature copy resolves against the destination skeleton. Uses
+    dict-style assignment to bypass the update callbacks (which would recompute
+    against the active bone)."""
+    from ..props.armature import _compute_rotation_sync
+    bvs = pb.bone.vs
+    bvs.ignore_rotation_offset = src.ignore_rotation_offset
+    tgt_name = src.rotation_copy_target
+    target_pb = arm_ob.pose.bones.get(tgt_name) if (tgt_name and arm_ob) else None
+    if target_pb is not None and target_pb != pb:
+        bvs['rotation_copy_target'] = tgt_name
+        euler = _compute_rotation_sync(pb, target_pb)
+        bvs['export_rotation_offset_x'] = euler.x
+        bvs['export_rotation_offset_y'] = euler.y
+        bvs['export_rotation_offset_z'] = euler.z
+    else:
+        bvs['rotation_copy_target'] = ""
+        bvs['export_rotation_offset_x'] = src.export_rotation_offset_x
+        bvs['export_rotation_offset_y'] = src.export_rotation_offset_y
+        bvs['export_rotation_offset_z'] = src.export_rotation_offset_z
+
+
+def _copy_location_offset(src, pb):
+    """Copy location-offset settings from bone.vs `src` onto pose bone pb.
+
+    When the source uses armature space, the same armature-space offset is applied to
+    each target and its local-space equivalent is recomputed from the target's own rest
+    matrix. Local and armature-space values are kept in sync. Dict-style assignment
+    bypasses the _sync_* update callbacks so we control the conversion explicitly."""
+    from mathutils import Vector
+    bvs = pb.bone.vs
+    rot = pb.bone.matrix_local.to_3x3()
+    bvs.ignore_location_offset = src.ignore_location_offset
+    bvs['location_offset_in_armature_space'] = src.location_offset_in_armature_space
+    if src.location_offset_in_armature_space:
+        arm_vec = Vector((src.export_location_offset_arm_x,
+                          src.export_location_offset_arm_y,
+                          src.export_location_offset_arm_z))
+        local_vec = rot.inverted() @ arm_vec
+    else:
+        local_vec = Vector((src.export_location_offset_x,
+                            src.export_location_offset_y,
+                            src.export_location_offset_z))
+        arm_vec = rot @ local_vec
+    bvs['export_location_offset_x'] = local_vec.x
+    bvs['export_location_offset_y'] = local_vec.y
+    bvs['export_location_offset_z'] = local_vec.z
+    bvs['export_location_offset_arm_x'] = arm_vec.x
+    bvs['export_location_offset_arm_y'] = arm_vec.y
+    bvs['export_location_offset_arm_z'] = arm_vec.z
+
+
 class SMD_OT_CopySourceBoneProps(Operator):
     bl_idname = "smd.copy_bone_props"
     bl_label = "Copy Source Bone Properties"
@@ -2021,59 +2091,6 @@ class SMD_OT_CopySourceBoneProps(Operator):
         row.prop(self, "copy_jigglebone")
         row.enabled = context.active_pose_bone.bone.vs.bone_is_jigglebone
 
-    def _copy_rotation(self, src, pb, arm_ob):
-        """Copy rotation-offset settings to target bone pb.
-
-        rotation_copy_target and the offset values are rest-pose dependent, so when the
-        source follows a copy target we recompute the offset for pb's own rest matrix
-        instead of copying the source's numbers verbatim. Uses dict-style assignment to
-        bypass the update callbacks (which would recompute against the active bone)."""
-        from ..props.armature import _compute_rotation_sync
-        bvs = pb.bone.vs
-        bvs.ignore_rotation_offset = src.ignore_rotation_offset
-        tgt_name = src.rotation_copy_target
-        target_pb = arm_ob.pose.bones.get(tgt_name) if (tgt_name and arm_ob) else None
-        if target_pb is not None and target_pb != pb:
-            bvs['rotation_copy_target'] = tgt_name
-            euler = _compute_rotation_sync(pb, target_pb)
-            bvs['export_rotation_offset_x'] = euler.x
-            bvs['export_rotation_offset_y'] = euler.y
-            bvs['export_rotation_offset_z'] = euler.z
-        else:
-            bvs['rotation_copy_target'] = ""
-            bvs['export_rotation_offset_x'] = src.export_rotation_offset_x
-            bvs['export_rotation_offset_y'] = src.export_rotation_offset_y
-            bvs['export_rotation_offset_z'] = src.export_rotation_offset_z
-
-    def _copy_location(self, src, pb):
-        """Copy location-offset settings to target bone pb.
-
-        When the source uses armature space, the same armature-space offset is applied to
-        each target and its local-space equivalent is recomputed from the target's own rest
-        matrix. Local and armature-space values are kept in sync. Dict-style assignment
-        bypasses the _sync_* update callbacks so we control the conversion explicitly."""
-        from mathutils import Vector
-        bvs = pb.bone.vs
-        rot = pb.bone.matrix_local.to_3x3()
-        bvs.ignore_location_offset = src.ignore_location_offset
-        bvs['location_offset_in_armature_space'] = src.location_offset_in_armature_space
-        if src.location_offset_in_armature_space:
-            arm_vec = Vector((src.export_location_offset_arm_x,
-                              src.export_location_offset_arm_y,
-                              src.export_location_offset_arm_z))
-            local_vec = rot.inverted() @ arm_vec
-        else:
-            local_vec = Vector((src.export_location_offset_x,
-                                src.export_location_offset_y,
-                                src.export_location_offset_z))
-            arm_vec = rot @ local_vec
-        bvs['export_location_offset_x'] = local_vec.x
-        bvs['export_location_offset_y'] = local_vec.y
-        bvs['export_location_offset_z'] = local_vec.z
-        bvs['export_location_offset_arm_x'] = arm_vec.x
-        bvs['export_location_offset_arm_y'] = arm_vec.y
-        bvs['export_location_offset_arm_z'] = arm_vec.z
-
     def execute(self, context) -> set:
         src = context.active_pose_bone.bone.vs
 
@@ -2100,9 +2117,14 @@ class SMD_OT_CopySourceBoneProps(Operator):
             if self.copy_rotation:
                 # pb.id_data is the target's own armature object, which may differ
                 # from the active one when several armatures are in pose mode.
-                self._copy_rotation(src, pb, pb.id_data)
+                _copy_rotation_offset(src, pb, pb.id_data)
             if self.copy_location:
-                self._copy_location(src, pb)
+                _copy_location_offset(src, pb)
+
+        # Values are set dict-style above, so nothing dirties the viewport on its own.
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
 
         self.report({'INFO'}, f"Copied bone properties to {len(targets)} bone(s)")
         return {'FINISHED'}
@@ -2193,6 +2215,104 @@ class SMD_OT_CopyJigglebonesFromArmature(Operator):
         return {'FINISHED'}
 
 
+class SMD_OT_CopyBonePropsFromArmature(Operator):
+    bl_idname = "smd.copy_bone_props_from_armature"
+    bl_label = get_id("op_copy_bone_props_from_armature")
+    bl_description = get_id("op_copy_bone_props_from_armature_tip")
+    bl_options = {"REGISTER", "UNDO"}
+
+    source_armature: StringProperty(
+        name=get_id("op_copy_jigglebones_source_armature"),
+        options={'SKIP_SAVE'})
+    only_selected: BoolProperty(
+        name=get_id("op_copy_jigglebones_only_selected"),
+        description=get_id("op_copy_jigglebones_only_selected_tip"),
+        default=False, options={'SKIP_SAVE'})
+    copy_name: BoolProperty(name="Export Name", default=False, options={'SKIP_SAVE'})
+    copy_rotation: BoolProperty(name="Export Rotation Offset", default=True, options={'SKIP_SAVE'})
+    copy_location: BoolProperty(name="Export Location Offset", default=True, options={'SKIP_SAVE'})
+
+    @classmethod
+    def poll(cls, context):
+        # Object/Pose only; data bones aren't reliable in Edit mode.
+        return context.mode in {'OBJECT', 'POSE'} and get_armature(context.object) is not None
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop_search(self, 'source_armature', bpy.data, 'objects')
+        row = layout.row()
+        row.prop(self, 'only_selected')
+        # Selected-bones only makes sense in Pose mode.
+        row.enabled = context.mode == 'POSE'
+        layout.separator()
+        layout.label(text="Properties to copy:")
+        layout.prop(self, "copy_name")
+        layout.prop(self, "copy_rotation")
+        layout.prop(self, "copy_location")
+
+    def execute(self, context) -> set:
+        tgt_arm = get_armature(context.object)
+        if tgt_arm is None:
+            self.report({'WARNING'}, "No target armature")
+            return {'CANCELLED'}
+
+        src_arm = bpy.data.objects.get(self.source_armature) if self.source_armature else None
+        if src_arm is None or src_arm.type != 'ARMATURE':
+            self.report({'WARNING'}, "Select a source armature to copy from")
+            return {'CANCELLED'}
+        if src_arm == tgt_arm:
+            self.report({'WARNING'}, "Source and target armature are the same")
+            return {'CANCELLED'}
+        if not (self.copy_name or self.copy_rotation or self.copy_location):
+            self.report({'WARNING'}, "Nothing selected to copy")
+            return {'CANCELLED'}
+
+        # Index source bones by export name and by bone name.
+        src_by_export = {}
+        src_by_name = {}
+        for sb in src_arm.data.bones:
+            src_by_name[sb.name] = sb
+            exp = get_bone_exportname(sb)
+            if exp:
+                src_by_export.setdefault(exp, sb)
+
+        if self.only_selected and context.mode == 'POSE':
+            selected = {pb.name for pb in (context.selected_pose_bones or [])}
+            targets = [pb for pb in tgt_arm.pose.bones if pb.name in selected]
+        else:
+            targets = list(tgt_arm.pose.bones)
+
+        count = 0
+        for pb in targets:
+            # Export name takes priority, fall back to the regular bone name.
+            match = src_by_export.get(get_bone_exportname(pb.bone)) or src_by_name.get(pb.name)
+            if match is None:
+                continue
+            if self.copy_name:
+                pb.bone.vs.export_name = match.vs.export_name
+            if self.copy_rotation:
+                # Resolve rotation_copy_target against the destination armature.
+                _copy_rotation_offset(match.vs, pb, tgt_arm)
+            if self.copy_location:
+                _copy_location_offset(match.vs, pb)
+            count += 1
+
+        if count == 0:
+            self.report({'WARNING'}, "No matching bones found")
+            return {'CANCELLED'}
+
+        # Values are set dict-style above, so nothing dirties the viewport on its own.
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+        self.report({'INFO'}, f"Copied bone properties to {count} bone(s)")
+        return {'FINISHED'}
+
+
 class SMD_OT_ResetJiggleSimulation(Operator):
     bl_idname  = "smd.reset_simulation"
     bl_label   = get_id("op_reset_jiggle_simulation")
@@ -2273,6 +2393,48 @@ class SMD_OT_SetAttachmentMeshRender(Operator):
             vs.attachment_display_mesh_render_index = -1
         else:
             vs.attachment_display_mesh_render_index = self.index
+        return {'FINISHED'}
+
+
+class SMD_OT_MaterialPathAdd(Operator):
+    bl_idname = 'smd.material_path_add'
+    bl_label = "Add Material Path"
+    bl_description = get_id("dmx_mat_path_add_tip")
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    def execute(self, context):
+        vs = context.scene.vs
+        vs.material_paths.add()
+        vs.material_paths_index = len(vs.material_paths) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_MaterialPathRemove(Operator):
+    bl_idname = 'smd.material_path_remove'
+    bl_label = "Remove Material Path"
+    bl_description = get_id("dmx_mat_path_remove_tip")
+    bl_options = {'REGISTER', 'UNDO', 'INTERNAL'}
+
+    @classmethod
+    def poll(cls, context):
+        vs = context.scene.vs
+        return 0 <= vs.material_paths_index < len(vs.material_paths)
+
+    def execute(self, context):
+        vs = context.scene.vs
+        idx = vs.material_paths_index
+
+        # Materials index into this collection, so shift every assignment that sits past
+        # the removed entry. Anything pointing at the entry itself falls back to 0.
+        for mat in bpy.data.materials:
+            assigned = int(mat.vs.material_path_index)
+            if assigned > idx:
+                mat.vs.material_path_index = str(assigned - 1)
+            elif assigned == idx:
+                mat.vs.material_path_index = '0'
+
+        vs.material_paths.remove(idx)
+        vs.material_paths_index = min(idx, len(vs.material_paths) - 1)
         return {'FINISHED'}
 
 

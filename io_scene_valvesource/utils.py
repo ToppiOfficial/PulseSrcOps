@@ -18,17 +18,17 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math, bmesh
-from typing import Optional, Any
+import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
+from typing import Optional
+# NB: `math` and `Optional` above are re-exported to every `from .utils import *`
+# consumer in exports/ - they are used there without a local import.
 from bpy.app.translations import pgettext
-from contextlib import contextmanager
 from bpy.app.handlers import depsgraph_update_post, load_post, persistent
 from mathutils import Matrix, Vector
 from math import radians, pi, ceil, floor
 from io import TextIOWrapper
 from . import datamodel
 from . import keyvalues3
-import numpy as np
 
 intsize = struct.calcsize("i")
 floatsize = struct.calcsize("f")
@@ -95,8 +95,6 @@ hitbox_group = [
     ('7', 'Right Leg', 'Used for human Right Leg, appears White like the default group in HLMV (Orange in Garry\'s Mod'),
     ('8', 'Neck', 'Used for human neck (to fix penetration to head from behind), appears Orange in HLMV (In all games since CS:GO)'),
 ]
-
-kitsune_data_keys: list[str] = []
 
 class ExportFormat:
     SMD = 1
@@ -202,9 +200,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
 
     @property
     def datamodelFormat(cls): return cls._engineBranch.format if cls._engineBranch else int(bpy.context.scene.vs.dmx_format.split("_")[0])
-
-    @property
-    def engineBranchTitle(cls): return cls._engineBranch.title if cls._engineBranch else None
 
     @property
     def compiler(cls): return cls._engineBranch.compiler if cls._engineBranch else Compiler.MODELDOC if "modeldoc" in bpy.context.scene.vs.dmx_format else Compiler.UNKNOWN
@@ -324,6 +319,33 @@ def get_active_exportable(context = None):
         return None
 
     return context.scene.vs.export_list[context.scene.vs.export_list_active]
+
+def get_material_path(scene, matdata = None) -> str:
+    """Resolve the DMX material path a material exports under. Materials point at an entry
+    in scene.vs.material_paths by index; anything out of range falls back to the first."""
+    paths = scene.vs.material_paths
+    if not len(paths):
+        return ""
+    index = 0
+    if matdata:
+        try:
+            index = int(matdata.vs.material_path_index)
+        except ValueError:
+            index = 0
+    if not 0 <= index < len(paths):
+        index = 0
+    return paths[index].path
+
+
+def find_or_add_material_path(scene, path: str) -> int:
+    """Index of path in scene.vs.material_paths, appending it if it isn't there yet."""
+    path = path.strip().replace('\\', '/').strip('/')
+    for i, item in enumerate(scene.vs.material_paths):
+        if item.path == path:
+            return i
+    scene.vs.material_paths.add().path = path
+    return len(scene.vs.material_paths) - 1
+
 
 class BenchMarker:
     def __init__(self,indent = 0, prefix = None):
@@ -514,9 +536,6 @@ def animationFrameRange(ad : bpy.types.AnimData):
     first = floor(min(times))
     return first, ceil(max(times)) - first
 
-def animationLength(ad : bpy.types.AnimData):
-    return animationFrameRange(ad)[1]
-    
 def getFileExt(flex=False):
     if State.datamodelEncoding != 0 and bpy.context.scene.vs.export_format == 'DMX':
         return ".dmx"
@@ -586,6 +605,16 @@ def getForwardAxisMat(axis: str) -> Matrix:
             return Matrix.Rotation(pi / 2, 4, 'X')
         case _:
             raise AttributeError(f"getForwardAxisMat got invalid axis argument '{axis}'")
+
+def getImportAxisMat(up_axis, forward_axis='-Y', up_axis_offset=0.0) -> Matrix:
+    """Undoes the axis transform the exporter applies in bake.py, world scale aside.
+
+    Export is up^-1 @ forward^-1 @ offset, so an import needs offset^-1 @ forward @ up.
+    With the default -Y forward and no offset this reduces to getUpAxisMat(up_axis).
+    """
+    return (getUpAxisOffsetMat(up_axis, up_axis_offset).inverted()
+            @ getForwardAxisMat(forward_axis)
+            @ getUpAxisMat(up_axis))
 
 def MakeObjectIcon(object,prefix=None,suffix=None):
     if not (prefix or suffix):
@@ -712,6 +741,46 @@ def actionsForFilter(filter):
     import fnmatch
     return list([action for action in bpy.data.actions if action.users and fnmatch.fnmatch(action.name, filter)])
 
+def _procBoneSlotDisplayName(action, slot_name : str):
+    """Mirror procbones_sim._find_action_slot, but return the slot's display name so it
+    can be compared against what the exporter iterates. An entry naming no slot, or a
+    slot that no longer exists, resolves to nothing - it drives no procedural bone, so
+    it must not suppress any animation."""
+    if not slot_name:
+        return None
+    for s in getattr(action, 'slots', ()):
+        if slot_name in (s.identifier, s.name_display, getattr(s, 'name', '')):
+            return s.name_display
+    return None
+
+def procBoneTriggerSlotNames(arm_ob : bpy.types.Object) -> set:
+    """Display names of the action slots that drive one of `arm_ob`'s procedural bones.
+    Only slots of the action currently assigned to `arm_ob` can collide, so entries
+    pointing at another action are ignored."""
+    ad = getattr(arm_ob, 'animation_data', None)
+    if not ad or not ad.action or arm_ob.type != 'ARMATURE':
+        return set()
+    names = (_procBoneSlotDisplayName(ad.action, e.action_slot_name)
+             for e in arm_ob.data.vs.proc_bones
+             if e.proc_type == 'TRIGGER' and e.action == ad.action)
+    return {n for n in names if n}
+
+def procBoneTriggerActionNames(arm_ob : bpy.types.Object) -> set:
+    """Names of the actions that drive one of `arm_ob`'s procedural bones."""
+    if arm_ob.type != 'ARMATURE':
+        return set()
+    return {e.action.name for e in arm_ob.data.vs.proc_bones
+            if e.proc_type == 'TRIGGER' and e.action}
+
+def isProcBoneAnimSkipped(arm_ob : bpy.types.Object, action_name : str, slot_name : str = None) -> bool:
+    """True when this animation only exists to drive a procedural bone and the armature
+    is not set to export those."""
+    if getattr(arm_ob, 'type', None) != 'ARMATURE' or arm_ob.data.vs.export_proc_bone_actions:
+        return False
+    if slot_name is not None:
+        return slot_name in procBoneTriggerSlotNames(arm_ob)
+    return action_name in procBoneTriggerActionNames(arm_ob)
+
 def actionSlotExportName(animData : bpy.types.AnimData):
     """For use only when exporting a single action slot"""
     slot_name = animData.action_slot.name_display
@@ -826,7 +895,8 @@ def make_export_list(scene: bpy.types.Scene):
     scene.vs.export_list.clear()
 
     def makeDisplayName(item, name=None):
-        return (name if name else item.name) + getFileExt()
+        base = name if name else item.name
+        return sanitize_string(base, allow_unicode=True) + getFileExt()
 
     if not State.exportableObjects:
         return
@@ -847,10 +917,11 @@ def make_export_list(scene: bpy.types.Scene):
             scene_groups.append(group)
 
     for g in scene_groups:
+        san_name = sanitize_string(g.name, allow_unicode=True)
         if g.vs.mute:
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_mute_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_mute_suffix", True)))
         elif is_bypassed_into_parent(g):
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_bypass_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_bypass_suffix", True)))
         else:
             label = makeDisplayName(g)
         pending.append((0, label, "COLLECTION", "GROUP", None, g))
@@ -870,18 +941,29 @@ def make_export_list(scene: bpy.types.Scene):
         i_name = i_type = i_icon = None
         if ob.type == 'ARMATURE':
             ad = ob.animation_data
-            if ad:
+            # No assigned action means nothing to export - keep it off the list.
+            if ad and ad.action:
                 i_icon = i_type = "ACTION_SLOT"
                 if ob.data.vs.action_selection != 'CURRENT':
                     export_slots = ob.data.vs.action_selection == 'FILTERED'
-                    exportables_count = len(actionSlotsForFilter(ob) if export_slots else actionsForFilter(ob.vs.action_filter))
-                    if exportables_count > 0:
-                        if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
-                            i_name = get_id("exportables_arm_filter_result", True).format(ob.vs.action_filter, exportables_count)
-                        else:
-                            i_name = get_id("exportables_arm_no_slot_filter", True).format(exportables_count, ob.name)
+                    if export_slots:
+                        exportables_count = len([s for s in actionSlotsForFilter(ob)
+                                                 if not isProcBoneAnimSkipped(ob, None, s.name_display)])
+                    else:
+                        exportables_count = len([a for a in actionsForFilter(ob.vs.action_filter)
+                                                 if not isProcBoneAnimSkipped(ob, a.name)])
+                    # Keep the row even when the filter matches nothing, otherwise the
+                    # armature vanishes from the list and the filter can't be recovered.
+                    if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
+                        i_name = get_id("exportables_arm_filter_result", True).format(ob.name, ob.vs.action_filter, exportables_count)
+                    else:
+                        i_name = get_id("exportables_arm_no_slot_filter", True).format(ob.name, exportables_count)
                 elif ad.action_slot:
                     i_name = makeDisplayName(ob, actionSlotExportName(ad))
+                else:
+                    # CURRENT mode with no active slot: keep the row so its action
+                    # settings stay reachable instead of the row disappearing.
+                    i_name = makeDisplayName(ob)
         else:
             i_name = makeDisplayName(ob)
             i_icon = MakeObjectIcon(ob, prefix="OUTLINER_OB_")
@@ -1055,25 +1137,26 @@ class SmdInfo:
     def __init__(self, jobName : str):
         self.jobName = jobName
         self.upAxis = bpy.context.scene.vs.up_axis
-        self.amod = {} # Armature modifiers
+        self.forwardAxis = bpy.context.scene.vs.forward_axis
+        self.upAxisOffset = bpy.context.scene.vs.up_axis_offset
         self.materials_used = set() # printed to the console for users' benefit
 
         # DMX stuff
         self.attachments = []
         self.meshes = []
-        self.parent_chain = []
-        self.dmxShapes = collections.defaultdict(list)
         self.boneTransformIDs = {}
-
-        self.frameData = []
-        self.bakeInfo = []
 
         # boneIDs contains the ID-to-name mapping of *this* SMD's bones.
         # - Key: integer ID
         # - Value: bone name (storing object itself is not safe)
         self.boneIDs = {}
-        self.boneNameToID = {} # for convenience during export
         self.phantomParentIDs = {} # for bones in animation SMDs but not the ref skeleton
+
+    @property
+    def axisMat(self) -> Matrix:
+        """Axis correction an import applies. A property rather than a cached value:
+        a DMX file's own axisSystem can overwrite upAxis after the reader has started."""
+        return getImportAxisMat(self.upAxis, self.forwardAxis, self.upAxisOffset)
 
 class QcInfo:
     startTime = 0
@@ -1104,6 +1187,10 @@ class QcInfo:
         self.dir_stack = []
         # Every imported mesh with shape keys; global flex data is applied to all of them.
         self.flex_meshes = []
+        # Every imported reference mesh, in import order. A decompiled VTA is indexed
+        # against the whole model, so shape matching has to span all of them, not just
+        # the ref_mesh that happened to be imported last.
+        self.ref_meshes = []
 
     def cd(self):
         return os.path.join(self.root_filedir,*self.dir_stack)
@@ -1213,33 +1300,6 @@ def parse_order_vg_name(name: str) -> int | None:
     return n
 
 #
-#   IMPORT
-#
-
-
-def parse_hitbox_line(line: str):
-    """Parse a $hbox line. Returns dict with group, bone, min, max, rotation (degrees), scale or None."""
-    import re
-    pattern = (r'\$hbox\s+(\d+)\s+"([^"]+)"\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
-               r'(?:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+))?'
-               r'(?:\s+([-\d.]+))?')
-    match = re.match(pattern, line.strip())
-    if not match:
-        return None
-    g = match.groups()
-    return {
-        'group':    int(g[0]),
-        'bone':     g[1],
-        'min':      mathutils.Vector((float(g[2]), float(g[3]), float(g[4]))),
-        'max':      mathutils.Vector((float(g[5]), float(g[6]), float(g[7]))),
-        'rotation': (float(g[8] or 0), float(g[9] or 0), float(g[10] or 0)),
-        'scale':    float(g[11]) if g[11] is not None else -1.0,
-    }
-
-
-#
 #   GET
 #
 
@@ -1285,59 +1345,9 @@ def get_attachments(ob : bpy.types.Object | None) -> list[bpy.types.Object | Non
         
     return attchs
 
-# I forgot what I even made this for??? Unused function
-#def get_collision_cloth_bone_uses(arm_ob: bpy.types.Object, weight_threshold: float) -> set[str]:
-#    """Return names of bones that have at least one vertex with weight > weight_threshold
-#    in any COLLISION or CLOTHPROXY mesh associated with arm_ob (via Armature modifier
-#    or direct parenting).  Uses the evaluated (post-modifier) mesh so Mirror and other
-#    modifiers that affect vertex group assignments are respected."""
-#    result: set[str] = set()
-#    bone_names = {b.name for b in arm_ob.data.bones}
-#
-#    try:
-#        depsgraph = bpy.context.evaluated_depsgraph_get()
-#    except Exception:
-#        depsgraph = None
-#
-#    for obj in bpy.data.objects:
-#        if obj.type != 'MESH':
-#            continue
-#        if getattr(getattr(obj, 'vs', None), 'mesh_type', 'DEFAULT') not in ('COLLISION', 'CLOTHPROXY'):
-#            continue
-#        associated = obj.parent is arm_ob
-#        if not associated:
-#            for mod in obj.modifiers:
-#                if mod.type == 'ARMATURE' and mod.object is arm_ob:
-#                    associated = True
-#                    break
-#        if not associated:
-#            continue
-#
-#        eval_obj = obj.evaluated_get(depsgraph) if depsgraph is not None else None
-#        mesh_data = eval_obj.to_mesh() if eval_obj is not None else obj.data
-#        vg_source = eval_obj if eval_obj is not None else obj
-#
-#        try:
-#            vg_to_bone = {
-#                vg.index: vg.name
-#                for vg in vg_source.vertex_groups
-#                if vg.name in bone_names
-#            }
-#            if not vg_to_bone:
-#                continue
-#            for vert in mesh_data.vertices:
-#                for ge in vert.groups:
-#                    if ge.group in vg_to_bone and ge.weight > weight_threshold:
-#                        result.add(vg_to_bone[ge.group])
-#        finally:
-#            if eval_obj is not None:
-#                eval_obj.to_mesh_clear()
-#
-#    return result
-
 
 # Display metadata for each prefab type: (icon, singular label). The default
-# output filename suffix and file extension are resolved in export_smd.py.
+# output filename suffix and file extension are resolved in export/prefab.py.
 prefab_type_info = {
     'JIGGLEBONES':   ('BONE_DATA',        'Jigglebones'),
     'ATTACHMENTS':   ('EMPTY_ARROWS',     'Attachments'),
@@ -1349,8 +1359,10 @@ prefab_type_info = {
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs should be encoded into the model DMX (DME mode) rather than
     written to .qci files. DME embedding is a Source 1 concept only - it is always
-    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl."""
+    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl.
+    Embedding only happens in the DMX writer, so SMD export always uses file mode."""
     return (State.compiler != Compiler.MODELDOC
+            and State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
@@ -1380,7 +1392,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     # non-zero offset (a zero offset aims the bone directly, no attachment);
     # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
     # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
-    # writeDMX / PrefabExporter._collect_lookat_attachments.
+    # DmxWriter._write_procedural_bones / PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
     lookat_pairs: set[tuple[str, tuple]] = set()
     if State.compiler != Compiler.MODELDOC:
@@ -1461,22 +1473,15 @@ def get_armature(ob: bpy.types.Object | bpy.types.Bone | bpy.types.EditBone | bp
             return get_armature(ctx_obj)
         return None
 
-def get_collection_parent(ob, scene) -> bpy.types.Collection | None:
-    for collection in scene.collection.children_recursive:
-        if ob.name in collection.objects:
-            return collection
-    
-    if ob.name in scene.collection.objects:
-        return None
-    
-    return None
-
 def get_valid_vertexanimation_object(ob : bpy.types.Object | None) -> bpy.types.Object | bpy.types.Collection | None:
     if not is_mesh_compatible(ob): return None
-    
-    collection = get_collection_parent(ob, bpy.context.scene)
-    if collection is None or collection.vs.mute: return ob
-    else: return collection
+
+    for group in bpy.data.collections:
+        if group.vs.mute or is_bypassed_into_parent(group):
+            continue
+        if ob in get_collection_export_objects(group):
+            return group
+    return ob
 
 #
 #   DATA
@@ -1631,7 +1636,7 @@ def resolve_dme_delta_names(shape_name: str, corrective_names, delta_map: dict, 
 
     Returns (primary, extras, split_base). When split_base is set the exporter emits
     '<base>L' (the primary) and '<base>R'. Sole source of truth for DME delta naming:
-    used by writeDMX and by export validation, so the two cannot drift."""
+    used by the DMX writer and by export validation, so the two cannot drift."""
     if shape_name in corrective_names:
         return shape_name, [], None
     if shape_name in split_map:
@@ -1648,7 +1653,7 @@ def get_dme_delta_name_collisions(ob) -> dict:
     """Return {delta_name: [shapekey, ...]} for delta names claimed by more than one shape key.
 
     Sanitization and delta overrides can merge distinct shape keys onto one delta name,
-    which would otherwise surface as an opaque ID collision inside writeDMX."""
+    which would otherwise surface as an opaque ID collision inside the DMX writer."""
     sk = ob.data.shape_keys if ob.data and hasattr(ob.data, 'shape_keys') else None
     if not sk:
         return {}
@@ -1931,16 +1936,17 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
     
     arm_prop = armature.data.vs
     
+    scene = bpy.context.scene
+    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
+
     if arm_prop.ignore_bone_exportnames and not for_write:
-        return bone.name
+        # Still sanitize: the Blender name may contain chars invalid for the compiler.
+        return sanitize_string(data_bone.name, force_modeldoc=force_s2)
 
     def get_bone_side(b: bpy.types.Bone) -> str:
         bone_x = b.matrix_local.to_translation().x
-        return (arm_prop.bone_direction_naming_right if bone_x < 0 
+        return (arm_prop.bone_direction_naming_right if bone_x < 0
                 else arm_prop.bone_direction_naming_left)
-
-    scene = bpy.context.scene
-    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
     prefix_shortcuts = get_prefix_shortcut_map()
 
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
@@ -2033,7 +2039,7 @@ def is_curve(ob : bpy.types.Object | None) -> bool:
     return ob is not None and ob.type == 'CURVE'
 
 
-KST_ATTACHMENT_COLL = "KST Attachment References"
+PULSE_ATTACHMENT_COLL = "Pulse Attachment References"
 
 
 def _find_layer_collection(layer_coll, name: str):
@@ -2046,13 +2052,13 @@ def _find_layer_collection(layer_coll, name: str):
     return None
 
 
-def ensure_kst_collection_at_top(scene, view_layer):
-    """Get (or create) the hidden KST attachment collection and move it to the
+def ensure_pulse_collection_at_top(scene, view_layer):
+    """Get (or create) the hidden Pulse attachment collection and move it to the
     very top of the outliner, above all other scene children."""
     scene_coll = scene.collection
-    coll = bpy.data.collections.get(KST_ATTACHMENT_COLL)
+    coll = bpy.data.collections.get(PULSE_ATTACHMENT_COLL)
     if coll is None:
-        coll = bpy.data.collections.new(KST_ATTACHMENT_COLL)
+        coll = bpy.data.collections.new(PULSE_ATTACHMENT_COLL)
 
     children = list(scene_coll.children)
     if not (children and children[0] == coll):
@@ -2066,7 +2072,7 @@ def ensure_kst_collection_at_top(scene, view_layer):
             scene_coll.children.link(c)
 
     coll.hide_render = True
-    lc = _find_layer_collection(view_layer.layer_collection, KST_ATTACHMENT_COLL)
+    lc = _find_layer_collection(view_layer.layer_collection, PULSE_ATTACHMENT_COLL)
     if lc:
         lc.exclude = True
 
@@ -2075,7 +2081,7 @@ def ensure_kst_collection_at_top(scene, view_layer):
 
 # Jigglebone / hitbox serialization lives in the prefab_io subpackage (both import
 # and export, co-located per format). Re-exported here so existing
-# `from .utils import *` call sites in import_smd keep working unchanged.
+# `from ..utils import *` call sites in the imports package keep working unchanged.
 from .prefab_io import (
     import_jigglebones_from_dmx_elements,
     import_jigglebones_from_content,

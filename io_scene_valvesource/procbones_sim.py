@@ -27,8 +27,6 @@ import math
 import bpy
 from mathutils import Vector, Matrix, Quaternion
 
-# FIXME: When the driver bone is also the parent of the helper, the procedural simulation just borked. WHY!?
-
 # -- Per-bone simulation state -------------------------------------------------
 
 class BoneSimState:
@@ -468,15 +466,19 @@ def _sim_bone(arm_ob, pb, dt: float, is_s2: bool, arm_world_inv: Matrix) -> None
 # -- Procedural bone simulation ------------------------------------------------
 
 def _find_action_slot(action, slot_name: str):
-    """Return the ActionSlot matching slot_name (by any name form), or first slot."""
+    """Return the ActionSlot matching slot_name (by any name form), or None.
+
+    No first-slot fallback: an entry that names nothing, or names a slot that no
+    longer exists, is invalid rather than silently bound to whichever slot happens
+    to be first - that samples the wrong animation with no indication anything is wrong."""
     if not slot_name:
-        return action.slots[0] if action.slots else None
+        return None
     for s in action.slots:
         if (s.identifier == slot_name
                 or s.name_display == slot_name
                 or getattr(s, 'name', '') == slot_name):
             return s
-    return action.slots[0] if action.slots else None
+    return None
 
 
 def _get_action_fcurves(action, slot_name: str) -> list:
@@ -667,6 +669,12 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
 
     action = entry.action
     if not action:
+        return []
+
+    # Slotted actions must name a slot that resolves - see _find_action_slot.
+    if not getattr(action, 'is_action_legacy', True) and _find_action_slot(action, entry.action_slot_name) is None:
+        print(f"[ProcBones] Entry {entry_idx} ('{entry.helper_bone}'): action '{action.name}' "
+              f"has no slot named '{entry.action_slot_name}' - assign one in the Procedural Bones list")
         return []
 
     # A reference armature lets near-identical rigs (e.g. the same character with a

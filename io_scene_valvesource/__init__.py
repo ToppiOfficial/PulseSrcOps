@@ -43,13 +43,13 @@ for collection in [bpy.app.handlers.depsgraph_update_post, bpy.app.handlers.load
         if func.__module__.startswith(pkg_name):
             collection.remove(func)
 
-from . import datamodel, import_smd, export_smd, flex, procbones_sim, updater
+from . import datamodel, imports, exports, flex, procbones_sim, updater, icons
 from . import gui as GUI
 from .utils import *
 from .props import *
 
 def menu_func_import(self, context):
-    self.layout.operator(import_smd.SmdImporter.bl_idname, text=get_id("import_menuitem", True))
+    self.layout.menu("SMD_MT_ImportChoice", text=get_id("importmenu_title"))
 
 def menu_func_export(self, context):
     self.layout.menu("SMD_MT_ExportChoice", text=get_id("export_menuitem"))
@@ -157,6 +157,7 @@ _classes = (
     PrefabItem,
     AttachmentDisplayMeshItem,
     BoneNamePrefixItem,
+    MaterialPathItem,
 
     # Material Classes
     ValveSource_MaterialProps,
@@ -180,23 +181,34 @@ _classes = (
     ValveSource_SceneProps,
 
     # GUI - Scene
+    GUI.SMD_MT_ImportChoice,
     GUI.SMD_MT_ExportChoice,
     GUI.SMD_PT_Scene,
     GUI.SMD_MT_ConfigureScene,
     GUI.SMD_UL_ExportItems,
     GUI.SMD_UL_GroupItems,
+    GUI.SMD_UL_ActionExport,
+    GUI.SMD_UL_MaterialPaths,
+    GUI.SMD_OT_MaterialPathAdd,
+    GUI.SMD_OT_MaterialPathRemove,
+    GUI.SMD_PT_SceneMaterialPaths,
+    GUI.SMD_PT_SceneEncodingOptions,
+    GUI.SMD_PT_SceneTransform,
+    GUI.SMD_PT_SceneModelOptions,
     GUI.SMD_PT_Exportables,
     GUI.SMD_PT_ViewportSimulation,
 
     # Properties
     GUI.SMD_PT_Armature,
     GUI.SMD_PT_ArmatureData,
-    GUI.SMD_PT_Action,
     GUI.SMD_PT_Bone,
     GUI.SMD_PT_BoneData,
     GUI.SMD_PT_Mesh,
     GUI.SMD_PT_Material,
     GUI.SMD_PT_Shapekey,
+    GUI.SMD_PT_DmeFlexControllers,
+    GUI.SMD_PT_DmeFlexRules,
+    GUI.SMD_PT_DmeDeltaMap,
     GUI.SMD_PT_Vertexmap,
     GUI.SMD_PT_Vertexfloatmap,
     GUI.SMD_PT_Vertexanimations,
@@ -242,6 +254,7 @@ GUI.SMD_PT_Jigglebones,
     GUI.SMD_UL_DmeFlexControllers,
     GUI.SMD_UL_DmeFlexRules,
     GUI.SMD_MT_FlexControllerSpecials,
+    GUI.SMD_MT_FlexRuleSpecials,
     GUI.SMD_OT_AutoAssignFlexGroups,
     GUI.SMD_OT_AddFlexController,
     GUI.SMD_OT_AddAllFlexControllers,
@@ -274,6 +287,7 @@ GUI.SMD_PT_Jigglebones,
     GUI.SMD_OT_AssignBoneRotExportOffset,
     GUI.SMD_OT_CopySourceBoneProps,
     GUI.SMD_OT_CopyJigglebonesFromArmature,
+    GUI.SMD_OT_CopyBonePropsFromArmature,
     GUI.SMD_OT_ResetJiggleSimulation,
     GUI.SMD_UL_AttachmentDisplayMeshes,
     GUI.SMD_OT_AddAttachmentDisplayMesh,
@@ -292,9 +306,13 @@ GUI.SMD_PT_Jigglebones,
     flex.InsertUUID,
 
     # Export and Import
-    export_smd.SmdExporter,
-    export_smd.PrefabExporter,
-    import_smd.SmdImporter,
+    exports.SmdExporter,
+    exports.PrefabExporter,
+    imports.ImportDMX,
+    imports.ImportSMD,
+    imports.ImportQC,
+    imports.ImportVMDL,
+    imports.ImportPrefab,
 
     # Updater
     updater.SMD_OT_CheckForUpdates,
@@ -305,6 +323,8 @@ GUI.SMD_PT_Jigglebones,
 )
 
 def register():
+    icons.register()
+
     for cls in _classes:
         bpy.utils.register_class(cls)
 
@@ -342,6 +362,7 @@ def register():
     State.hook_events()
     bpy.app.handlers.depsgraph_update_post.append(_on_armature_data_updated)
     bpy.app.handlers.load_post.append(_on_blend_load_refresh_hitbox_snapshot)
+    bpy.app.handlers.load_post.append(_on_blend_load_migrate_material_paths)
 
     procbones_sim.register()
 
@@ -375,6 +396,8 @@ def unregister():
         bpy.app.handlers.depsgraph_update_post.remove(_on_armature_data_updated)
     if _on_blend_load_refresh_hitbox_snapshot in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_blend_load_refresh_hitbox_snapshot)
+    if _on_blend_load_migrate_material_paths in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_blend_load_migrate_material_paths)
     State.unhook_events()
 
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
@@ -399,6 +422,8 @@ def unregister():
     del bpy.types.Text.vs
     del bpy.types.Bone.vs
     del bpy.types.Material.vs
+
+    icons.unregister()
 
 if __name__ == "__main__":
     register()

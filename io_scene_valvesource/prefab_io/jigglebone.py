@@ -186,14 +186,14 @@ def import_jigglebones_from_kv3(kv_doc, armature: 'object') -> 'tuple[int, list]
 
 
 # -----------------------------------------------------------------------------
-# DME (model-DMX / KitsuneMDL) - structured codec, writer + reader adjacent
+# DME (model-DMX / PulseMDL) - structured codec, writer + reader adjacent
 # -----------------------------------------------------------------------------
 
 def write_dme_attrs(elem, bone) -> None:
     """Populate a DmeJiggleBone element from a bone's jiggle_* properties.
 
     Mirrors the flag-gating and unit conversions of ``qc_block_lines`` so the DME
-    encoding matches the .qci output. Attribute names/units match KitsuneMDL's
+    encoding matches the .qci output. Attribute names/units match PulseMDL's
     CDmeJiggleBone. Inverse of ``import_jigglebones_from_dmx_elements`` below.
     """
     bvs = bone.vs

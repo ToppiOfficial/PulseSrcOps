@@ -227,8 +227,7 @@ def draw_prefs(layout, prefs):
             sub.label(text=get_id("updater_available", True).format(_info.label), icon='IMPORT')
         return
 
-    box = layout.box()
-    col = box.column()
+    col = layout.column()
     col.prop(prefs, "update_auto_check")
 
     row = col.row(align=True)
