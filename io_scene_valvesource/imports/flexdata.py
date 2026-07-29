@@ -5,8 +5,6 @@ Named flexdata rather than flex to stay distinct from the add-on's top-level
 `flex.py`, which holds the shape-key operators.
 """
 
-import re
-
 import bpy
 
 
@@ -110,10 +108,15 @@ def parse_flex_text(text: str) -> dict:
             localvars.extend(line[1:])
             continue
 
-        if kw.startswith('%'):
-            m = re.match(r'^\s*%(\w+)\s*=\s*(.+?)\s*$', line_str)
-            if m:
-                expressions.append((m.group(1), m.group(2).strip()))
+        if line_str.startswith('%'):
+            # Everything up to the first '=' is the delta name (which may contain spaces,
+            # e.g. "eyes look up"); the rest is the expression.
+            body = line_str[1:]
+            if '=' in body:
+                name, expr = body.split('=', 1)
+                name, expr = name.strip(), expr.strip()
+                if name and expr:
+                    expressions.append((name, expr))
             continue
 
     return {
@@ -158,7 +161,20 @@ def apply_flex_text_to_object(ob, parsed: dict) -> tuple[int, int]:
             existing_lv.add(varname)
             n_rules += 1
 
+    controller_by_name = {i.controller_name: i for i in ob.vs.dme_flexcontrollers if i.controller_name}
+    shape_keys = ob.data.shape_keys if getattr(ob, "data", None) else None
+    shape_key_names = {kb.name for kb in shape_keys.key_blocks} if shape_keys else set()
     for delta_name, expr in expressions:
+        # A bare "%<shapekey> = <controller>" is a direct assignment: store it on the
+        # controller's shapekey field rather than as a standalone expression rule - but
+        # only when the delta actually names a shape key on this mesh. Otherwise keep it
+        # a regular expression rule.
+        target = expr.strip()
+        if target in controller_by_name and delta_name in shape_key_names:
+            controller_by_name[target].shapekey = delta_name
+            n_controllers += 1
+            continue
+
         existing = next(
             (r for r in ob.vs.dme_flex_rules if r.rule_type == 'EXPRESSION' and r.name == delta_name),
             None,
@@ -176,6 +192,75 @@ def apply_flex_text_to_object(ob, parsed: dict) -> tuple[int, int]:
         ob.vs.flex_controller_mode = 'DME'
 
     return n_controllers, n_rules
+
+
+def _fmt_num(v: float) -> str:
+    return f"{v:g}"
+
+
+def serialize_flex_text(ob) -> tuple[str, int]:
+    """Serialize ob's DME flex controllers and rules to QC-style text.
+
+    Inverse of apply_flex_text_to_object: only the tokens parse_flex_text can read back
+    (flexcontroller / flexpair / localvar / %expression) are emitted as live directives.
+    Other rule types (passthrough, domination, corrective) are written as // comments so
+    they stay visible for editing but are ignored on re-import.
+
+    Returns (text, n_uneditable) where n_uneditable is how many rules were commented out
+    because the text importer can't round-trip them."""
+    lines = [f'// DME flex controllers and rules for "{ob.name}"']
+    n_uneditable = 0
+
+    # --- Flex controllers -----------------------------------------------------
+    controllers = [fc for fc in ob.vs.dme_flexcontrollers if fc.controller_name]
+    stereo = [fc.controller_name for fc in controllers if fc.stereo]
+    direct = [(fc.shapekey, fc.controller_name) for fc in controllers if fc.shapekey]
+
+    if controllers:
+        # Pad the group column so the names line up in a readable table.
+        gw = max(len(fc.resolved_flexgroup()) for fc in controllers)
+        lines += ["", "// === Flex Controllers ==="]
+        for fc in controllers:
+            group = fc.resolved_flexgroup().ljust(gw)
+            lines.append(
+                f"flexcontroller {group} range {_fmt_num(fc.flex_min)} {_fmt_num(fc.flex_max)} {fc.controller_name}"
+            )
+
+    if stereo:
+        lines += ["", "// === Stereo (L/R split) ==="]
+        lines += [f"flexpair {name}" for name in stereo]
+
+    # --- Flex rules -----------------------------------------------------------
+    localvars = [r.name for r in ob.vs.dme_flex_rules if r.rule_type == 'LOCALVAR' and r.name]
+    expressions = [r for r in ob.vs.dme_flex_rules if r.rule_type == 'EXPRESSION' and r.name]
+
+    if direct:
+        # Direct shapekey assignments: %<shapekey> = <controller> (a plain passthrough).
+        lines += ["", "// === Direct Assignments (shapekey = controller) ==="]
+        lines += [f"%{shapekey} = {name}" for shapekey, name in direct]
+
+    if localvars:
+        lines += ["", "// === Local Variables ==="]
+        lines += [f"localvar {name}" for name in localvars]
+
+    if expressions:
+        lines += ["", "// === Expressions ==="]
+        lines += [f"%{r.name} = {r.expression}" for r in expressions]
+
+    # Rule types the text importer can't round-trip: keep them visible as comments.
+    other = [r for r in ob.vs.dme_flex_rules if r.rule_type in ('PASSTHROUGH', 'DOMINATION', 'CORRECTIVE')]
+    if other:
+        lines += ["", "// === Not re-imported (edit in the UI) ==="]
+        for r in other:
+            n_uneditable += 1
+            if r.rule_type == 'PASSTHROUGH':
+                lines.append(f"// passthrough {r.name}")
+            elif r.rule_type == 'DOMINATION':
+                lines.append(f"// domination dominators=[{r.dominator_names}] suppressed=[{r.suppressed_names}]")
+            else:
+                lines.append(f"// corrective {r.name} components=[{r.components}]")
+
+    return "\n".join(lines) + "\n", n_uneditable
 
 
 def populate_dme_flex_from_dmx(ob: bpy.types.Object, combo_op) -> None:

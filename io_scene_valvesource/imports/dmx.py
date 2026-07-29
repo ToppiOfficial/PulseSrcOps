@@ -4,6 +4,7 @@ Extracted from readDMX. Everything here is a faithful port; behaviour
 changes belong in the build half.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -11,7 +12,7 @@ from mathutils import Matrix, Vector, Quaternion
 
 from .. import datamodel, ordered_set
 from ..utils import (REF, ANIM, PHYS, axes_lookup, implicit_bone_name, dmx_version,
-                     Compiler, getDmxKeywords)
+                     Compiler, getDmxKeywords, vertex_float_maps)
 from .records import (ImportedAnim, ImportedAttachment, ImportedBone, ImportedChannel,
                       ImportedFace, ImportedFile, ImportedLoopLayer, ImportedMesh,
                       ImportedShape, ImportedSkeleton)
@@ -167,8 +168,19 @@ def read_skeleton(parsed: ParsedDmx) -> ImportedSkeleton:
 # Mesh
 # ---------------------------------------------------------------------------
 
-def _is_cloth_enable_map(name: str) -> bool:
-    return name.startswith("cloth_enable$")
+_CLOTH_STREAM_SUFFIX = re.compile(r"\$[0-9]+$")
+_CLOTH_COLLISION_LAYER = re.compile(r"cloth_collision_layer_([0-9]|1[0-5])$")
+
+
+def _cloth_map_base(name: str) -> str | None:
+    """Vertex group name for a cloth vertex stream ('cloth_mass$0' -> 'cloth_mass'),
+    or None when the stream isn't a cloth map. Mirrors findDmxClothVertexGroups."""
+    base = _CLOTH_STREAM_SUFFIX.sub("", name)
+    if (base in vertex_float_maps
+            or base.startswith("cloth_vertex_set_")
+            or _CLOTH_COLLISION_LAYER.match(base)):
+        return base
+    return None
 
 
 def _classify_vertex_map(values) -> str | None:
@@ -240,7 +252,7 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
         values = DmeVertexData.get(vertexMap)
         if not isinstance(values, list) or len(values) == 0:
             continue
-        if isinstance(values[0], float) and _is_cloth_enable_map(vertexMap):
+        if isinstance(values[0], float) and _cloth_map_base(vertexMap):
             continue  # imported as vertex groups instead
 
         kind = _classify_vertex_map(values)
@@ -265,12 +277,16 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
     _read_weights(parsed, DmeVertexData, mesh)
     _read_faces(DmeMesh, mesh)
 
-    for cloth_name in [n for n in vertex_format if _is_cloth_enable_map(n)]:
+    for stream in vertex_format:
+        base = _cloth_map_base(stream)
+        if base is None:
+            continue
         mesh.cloth_groups.append((
-            cloth_name,
-            DmeVertexData.get(cloth_name),
-            DmeVertexData.get(cloth_name + "Indices"),
+            base,
+            DmeVertexData.get(stream),
+            DmeVertexData.get(stream + "Indices"),
         ))
+        parsed.version_bumps.append(dmx_version(9, 22))  # cloth streams are Source 2 only
 
     if keywords['balance'] in vertex_format:
         mesh.balance = (DmeVertexData[keywords['balance']],

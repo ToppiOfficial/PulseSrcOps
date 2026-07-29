@@ -8,12 +8,15 @@ from ..imports import ImportDMX, ImportSMD, ImportQC, ImportVMDL, ImportPrefab
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
+    SMD_OT_ExportFlexControllersToText,
     SMD_OT_CombineStereoFlexControllers,
     SMD_OT_SortFlexControllers,
     SMD_OT_AutoAssignFlexGroups,
     SMD_OT_CopyFlexControllers,
     SMD_OT_ClearFlexControllers,
     SMD_OT_MigrateQCDeltasToOverrides,
+    SMD_OT_FlexControllerRegexReplace,
+    SMD_OT_DeltaOverrideRegexReplace,
     SMD_OT_FlexRuleRegexReplace,
     SMD_OT_ClearFlexRules,
     SMD_OT_ProcBoneDuplicate,
@@ -129,10 +132,13 @@ class SMD_MT_FlexControllerSpecials(Menu):
         layout = self.layout
         layout.operator(SMD_OT_AddAllFlexControllers.bl_idname, icon='IMPORT',      text=get_id('label_add_all', True))
         layout.operator(SMD_OT_ImportFlexControllersFromText.bl_idname, icon='TEXT', text=get_id('label_import_flex_text', True))
+        layout.operator(SMD_OT_ExportFlexControllersToText.bl_idname, icon='TEXT', text=get_id('label_export_flex_text', True))
         layout.operator(SMD_OT_SortFlexControllers.bl_idname,   icon='SORTALPHA',   text=get_id('label_sort_by_name', True))
         layout.operator(SMD_OT_AutoAssignFlexGroups.bl_idname,  icon='GROUP')
         layout.operator(SMD_OT_CombineStereoFlexControllers.bl_idname, icon='MOD_MIRROR', text=get_id('label_combine_stereo', True))
         layout.operator(SMD_OT_CopyFlexControllers.bl_idname,   icon='PASTEDOWN')
+        layout.separator()
+        layout.operator(SMD_OT_FlexControllerRegexReplace.bl_idname, icon='VIEWZOOM')
         layout.separator()
         layout.operator(SMD_OT_MigrateQCDeltasToOverrides.bl_idname, icon='FORWARD', text="Migrate QC Deltas to Overrides")
         layout.separator()

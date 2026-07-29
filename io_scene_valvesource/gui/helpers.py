@@ -13,6 +13,25 @@ def _mesh_type_allows(ob, feature: str) -> bool:
     return False  # COLLISION blocks everything
 
 
+# Keyword -> flexgroup enum, checked in order so more specific groups win (eyelid before eyes).
+_FLEX_GROUP_KEYWORDS = (
+    ('EYELID', ('lid', 'blink', 'wink', 'squint')),
+    ('EYES',   ('eye', 'pupil', 'iris', 'gaze', 'look')),
+    ('BROW',   ('brow', 'forehead')),
+    ('CHEEK',  ('cheek', 'puff', 'dimple')),
+    ('MOUTH',  ('mouth', 'lip', 'smile', 'frown', 'jaw', 'chin', 'teeth', 'tongue', 'grin', 'pucker', 'kiss', 'sneer')),
+)
+
+
+def _guess_flex_group(name: str) -> str:
+    """Guess a FlexControllerItem.flexgroup enum value from a shape key name. Returns 'DEFAULT' if nothing matches."""
+    n = (name or '').lower()
+    for group, keywords in _FLEX_GROUP_KEYWORDS:
+        if any(k in n for k in keywords):
+            return group
+    return 'DEFAULT'
+
+
 def _draw_proc_bone_context_menu(self, context):
     if context.mode == 'POSE' and context.selected_pose_bones:
         arm_ob = get_armature(context.object)

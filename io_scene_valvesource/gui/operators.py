@@ -5,7 +5,7 @@ from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, ve
                      get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta,
                      get_addon_prefs)
 from .. import procbones_sim as _procbones_sim
-from .helpers import _get_or_create_proc_tol_fcurve, _get_entry_proc_tol
+from .helpers import _get_or_create_proc_tol_fcurve, _get_entry_proc_tol, _guess_flex_group
 
 
 SMD_OT_CreateVertexMap_idname : str = "smd.vertex_map_create_"
@@ -203,6 +203,8 @@ class SMD_OT_AddFlexController(Operator):
         if hasattr(ob.data, 'shape_keys') and ob.active_shape_key_index is not None and ob.active_shape_key_index > 0:
             new_item.shapekey = ob.data.shape_keys.key_blocks[ob.active_shape_key_index].name
             new_item.raw_delta_name = new_item.shapekey
+            new_item.controller_name = new_item.shapekey  # sanitised by the property's update callback
+            new_item.flexgroup = _guess_flex_group(new_item.shapekey)
         else:
             new_item.shapekey = ""
 
@@ -251,6 +253,7 @@ class SMD_OT_AddAllFlexControllers(Operator):
             new_item.raw_delta_name = key.name
             if self.auto_name:
                 new_item.controller_name = key.name  # sanitised by the property's update callback
+                new_item.flexgroup = _guess_flex_group(key.name)
             added += 1
 
         if added:
@@ -306,6 +309,62 @@ class SMD_OT_ImportFlexControllersFromText(Operator):
             return {'CANCELLED'}
 
         self.report({'INFO'}, f"Imported {n_controllers} controller(s), {n_rules} rule(s)")
+        return {'FINISHED'}
+
+
+class SMD_OT_ExportFlexControllersToText(Operator):
+    bl_idname = "smd.export_flex_to_text"
+    bl_label = "Export to Text Block"
+    bl_description = get_id("op_export_flex_text_tip")
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    text_block: StringProperty(name="Text Block", description=get_id("op_export_flex_text_block_tip"))
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        ob = context.object
+        return bool(ob and hasattr(ob, "vs")
+                    and (len(ob.vs.dme_flexcontrollers) or len(ob.vs.dme_flex_rules)))
+
+    def invoke(self, context, event):
+        if not self.text_block:
+            for area in context.screen.areas:
+                if area.type == 'TEXT_EDITOR' and area.spaces.active.text:
+                    self.text_block = area.spaces.active.text.name
+                    break
+            if not self.text_block:
+                self.text_block = f"flex_{context.object.name}.txt"
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, context):
+        self.layout.prop_search(self, "text_block", bpy.data, "texts", text="")
+
+    def execute(self, context) -> set:
+        from ..imports.flexdata import serialize_flex_text
+
+        ob = context.object
+        name = self.text_block.strip() or f"flex_{ob.name}.txt"
+
+        body, n_uneditable = serialize_flex_text(ob)
+
+        text = bpy.data.texts.get(name)
+        if not text:
+            text = bpy.data.texts.new(name)
+        text.clear()
+        text.write(body)
+        # Fake user so Blender keeps the block after the flex data is cleared from the UI.
+        text.use_fake_user = True
+
+        # Move the data into the text block: clear the UI collections (delta overrides stay).
+        ob.vs.dme_flexcontrollers.clear()
+        ob.vs.dme_flexcontrollers_index = 0
+        ob.vs.dme_flex_rules.clear()
+        ob.vs.dme_flex_rules_index = 0
+
+        if n_uneditable:
+            self.report({'WARNING'}, f"Exported to '{text.name}'; {n_uneditable} rule(s) written as comments and won't re-import")
+        else:
+            self.report({'INFO'}, f"Exported flex data to '{text.name}'")
         return {'FINISHED'}
 
 
@@ -795,6 +854,132 @@ class SMD_OT_FlexRuleRegexReplace(Operator):
 
         if total:
             self.report({'INFO'}, f"Made {total} substitution(s) across flex rules")
+        else:
+            self.report({'INFO'}, "No matches found")
+        return {'FINISHED'}
+
+
+class SMD_OT_FlexControllerRegexReplace(Operator):
+    bl_idname = "smd.flex_controller_regex_replace"
+    bl_label = "Regex Find/Replace in Flex Controllers"
+    bl_description = "Apply a regex find/replace across flex controller fields on the active object"
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    pattern     : StringProperty(name="Pattern",     description="Regex pattern to search for")
+    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \\1)")
+    field_name     : BoolProperty(name="Controller Name", description="Apply to Controller Name fields", default=True)
+    field_shapekey : BoolProperty(name="Shape Key",       description="Apply to ShapeKey fields", default=True)
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return bool(context.object and getattr(context.object, 'vs', None) and len(context.object.vs.dme_flexcontrollers) > 0)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.prop(self, 'pattern')
+        layout.prop(self, 'replacement')
+        layout.separator(factor=0.5)
+        layout.label(text="Apply to fields:")
+        col = layout.column(align=True)
+        col.prop(self, 'field_name')
+        col.prop(self, 'field_shapekey')
+
+    def execute(self, context) -> set:
+        if not self.pattern:
+            self.report({'WARNING'}, "Pattern is empty")
+            return {'CANCELLED'}
+        try:
+            compiled = _re.compile(self.pattern)
+        except _re.error as e:
+            self.report({'ERROR'}, f"Invalid regex: {e}")
+            return {'CANCELLED'}
+
+        fields = []
+        if self.field_name:     fields.append('controller_name')
+        if self.field_shapekey: fields.append('shapekey')
+
+        if not fields:
+            self.report({'WARNING'}, "No fields selected")
+            return {'CANCELLED'}
+
+        total = 0
+        for ctrl in context.object.vs.dme_flexcontrollers:
+            for field in fields:
+                old_val = getattr(ctrl, field, '')
+                new_val, n = compiled.subn(self.replacement, old_val)
+                if n:
+                    setattr(ctrl, field, new_val)
+                    total += n
+
+        if total:
+            self.report({'INFO'}, f"Made {total} substitution(s) across flex controllers")
+        else:
+            self.report({'INFO'}, "No matches found")
+        return {'FINISHED'}
+
+
+class SMD_OT_DeltaOverrideRegexReplace(Operator):
+    bl_idname = "smd.delta_override_regex_replace"
+    bl_label = "Regex Find/Replace in Delta Overrides"
+    bl_description = "Apply a regex find/replace across delta name override fields on the active object"
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    pattern     : StringProperty(name="Pattern",     description="Regex pattern to search for")
+    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \\1)")
+    field_shapekey   : BoolProperty(name="Shape Key",  description="Apply to Shape Key fields", default=True)
+    field_delta_name : BoolProperty(name="Delta Name", description="Apply to Delta Name fields", default=True)
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return bool(context.object and getattr(context.object, 'vs', None) and len(context.object.vs.dme_delta_overrides) > 0)
+
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self, width=360)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.prop(self, 'pattern')
+        layout.prop(self, 'replacement')
+        layout.separator(factor=0.5)
+        layout.label(text="Apply to fields:")
+        col = layout.column(align=True)
+        col.prop(self, 'field_shapekey')
+        col.prop(self, 'field_delta_name')
+
+    def execute(self, context) -> set:
+        if not self.pattern:
+            self.report({'WARNING'}, "Pattern is empty")
+            return {'CANCELLED'}
+        try:
+            compiled = _re.compile(self.pattern)
+        except _re.error as e:
+            self.report({'ERROR'}, f"Invalid regex: {e}")
+            return {'CANCELLED'}
+
+        fields = []
+        if self.field_shapekey:   fields.append('shapekey')
+        if self.field_delta_name: fields.append('delta_name')
+
+        if not fields:
+            self.report({'WARNING'}, "No fields selected")
+            return {'CANCELLED'}
+
+        total = 0
+        for ov in context.object.vs.dme_delta_overrides:
+            for field in fields:
+                old_val = getattr(ov, field, '')
+                new_val, n = compiled.subn(self.replacement, old_val)
+                if n:
+                    setattr(ov, field, new_val)
+                    total += n
+
+        if total:
+            self.report({'INFO'}, f"Made {total} substitution(s) across delta overrides")
         else:
             self.report({'INFO'}, "No matches found")
         return {'FINISHED'}

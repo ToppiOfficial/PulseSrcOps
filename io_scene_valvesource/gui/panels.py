@@ -26,6 +26,7 @@ from .operators import (
     SMD_OT_AddDeltaOverride,
     SMD_OT_RemoveDeltaOverride,
     SMD_OT_ClearDeltaOverrides,
+    SMD_OT_DeltaOverrideRegexReplace,
     SMD_OT_AddVertexAnimation,
     SMD_OT_RemoveVertexAnimation,
     SMD_OT_GenerateVertexAnimationQCSnippet,
@@ -1216,6 +1217,8 @@ class SMD_PT_DmeDeltaMap(_DmeFlexPanel):
         ov_btn_col = ov_row.column(align=True)
         ov_btn_col.operator(SMD_OT_AddDeltaOverride.bl_idname, icon='ADD', text='')
         ov_btn_col.operator(SMD_OT_RemoveDeltaOverride.bl_idname, icon='REMOVE', text='')
+        ov_btn_col.separator()
+        ov_btn_col.operator(SMD_OT_DeltaOverrideRegexReplace.bl_idname, icon='VIEWZOOM', text='')
         ov_btn_col.separator()
         ov_btn_col.operator(SMD_OT_ClearDeltaOverrides.bl_idname, icon='TRASH', text='')
 

@@ -615,18 +615,37 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
 
     if imesh.cloth_groups:
         deformLayer = bm.verts.layers.deform.verify()
+        remaps = {r.group: r for r in ob.vs.vertex_map_remaps}
+        imported = 0
         for cloth_name, cloth_data, cloth_indices in imesh.cloth_groups:
-            vg_index = deform_group_names.add(cloth_name)
-            if cloth_data is None or cloth_indices is None:
+            if not cloth_data or not cloth_indices:
                 ctx.warning(f"Cloth group '{cloth_name}' has no data - skipped")
                 continue
-            loop_i = 0
-            for face in bm.faces:
-                for loop in face.loops:
-                    w = cloth_data[cloth_indices[loop_i]]
-                    loop.vert[deformLayer][vg_index] = w
-                    loop_i += 1
-        print(f"- Imported {len(imesh.cloth_groups)} cloth-enable vertex group(s)")
+            vg_index = deform_group_names.add(cloth_name)
+
+            # Vertex group weights are 0-1, so the stream's real range moves to the remap
+            # entry the exporter reads back.
+            lo, hi = min(cloth_data), max(cloth_data)
+            span = hi - lo
+            remap = remaps.get(cloth_name)
+            if remap is None:
+                remap = ob.vs.vertex_map_remaps.add()
+                remap.group = cloth_name
+                remaps[cloth_name] = remap
+            remap.min, remap.max = lo, hi
+
+            # Driven off imesh.faces rather than bm.faces so a face the bmesh rejected
+            # doesn't shift every later loop's value.
+            for iface in imesh.faces:
+                for loop in iface.loops:
+                    value = cloth_data[cloth_indices[loop]]
+                    vert = bm.verts[imesh.position_indices[loop]]
+                    vert[deformLayer][vg_index] = (value - lo) / span if span else 1.0
+            imported += 1
+
+        if imported:
+            ob.vs.mesh_type = 'CLOTHPROXY'
+            print(f"- Imported {imported} cloth vertex group(s) as a cloth proxy mesh")
 
     for groupName in deform_group_names:
         ob.vertex_groups.new(name=groupName)

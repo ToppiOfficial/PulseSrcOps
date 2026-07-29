@@ -880,6 +880,18 @@ _data = {
         'en': "Blender text block containing the flexcontroller / localvar / %expression definitions",
         'ja': "flexcontroller / localvar / %式の定義を含むBlenderテキストブロック",
     },
+    'label_export_flex_text': {
+        'en': "Export to Text Block",
+        'ja': "テキストブロックへエクスポート",
+    },
+    'op_export_flex_text_tip': {
+        'en': "Write flex controllers and rules to a Blender text block as QC-style text for editing, then clear them from the list (delta overrides are kept). Re-import with 'Import from Text Block'",
+        'ja': "フレックスコントローラーとルールをQC形式テキストとしてBlenderテキストブロックに書き出して編集できるようにし、リストからは削除します（デルタオーバーライドは保持）。「テキストブロックからインポート」で読み込めます",
+    },
+    'op_export_flex_text_block_tip': {
+        'en': "Name of the Blender text block to write to; created if it does not exist",
+        'ja': "書き込み先のBlenderテキストブロック名。存在しない場合は作成されます",
+    },
     'label_all_attachments': {
         'en': "All Attachments",
         'ja': "すべてのアタッチメント",
