@@ -634,6 +634,12 @@ class ImportVMDL(ImporterBase):
     def execute(self, context):
         if not self.properties.contentPathChosen:
             self.properties.contentPathChosen = True
+            # A VMDL always lives under its content root, so start the browser there
+            # instead of wherever Blender was last.
+            content = bpy.path.abspath(self.properties.contentPath) if self.properties.contentPath else ""
+            if content and os.path.isdir(content):
+                self.properties.directory = os.path.join(content, "")
+                self.properties.filepath = self.properties.directory
             context.window_manager.fileselect_add(self)
             return {'RUNNING_MODAL'}
         return super().execute(context)

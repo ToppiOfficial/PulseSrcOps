@@ -626,6 +626,10 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
             # Vertex group weights are 0-1, so the stream's real range moves to the remap
             # entry the exporter reads back.
             lo, hi = min(cloth_data), max(cloth_data)
+            if lo == hi:
+                # A constant stream would give a zero-width range and an unpaintable
+                # group, so anchor it at 0: full weight is the value, no weight is off.
+                lo = 0.0
             span = hi - lo
             remap = remaps.get(cloth_name)
             if remap is None:

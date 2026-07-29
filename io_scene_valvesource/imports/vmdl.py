@@ -163,6 +163,7 @@ def _read_document(ctx, smd, qc, filepath: str, rot_mode: str, seen: set) -> boo
     # Meshes do not depend on a skeleton - an arms/mesh-only VMDL has no Skeleton node
     # at all, and skipping its RenderMeshList would import nothing.
     _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode)
+    _read_cloth_proxy_meshes(ctx, qc, root_node, filepath, filename, rot_mode)
 
     arm = qc.a or (ctx.smd.a if ctx.smd else None)
     if not arm:
@@ -290,6 +291,25 @@ def _build_skeleton(ctx, smd, qc, skeleton_node):
     return arm
 
 
+def _import_mesh_ref(ctx, qc, dmx_ref, filepath, filename, rot_mode, label) -> None:
+    """Resolve one mesh file reference and import it, at most once per VMDL tree.
+
+    The importer's Bone Handling choice applies rather than a forced VALIDATE. A Source 2
+    mesh is often skinned to the art rig, not the model skeleton - AnimConstraints bridge
+    the two at compile time - so validating drops every one of its bones.
+    """
+    if not dmx_ref:
+        return
+    dmx_path = resolve_content_ref(filepath, dmx_ref, _content_path(ctx))
+    if not dmx_path:
+        ctx.warning(f"{filename}: could not find {label} '{dmx_ref}'")
+        return
+    if dmx_path in qc.imported_smds:
+        return
+    qc.imported_smds.append(dmx_path)
+    ctx.num_files_imported += ctx.readDMX(dmx_path, qc.upAxis, rot_mode, False, REF)
+
+
 def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> None:
     render_mesh_list = root_node.get(recursive=False, _class="RenderMeshList")
     if not render_mesh_list:
@@ -297,21 +317,17 @@ def _read_render_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> Non
     for rmf in render_mesh_list.children:
         if rmf.properties.get("_class") != "RenderMeshFile":
             continue
-        dmx_ref = rmf.properties.get("filename", "")
-        if not dmx_ref:
-            continue
-        dmx_path = resolve_content_ref(filepath, dmx_ref, _content_path(ctx))
-        if not dmx_path:
-            ctx.warning(f"{filename}: could not find DMX '{dmx_ref}'")
-            continue
-        if dmx_path in qc.imported_smds:
-            continue
-        qc.imported_smds.append(dmx_path)
-        # The importer's Bone Handling choice applies here rather than a forced
-        # VALIDATE. A Source 2 render mesh is often skinned to the art rig, not the
-        # model skeleton - AnimConstraints bridge the two at compile time - so
-        # validating drops every one of its bones.
-        ctx.num_files_imported += ctx.readDMX(dmx_path, qc.upAxis, rot_mode, False, REF)
+        _import_mesh_ref(ctx, qc, rmf.properties.get("filename", ""),
+                         filepath, filename, rot_mode, "DMX")
+
+
+def _read_cloth_proxy_meshes(ctx, qc, root_node, filepath, filename, rot_mode) -> None:
+    """ClothProxyMeshFile sits under Softbody > ClothVertexMap, hence the recursive search.
+    Its DMX carries the cloth_* vertex streams, which the DMX reader turns into vertex
+    groups and a CLOTHPROXY mesh type."""
+    for node in root_node.find_all(recursive=True, _class="ClothProxyMeshFile"):
+        _import_mesh_ref(ctx, qc, node.properties.get("filename", ""),
+                         filepath, filename, rot_mode, "cloth proxy DMX")
 
 
 def read_attachments(ctx, coll, arm, root_node, filename) -> int:
