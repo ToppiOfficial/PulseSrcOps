@@ -152,7 +152,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
 
     smd_format : EnumProperty(name=get_id("smd_format"), description=get_id("smd_format_tip"), items=(('SOURCE', "Source", "Source Engine (Half-Life 2)"), ("GOLDSOURCE", "GoldSrc", "GoldSrc engine (Half-Life 1)")), default="SOURCE")
 
-    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange")], default='DMX')
+    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange"), ('FBX', "FBX", "Autodesk FBX (Source 2 / external tools)")], default='DMX')
     up_axis : EnumProperty(name=get_id("up_axis"), items=axes, default='Z', description=get_id("up_axis_tip"))
     up_axis_offset : FloatProperty(name=get_id("up_axis_offset"), description=get_id("up_axis_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     forward_axis : EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("up_axis_tip"))

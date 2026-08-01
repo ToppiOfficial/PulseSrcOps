@@ -137,7 +137,7 @@ class SMD_PT_Scene(Panel):
                 sub.prop(scene.vs, "dmx_encoding", text="")
                 sub.prop(scene.vs, "dmx_format", text="")
                 sub.enabled = not sub.alert
-        else:
+        elif scene.vs.export_format == 'SMD':
             row = l.split(factor=0.33)
             row.label(text=get_id("smd_format", True) + ":")
             row.row().prop(scene.vs, "smd_format", expand=True)

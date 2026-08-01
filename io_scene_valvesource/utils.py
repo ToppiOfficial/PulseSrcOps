@@ -99,6 +99,7 @@ hitbox_group = [
 class ExportFormat:
     SMD = 1
     DMX = 2
+    FBX = 3
 
 class Compiler:
     UNKNOWN = 0
@@ -205,7 +206,10 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     def compiler(cls): return cls._engineBranch.compiler if cls._engineBranch else Compiler.MODELDOC if "modeldoc" in bpy.context.scene.vs.dmx_format else Compiler.UNKNOWN
 
     @property
-    def exportFormat(cls): return ExportFormat.DMX if bpy.context.scene.vs.export_format == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
+    def exportFormat(cls):
+        fmt = bpy.context.scene.vs.export_format
+        if fmt == 'FBX': return ExportFormat.FBX
+        return ExportFormat.DMX if fmt == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
 
     @property
     def gamePath(cls):
@@ -537,7 +541,10 @@ def animationFrameRange(ad : bpy.types.AnimData):
     return first, ceil(max(times)) - first
 
 def getFileExt(flex=False):
-    if State.datamodelEncoding != 0 and bpy.context.scene.vs.export_format == 'DMX':
+    fmt = bpy.context.scene.vs.export_format
+    if fmt == 'FBX':
+        return ".fbx"
+    if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
         if flex: return ".vta"
@@ -2021,6 +2028,61 @@ def get_bone_matrix(data: bpy.types.PoseBone | mathutils.Matrix, bone: bpy.types
 
     # Apply offsets in bone space
     return matrix @ offset_matrix
+
+
+def retarget_rest_pose(arm, bone_names, mutate, post=None) -> None:
+    """Change an armature's rest pose without moving what its action does.
+
+    ``mutate`` receives ``edit_bones``. A bone's local space moves with its rest, so poses for
+    ``bone_names`` are sampled first and re-keyed after, optionally times ``post[name]``.
+    Pass no names to skip the animation work.
+    """
+    scene = bpy.context.scene
+    names = list(bone_names)
+    action = arm.animation_data.action if arm.animation_data else None
+
+    sampled = {}
+    saved_frame = scene.frame_current
+    if action and names:
+        start, end = (int(round(f)) for f in action.frame_range)
+        for f in range(start, max(end, start) + 1):
+            scene.frame_set(f)
+            sampled[f] = {n: arm.pose.bones[n].matrix.copy() for n in names}
+
+    prev_active = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    try:
+        mutate(arm.data.edit_bones)
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    if sampled:
+        # pose_bone.matrix resolves against the parent's current evaluated state, so children
+        # follow parents with a flush between. Bones at one depth can't affect each other, so
+        # flush per depth, not per bone - thousands of updates saved on a big rig.
+        by_depth = collections.defaultdict(list)
+        for pb in arm.pose.bones:
+            if pb.name in names:
+                by_depth[len(pb.parent_recursive)].append(pb)
+        levels = [by_depth[d] for d in sorted(by_depth)]
+        ordered = [pb for level in levels for pb in level]
+        identity = Matrix.Identity(4)
+
+        for f, mats in sorted(sampled.items()):
+            scene.frame_set(f)
+            for level in levels:
+                for pb in level:
+                    pb.matrix = mats[pb.name] @ (post.get(pb.name, identity) if post else identity)
+                bpy.context.view_layer.update()
+            for pb in ordered:
+                pb.keyframe_insert("location", frame=f)
+                pb.keyframe_insert(
+                    "rotation_quaternion" if pb.rotation_mode == 'QUATERNION' else "rotation_euler",
+                    frame=f)
+
+    scene.frame_set(saved_frame)
+    bpy.context.view_layer.objects.active = prev_active
 
 #
 #   BOOL

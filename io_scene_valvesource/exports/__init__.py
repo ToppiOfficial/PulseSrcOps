@@ -5,5 +5,6 @@ from .bake import Baker
 from .plan import ExportPlanner
 from .dmx import DmxWriter
 from .smd import SmdWriter
+from .fbx import FbxWriter
 from .prefab import PrefabExporter, resolve_prefab_output, _PrefabRunnerAdapter
 from .exporter import SmdExporter

@@ -17,6 +17,7 @@ from .bake import Baker
 from .plan import ExportPlanner
 from .dmx import DmxWriter
 from .smd import SmdWriter
+from .fbx import FbxWriter
 from .prefab import resolve_prefab_output, _PrefabRunnerAdapter
 
 
@@ -286,7 +287,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     continue
                 if getattr(vs, 'mesh_type', 'DEFAULT') == 'CLOTHPROXY':
                     self.warning(f"'{_ob.name}' is set to Cloth Proxy but scene export format is not DMX - cloth attributes will be omitted.")
-                if getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob):
+                # FBX carries DME flex rules in its own custom properties, so only SMD drops them.
+                if (State.exportFormat == ExportFormat.SMD
+                        and getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob)):
                     self.warning(get_id("exporter_warn_dme_smd", True).format(_ob.name))
 
         for _ob in check_obs:
@@ -409,13 +412,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         self.exportable_boneNames = {}
         self.exportable_empties = None
 
-        for result in bake_results:
-            if result.armature:
-                if not self.armature:
-                    self.armature = result.armature.object
-                    self.armature_src = result.armature.src
-                elif self.armature != result.armature.object:
-                    self.warning(get_id("exporter_warn_multiarmature"))
+        # original_id, not source: a collection task's source is the planner's temp collection.
+        self._select_armature(original_id, bake_results, planner)
 
         if planner and self.armature_src:
             self.armature_src = planner._original_ob_map.get(
@@ -448,7 +446,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 source.vs.automerge = True
 
         # -- write -------------------------------------------------------------
-        write_func = self._run_dmx_writer if State.exportFormat == ExportFormat.DMX else self._run_smd_writer
+        write_func = {
+            ExportFormat.DMX: self._run_dmx_writer,
+            ExportFormat.FBX: self._run_fbx_writer,
+        }.get(State.exportFormat, self._run_smd_writer)
         bench.report("Post Bake")
 
         if isinstance(source, bpy.types.Object) and source.type == "ARMATURE" and source.data.vs.action_selection != "CURRENT":
@@ -482,6 +483,46 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.warning(get_id("exporter_warn_source2names", format_string=True).format(source.name))
 
         return True
+
+    def _select_armature(self, export_id, bake_results: list[BakeResult], planner) -> None:
+        """Pick the export skeleton: one that belongs to the export first, then the most used.
+
+        Anything an exported object is bound to gets baked, in the export or not, so a stray
+        rig reached through one forgotten modifier could otherwise win by baking first.
+        Candidates group by the authored armature, since the planner's copy of a collection's
+        armature would otherwise look like a second rig.
+        """
+        def authored(ob):
+            if planner is None or ob is None:
+                return ob
+            return planner._original_ob_map.get(ob.session_uid, ob)
+
+        candidates = {}   # authored armature -> [use count, first BakeResult, first owner]
+        for result in bake_results:
+            if not result.armature:
+                continue
+            key = authored(result.armature.src or result.armature.object)
+            entry = candidates.setdefault(key, [0, result.armature, result.name])
+            entry[0] += 1
+            if entry[1].src is None and result.armature.src is not None:
+                entry[1] = result.armature   # a bake that knows its source object wins the slot
+
+        if not candidates:
+            return
+
+        source_obs = set(export_id.all_objects) if isinstance(export_id, Collection) else {export_id}
+        order = list(candidates.items())
+        winner, (_count, win_bake, win_owner) = max(
+            order, key=lambda item: (item[0] in source_obs, item[1][0]))
+        self.armature = win_bake.object
+        self.armature_src = win_bake.src
+
+        for arm_ob, (_c, bake, owner) in order:
+            if arm_ob is winner:
+                continue
+            # Either name can be export-generated (a split part, an LOD, an edgeline).
+            self.warning(get_id("exporter_warn_multiarmature", True).format(
+                owner, arm_ob.name, win_owner, winner.name))
 
     def _setup_skeleton(self, source, bake_results: list[BakeResult], baker: Baker) -> bool:
         if list(self.armature_src.scale).count(self.armature_src.scale[0]) != 3:
@@ -838,6 +879,16 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),
+        )
+        return writer.write()
+
+    def _run_fbx_writer(self, id, bake_results, name, dir_path):
+        writer = FbxWriter(
+            self, id, bake_results, name, dir_path,
+            armature=self.armature, armature_src=self.armature_src,
+            exportable_bones=self.exportable_bones,
+            exportable_boneNames=self.exportable_boneNames,
+            all_bake_results=self.bake_results,
         )
         return writer.write()
 

@@ -365,6 +365,18 @@ _data = {
         'en': "Could not create {0} file. Python reports: {1}.",
         'ja': "{0}ファイルを作成できませんでした。Pythonの報告: {1}",
     },
+    'exporter_err_fbx_addon': {
+        'en': "FBX export requires Blender's \"Import-Export: FBX format\" add-on, which could not be enabled.",
+    },
+    'exporter_warn_fbx_flex_advanced': {
+        'en': "\"{0}\" uses Advanced flex controller mode, whose external source file is not embedded in FBX - switch it to DME Rule mode to carry the controllers and rules in the file.",
+    },
+    'exporter_warn_fbx_vca': {
+        'en': "\"{0}\" has vertex animations, which FBX export does not support - they were skipped.",
+    },
+    'exporter_warn_fbx_shapeverts': {
+        'en': "Shape key \"{0}\" on \"{1}\" baked to a different vertex count to its base mesh - skipped.",
+    },
     'exporter_err_relativeunsaved': {
         'en': "Cannot export to a relative path until the blend file has been saved.",
         'ja': "blendファイルが保存されるまで相対パスにエクスポートできません",
@@ -425,8 +437,8 @@ _data = {
         'ja': "是正シェイプキー「{0}」は「{2}」と同じ有効化条件({1})です。スキップします",
     },
     'exporter_warn_multiarmature': {
-        'en': "Multiple armatures detected",
-        'ja': "複数のアーマチュアが検出されました",
+        'en': "Multiple armatures detected: \"{0}\" is bound to \"{1}\", but \"{2}\" already selected \"{3}\" as the export skeleton - only \"{3}\" will be used",
+        'ja': "複数のアーマチュアが検出されました: \"{0}\" は \"{1}\" にバインドされていますが、\"{2}\" が既に \"{3}\" をエクスポートスケルトンとして選択しています - \"{3}\" のみ使用されます",
     },
     'exporter_warn_unkeyframed_pose': {
         'en': "Animation \"{0}\": {1} posed but un-keyframed bone(s) will be reset to rest ({2}). Keyframe them, or disable 'Reset Pose Per Anim' to keep the pose.",
@@ -571,6 +583,24 @@ _data = {
     'importmenu_title': {
         'en': "Source Engine",
         'ja': "Source Engine",
+    },
+    'import_menuitem_fbx': {
+        'en': "FBX (.fbx)",
+    },
+    'importer_fbx_title': {
+        'en': "Import FBX",
+    },
+    'importer_fbx_tip': {
+        'en': "Imports an FBX model, restoring any Source data an FBX export wrote into it",
+    },
+    'importer_fbx_scale': {
+        'en': "Scale",
+    },
+    'importer_fbx_scale_tip': {
+        'en': "Scale applied on import. Defaults to the inverse of the scene's world scale, undoing the conversion to engine units",
+    },
+    'importer_err_fbx': {
+        'en': "Could not import \"{0}\". Blender's FBX importer reports: {1}",
     },
     'import_menuitem_dmx': {
         'en': "DMX (.dmx)",

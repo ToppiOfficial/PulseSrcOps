@@ -45,7 +45,7 @@ def register():
         try:
             _previews.load(stem, os.path.join(ICONS_DIR, filename), 'IMAGE')
         except Exception as err:
-            print("KitsuneSourceTools: could not load icon {} ({})".format(filename, err))
+            print("PulseSrcOps: could not load icon {} ({})".format(filename, err))
 
 
 def unregister():

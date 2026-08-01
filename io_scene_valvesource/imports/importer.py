@@ -26,6 +26,7 @@ from ..utils import *
 from .. import datamodel, keyvalues3
 from . import anim as _anim, build as _build, dmx as _dmx
 from . import prefab as _prefab, qc as _qc, smd as _smd, vmdl as _vmdl
+from . import fbx as _fbx
 
 from ..utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 from .flexdata import populate_dme_flex_from_dmx
@@ -670,6 +671,80 @@ class ImportVMDL(ImporterBase):
         if self.qc and self.qc.a:
             bpy.context.view_layer.objects.active = self.qc.a
         return count
+
+
+class ImportFBX(ImporterBase):
+    """Blender's FBX importer, plus the Source data exports/fbx.py wrote alongside it.
+
+    The native importer owns the skeleton, axes and mesh, so none of ImporterBase's build
+    options apply - only scale and the prefab toggles are drawn.
+    """
+    bl_idname = "import_scene.kst_fbx"
+    bl_label = get_id("importer_fbx_title")
+    bl_description = get_id("importer_fbx_tip")
+
+    filter_glob: StringProperty(default="*.fbx", options={'HIDDEN'})
+
+    importScale: FloatProperty(
+        name=get_id("importer_fbx_scale"), description=get_id("importer_fbx_scale_tip"),
+        default=1.0, min=0.0001, soft_max=100.0, precision=4)
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL')
+
+    def invoke(self, context, event):
+        # Our FBX carries engine units, so undo world_scale to land back at authored size.
+        world_scale = context.scene.vs.world_scale
+        self.properties.importScale = 1.0 / world_scale if world_scale else 1.0
+        bpy.context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def draw(self, context):
+        self.layout.use_property_split = True
+        self.layout.use_property_decorate = False
+        self.layout.prop(self.properties, "importScale")
+        self.draw_prefab_data(self.layout)
+
+    def read_file(self, filepath: str) -> int | None:
+        if not filepath.lower().endswith('.fbx'):
+            self.report_unreadable(filepath)
+            return None
+        if not hasattr(bpy.ops.import_scene, "fbx"):
+            self.error(get_id("exporter_err_fbx_addon", True))
+            return None
+
+        # Blender always divides by UnitScaleFactor/100, but Source FBX declares 1 with the
+        # numbers already in engine units. Undo it so importScale means what it says.
+        units = bpy.context.scene.unit_settings
+        unit_factor = 100.0 if units.system == 'NONE' else 100.0 * units.scale_length
+
+        pre = set(bpy.context.scene.objects)
+        try:
+            bpy.ops.import_scene.fbx(
+                filepath=filepath,
+                global_scale=self.properties.importScale * unit_factor,
+                use_custom_props=True,
+                use_custom_props_enum_as_string=True,
+                # Take the bone axes from the file: automatic_bone_orientation re-aims each
+                # bone at its child, discarding any authored export offset. Axes mirror the
+                # export.
+                automatic_bone_orientation=False,
+                primary_bone_axis='Y',
+                secondary_bone_axis='X',
+                # The exporter writes add_leaf_bones=False, so every chain ends in a real bone.
+                ignore_leaf_bones=False,
+                # Keep the file's own frame numbering instead of Blender's default +1 shift.
+                anim_offset=0.0,
+            )
+        except RuntimeError as err:
+            self.error(get_id("importer_err_fbx", True).format(os.path.basename(filepath), err))
+            return None
+
+        new_obs = [ob for ob in bpy.context.scene.objects if ob not in pre]
+        counts = _fbx.apply_source_props(self, new_obs, bpy.context.scene,
+                                         self.properties.prefabData)
+        self.imported_jigglebones += counts["jigglebones"]
+        self.imported_hitboxes += counts["hitboxes"]
+        self.imported_procbones += counts["procbones"]
+        return self.num_files_imported + 1
 
 
 class ImportDMX(ImporterBase):

@@ -86,12 +86,14 @@ class Baker:
 
         # -- coordinate transform ---------------------------------------------
         ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+        # Subtract the top parent's origin in Blender space, right of the scale/axis
+        # conversion, so it gets scaled and rotated like everything else.
         ob.matrix_world = (
-            Matrix.Translation(top_parent.location).inverted()
-            @ getUpAxisMat(bpy.context.scene.vs.up_axis).inverted()
+            getUpAxisMat(bpy.context.scene.vs.up_axis).inverted()
             @ getForwardAxisMat(bpy.context.scene.vs.forward_axis).inverted()
             @ getUpAxisOffsetMat(bpy.context.scene.vs.up_axis, bpy.context.scene.vs.up_axis_offset)
             @ Matrix.Scale(bpy.context.scene.vs.world_scale, 4)
+            @ Matrix.Translation(top_parent.location).inverted()
             @ ob.matrix_world
         )
 

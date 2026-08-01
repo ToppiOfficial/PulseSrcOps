@@ -315,6 +315,7 @@ GUI.SMD_PT_Jigglebones,
     imports.ImportSMD,
     imports.ImportQC,
     imports.ImportVMDL,
+    imports.ImportFBX,
     imports.ImportPrefab,
 
     # Updater
