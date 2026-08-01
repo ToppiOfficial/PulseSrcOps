@@ -342,19 +342,18 @@ class Baker:
                 ops.mesh.flip_normals()
             ops.object.mode_set(mode="OBJECT")
 
-        self._delete_filtered_faces(ob, source_ob, quiet=quiet)
+        self._delete_filtered_faces(ob.data, source_ob, quiet=quiet)
 
         # Not the way I hope to fix it but too bad.
         # if source_ob.vs.use_toon_edgeline and not source_ob.vs.edgeline_per_material:
         # oh ffs.
         #
         if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
-            self._collapse_edgeline_materials(ob)
+            self._collapse_edgeline_materials(ob.data)
 
         return ob
-    
-    def _delete_filtered_faces(self, ob: bpy.types.Object, vg_source: bpy.types.Object, quiet: bool = False) -> None:
-        me = ob.data
+
+    def _delete_filtered_faces(self, me: bpy.types.Mesh, vg_source: bpy.types.Object, quiet: bool = False) -> None:
         if not getattr(vg_source, "vs", None):
             return
 
@@ -444,8 +443,7 @@ class Baker:
 
 
     # SmdExporter - _collapse_edgeline_materials (unchanged)
-    def _collapse_edgeline_materials(self, ob: bpy.types.Object) -> None:
-        me = ob.data
+    def _collapse_edgeline_materials(self, me: bpy.types.Mesh) -> None:
         generic_mat = bpy.data.materials.get(EdgelineBuilder.EDGELINE_MAT) or bpy.data.materials.new(name=EdgelineBuilder.EDGELINE_MAT)
         for i, mat in enumerate(me.materials):
             if mat and mat.name != EdgelineBuilder.EDGELINE_MAT and mat.name.endswith("_edgeline"):
@@ -472,19 +470,45 @@ class Baker:
             baked_shape_data = bpy.data.meshes.new_from_object(source_ob.evaluated_get(depsgraph))
             baked_shape_data.name = f"{source_ob.name} -> {shape.name}"
 
-            shape_ob = self._put_in_object(source_ob, baked_shape_data, solidify_fill_rim, quiet=True)
-
-            result.shapes[shape.name] = shape_ob.data
+            self._finalize_shape_data(source_ob, baked_shape_data, solidify_fill_rim, should_tri)
+            result.shapes[shape.name] = baked_shape_data
 
             if normalize:
                 shape.value = original_value
 
-            if should_tri:
-                bpy.context.view_layer.objects.active = shape_ob
-                self._triangulate()
+    def _finalize_shape_data(self, source_ob: bpy.types.Object, data: bpy.types.Mesh, solidify_fill_rim, should_tri: bool) -> None:
+        # Shape-key equivalent of _put_in_object that never creates/links/unlinks a scene
+        # Object. transform_apply and edit-mode triangulate are bpy.ops calls - each one is
+        # a context-dispatched operator with its own depsgraph/undo overhead, which is fine
+        # once per mesh but not once per shape key on flex-heavy (50-150 shape) models.
+        exporting_smd = State.exportFormat == ExportFormat.SMD
+        loc, rot, scale = source_ob.matrix_world.decompose()
+        bake_matrix = Matrix.Diagonal(scale.to_4d())
+        if exporting_smd:
+            bake_matrix = Matrix.Translation(loc) @ rot.to_matrix().to_4x4() @ bake_matrix
+        data.transform(bake_matrix)
 
-            bpy.context.scene.collection.objects.unlink(shape_ob)
-            bpy.data.objects.remove(shape_ob)
+        if hasCurves(source_ob) or should_tri:
+            bm = bmesh.new()
+            bm.from_mesh(data)
+            if hasCurves(source_ob):
+                if source_ob.data.vs.faces == "BOTH":
+                    bmesh.ops.duplicate(bm, geom=bm.faces[:])
+                    if solidify_fill_rim:
+                        self._exporter.warning(get_id("exporter_err_solidifyinside", True).format(source_ob.name))
+                if source_ob.data.vs.faces != "FORWARD":
+                    bmesh.ops.reverse_faces(bm, faces=bm.faces)
+            if should_tri:
+                bmesh.ops.triangulate(bm, faces=bm.faces, quad_method="FIXED")
+            bm.to_mesh(data)
+            bm.free()
+
+        self._delete_filtered_faces(data, source_ob, quiet=True)
+
+        if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
+            self._collapse_edgeline_materials(data)
+
+        data.update()
 
     def _generate_uvs_if_needed(self, ob: bpy.types.Object, result: BakeResult) -> None:
         if ob.data.uv_layers:
