@@ -132,8 +132,7 @@ def _fix_vrf_nmskel_axis(parsed: ParsedDmx) -> None:
         trfm = child["transform"]
         trfm["position"] = _nm_unrotate(trfm["position"])
         trfm["orientation"] = _dmx_quat(blender_quat(trfm["orientation"]) @ _NM_FIXUP_INV)
-    parsed.warnings.append(
-        "Removed ValveResourceFormat's broken root_motion axis fixup from this skeleton")
+    print("- Removed ValveResourceFormat's broken root_motion axis fixup from this skeleton")
 
 
 def _fix_vrf_nmclip_axis(parsed: ParsedDmx) -> None:
@@ -172,8 +171,7 @@ def _fix_vrf_nmclip_axis(parsed: ParsedDmx) -> None:
             values[:] = [_nm_unrotate(v) for v in values]
         elif ch["toAttribute"] == "orientation":
             values[:] = [_dmx_quat(_NM_FIXUP_INV @ blender_quat(v)) for v in values]
-    parsed.warnings.append(
-        "Removed ValveResourceFormat's root_motion axis fixup from this animation")
+    print("- Removed ValveResourceFormat's root_motion axis fixup from this animation")
 
 
 # ---------------------------------------------------------------------------

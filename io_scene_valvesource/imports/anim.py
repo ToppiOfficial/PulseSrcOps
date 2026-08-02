@@ -83,9 +83,15 @@ def build_anim(ctx, smd, ianim) -> None:
                 frame_time = datamodel.Time.from_int(frame_time)
             frame_value = channel.values[i]
 
+            frame = frame_time * frameRate
+            if frame < 0:
+                # ValveResourceFormat pads motionless position channels with keys at
+                # t=-0.1 and t=-0.05 so ModelDoc doesn't discard them.
+                continue
+
             keyframe = KeyFrame()
             keyframes[bone].append(keyframe)
-            keyframe.frame = frame_time * frameRate
+            keyframe.frame = frame
             lastFrameIndex = max(lastFrameIndex, keyframe.frame)
 
             if not (bone.parent or keyframe.pos or keyframe.rot or keyframe.scale):
