@@ -11,7 +11,7 @@ from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 from .check import ExportCheck
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan, is_proxy_only
 from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder
 from .bake import Baker
 from .plan import ExportPlanner
@@ -346,7 +346,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     continue
                 if getattr(vs, 'mesh_type', 'DEFAULT') == 'CLOTHPROXY':
                     self.warning(f"'{_ob.name}' is set to Cloth Proxy but scene export format is not DMX - cloth attributes will be omitted.")
-                # FBX carries DME flex rules in its own custom properties, so only SMD drops them.
+                # FBX carries DME flex rules in its companion DMX, so only SMD drops them.
                 if (State.exportFormat == ExportFormat.SMD
                         and getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob)):
                     self.warning(get_id("exporter_warn_dme_smd", True).format(_ob.name))
@@ -488,7 +488,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         # -- flex controller setup ---------------------------------------------
         src_mt_flex = getattr(getattr(source, 'vs', None), 'mesh_type', 'DEFAULT')
-        if State.exportFormat == ExportFormat.DMX and hasShapes(source) and src_mt_flex == 'DEFAULT':
+        if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX) and hasShapes(source) and src_mt_flex == 'DEFAULT':
             self.flex_controller_mode = source.vs.flex_controller_mode
             self.flex_controller_source = source.vs.flex_controller_source
 
@@ -945,7 +945,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
 
 
-    def _run_dmx_writer(self, datablock, bake_results, name, dir_path):
+    def _run_dmx_writer(self, datablock, bake_results, name, dir_path, skeleton_only=False):
         writer = DmxWriter(
             self, datablock, bake_results, name, dir_path,
             armature=self.armature, armature_src=self.armature_src,
@@ -955,10 +955,30 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),
+            skeleton_only=skeleton_only,
         )
         return writer.write()
 
     def _run_fbx_writer(self, id, bake_results, name, dir_path):
+        # A model export writes two files: the .fbx (mesh + skeleton + blendshapes) and a
+        # companion .dmx of the same name holding what FBX cannot carry - flex controllers
+        # and rules, jigglebones, hitboxes, procedural bones - over a mesh-less skeleton.
+        # DMX runs first: FbxWriter mutates the baked rig (bone renames, offsets, scale).
+        #
+        # An animation is DMX only. Its bone channels are the whole file, and DMX writes
+        # them exactly where Blender's FBX baker resamples them - there is no mesh to
+        # justify a second file.
+        #
+        # A collision/cloth-only export has none of that extra data, so the companion
+        # would be a bare skeleton - skip it and write the .fbx alone.
+        is_anim = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
+        written = 0
+        if not is_proxy_only(bake_results):
+            written = self._run_dmx_writer(id, bake_results, name, dir_path,
+                                           skeleton_only=not is_anim)
+            if is_anim:
+                return written
+
         writer = FbxWriter(
             self, id, bake_results, name, dir_path,
             armature=self.armature, armature_src=self.armature_src,
@@ -966,7 +986,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             exportable_boneNames=self.exportable_boneNames,
             all_bake_results=self.bake_results,
         )
-        return writer.write()
+        return written + writer.write()
 
     def _run_smd_writer(self, id, bake_results, name, dir_path):
         writer = SmdWriter(

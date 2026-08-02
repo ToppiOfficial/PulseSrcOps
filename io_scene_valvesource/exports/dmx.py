@@ -5,7 +5,7 @@ from ..utils import *
 from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
-from .records import BakeResult, ExportTask
+from .records import BakeResult, ExportTask, is_proxy_only
 
 
 # DmxWriter - the DMX model exporter (replaces the old SmdExporter.writeDMX). Covers skeleton,
@@ -14,7 +14,8 @@ from .records import BakeResult, ExportTask
 class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
-                 exportable_empties, all_bake_results, flex_mode, flex_source):
+                 exportable_empties, all_bake_results, flex_mode, flex_source,
+                 skeleton_only=False):
         self.r = reporter
         self.datablock = datablock
         self.bake_results = bake_results
@@ -28,6 +29,9 @@ class DmxWriter:
         self.all_bake_results = all_bake_results
         self.flex_controller_mode = flex_mode
         self.flex_controller_source = flex_source
+        # FBX companion: skeleton + flex controllers + prefabs, no DmeMesh. The mesh, its
+        # morphs and its materials ship in the .fbx instead.
+        self.skeleton_only = skeleton_only
         self.bone_ids: dict[str, int] = {}
 
     # -- reporting -----------------------------------------------------------
@@ -59,6 +63,7 @@ class DmxWriter:
         # DME prefab mode: embed jigglebones/hitboxes/procedural bones + keep attachments
         # inside the model DMX instead of writing .qci/.vmdl prefabs.
         self.dme_mode = prefab_mode_is_dme(bpy.context.scene)
+        self.proxy_only = is_proxy_only(self.bake_results)
 
         self.want_jointlist = dm.format_ver >= 11
         self.want_jointtransforms = dm.format_ver in range(0, 21)
@@ -108,15 +113,19 @@ class DmxWriter:
         self._write_attachments(bench)
         self._write_procedural_bones()
         self._write_hitboxes(bench)
-        self._write_vca_bones()
+        if not self.skeleton_only:
+            self._write_vca_bones()
 
         combination_operator = self._setup_flex(bench)
-        if not combination_operator and self.bake_results and self.bake_results[0].vertex_animations:
+        if not combination_operator and not self.skeleton_only and self.bake_results and self.bake_results[0].vertex_animations:
             combination_operator = flex.DmxWriteFlexControllers.make_controllers(self.datablock).root["combinationOperator"]
         if combination_operator:
             root["combinationOperator"] = combination_operator
 
-        self._write_meshes(combination_operator, bench)
+        if self.skeleton_only:
+            root["model"] = self.DmeModel
+        else:
+            self._write_meshes(combination_operator, bench)
 
         if self.is_anim:
             self._write_animation(bench)
@@ -165,7 +174,8 @@ class DmxWriter:
         # In DME mode a jigglebone is a skeleton joint of element type DmeJiggleBone
         # (a DmeJoint subclass); the .vs props live on the data Bone (bone.bone).
         data_bone = bone.bone if bone is not None else None
-        is_dme_jiggle = self.dme_mode and not self.is_anim and data_bone is not None and data_bone.vs.bone_is_jigglebone
+        is_dme_jiggle = (self.dme_mode and not self.is_anim and not self.proxy_only
+                         and data_bone is not None and data_bone.vs.bone_is_jigglebone)
         bone_elem_type = "DmeJiggleBone" if is_dme_jiggle else "DmeJoint"
         self.bone_elements[bone_name] = bone_elem = dm.add_element(bone_exportname, bone_elem_type, id=bone_name)
         if is_dme_jiggle:
@@ -270,7 +280,7 @@ class DmxWriter:
             bench.report("Empties")
 
     def _write_procedural_bones(self):
-        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
             return
         avs = getattr(self.armature_src.data, 'vs', None)
         proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
@@ -350,7 +360,7 @@ class DmxWriter:
                     bone_elem.type = "DmeAimAtBone"
 
     def _write_hitboxes(self, bench):
-        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
             return
         dm = self.dm
         arm_data = self.armature_src.data
@@ -579,33 +589,13 @@ class DmxWriter:
             texcoIndices = [None] * num_loops
             jointWeights = []
             jointIndices = []
-            balance = [0.0] * num_verts
+            balance = bake.stereo_balance(ob, self._warning)
             cloth_weights = {}
             Indices = [-1] * num_loops
 
             if cloth_groups:
                 for vgroup in cloth_groups:
                     cloth_weights[vgroup.name] = [0.0] * num_verts
-
-            # Stereo flex (balance) setup
-            if bake.shapes and bake.src and hasattr(bake.src, 'data') and hasattr(bake.src.data, 'vs'):
-                stereo_mode = bake.src.data.vs.flex_stereo_mode
-                if stereo_mode == 'VGROUP':
-                    vg_name = bake.src.data.vs.flex_stereo_vg
-                    if not vg_name:
-                        self._warning(f"'{bake.name}': stereo mode is VGROUP but no vertex group is specified")
-                    else:
-                        bake.balance_vg = ob.vertex_groups.get(vg_name)
-                        if bake.balance_vg is None:
-                            self._warning(f"'{bake.name}': stereo vertex group '{vg_name}' not found")
-                elif stereo_mode in axes_lookup:
-                    axis = axes_lookup[stereo_mode]
-                    sharpness = bake.src.data.vs.flex_stereo_sharpness
-                    balance_width = ob.dimensions[axis] * (1 - (sharpness / 100))
-                    if balance_width:
-                        for _v in ob.data.vertices:
-                            balance[_v.index] = max(0.0, min(1.0, (-_v.co[axis] / balance_width / 2) + 0.5))
-                    bake.balance_vg = True  # sentinel: balance[] is pre-populated
 
             uv_layer = ob.data.uv_layers.active.data
 
@@ -616,14 +606,6 @@ class DmxWriter:
 
             for v in ob.data.vertices:
                 v.select = False
-                if bake.shapes and bake.balance_vg:
-                    if isinstance(bake.balance_vg, bpy.types.VertexGroup):
-                        try:
-                            balance[v.index] = bake.balance_vg.weight(v.index)
-                        except RuntimeError:
-                            pass  # vertex not in the balance group
-                    # else: balance[] was pre-populated by axis-based stereo setup
-
                 if cloth_groups:
                     for vgroup in cloth_groups:
                         try:

@@ -688,7 +688,8 @@ class ImportFBX(ImporterBase):
     importScale: FloatProperty(
         name=get_id("importer_fbx_scale"), description=get_id("importer_fbx_scale_tip"),
         default=1.0, min=0.0001, soft_max=100.0, precision=4)
-    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL')
+    # All four kinds ride in the companion DMX, attachments included.
+    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
     def invoke(self, context, event):
         # Our FBX carries engine units, so undo world_scale to land back at authored size.
@@ -739,11 +740,13 @@ class ImportFBX(ImporterBase):
             return None
 
         new_obs = [ob for ob in bpy.context.scene.objects if ob not in pre]
-        counts = _fbx.apply_source_props(self, new_obs, bpy.context.scene,
-                                         self.properties.prefabData)
-        self.imported_jigglebones += counts["jigglebones"]
-        self.imported_hitboxes += counts["hitboxes"]
-        self.imported_procbones += counts["procbones"]
+        companion = _fbx.companion_path(filepath)
+        if companion:
+            jb, hb, pb, at = _fbx.apply_companion_dmx(self, companion, new_obs)
+            self.imported_jigglebones += jb
+            self.imported_hitboxes += hb
+            self.imported_procbones += pb
+            self.imported_attachments += at
         return self.num_files_imported + 1
 
 

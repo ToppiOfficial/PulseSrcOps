@@ -29,14 +29,15 @@ def wants_prefab(ctx, kind: str) -> bool:
     return kind in selected
 
 
-def read_dmx_prefab(ctx, filepath: str, arm) -> tuple[int, int, int, int]:
-    """Attach prefab data from a model DMX onto an existing armature.
+def read_dmx_prefab(ctx, filepath: str, arm, parsed=None) -> tuple[int, int, int, int]:
+    """Attach prefab data from a model DMX onto an existing armature. ``parsed`` lets a
+    caller that already loaded the file skip a second parse.
 
     Returns (jigglebones, hitboxes, procbones, attachments).
     """
     from .dmx import load_dmx, read_skeleton
 
-    parsed = load_dmx(filepath)
+    parsed = parsed or load_dmx(filepath)
     skel = read_skeleton(parsed)
 
     jiggle_elems = [(b.element, b.name) for b in skel.bones

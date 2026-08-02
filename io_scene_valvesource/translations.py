@@ -372,11 +372,14 @@ _data = {
     'exporter_err_fbx_addon': {
         'en': "FBX export requires Blender's \"Import-Export: FBX format\" add-on, which could not be enabled.",
     },
-    'exporter_warn_fbx_flex_advanced': {
-        'en': "\"{0}\" uses Advanced flex controller mode, whose external source file is not embedded in FBX - switch it to DME Rule mode to carry the controllers and rules in the file.",
-    },
     'exporter_warn_fbx_vca': {
         'en': "\"{0}\" has vertex animations, which FBX export does not support - they were skipped.",
+    },
+    'importer_warn_fbx_companion': {
+        'en': "Could not read the companion DMX \"{0}\", so no flex controllers or prefab data were imported. Python reports: {1}.",
+    },
+    'exporter_warn_fbx_corrective': {
+        'en': "\"{0}\" has corrective shape keys. The companion DMX has no mesh, so it cannot declare them as correctives - export as DMX instead if you need them.",
     },
     'exporter_warn_fbx_shapeverts': {
         'en': "Shape key \"{0}\" on \"{1}\" baked to a different vertex count to its base mesh - skipped.",
@@ -503,6 +506,10 @@ _data = {
     'exportname_tip': {
         'en': "Override the bone name written to exported files",
         'ja': "エクスポートされるファイルに書き込まれるボーン名を上書き",
+    },
+    'exportpanel_fbx_companion': {
+        'en': "A .dmx is written beside each .fbx for the flex controllers and prefabs.",
+        'ja': "フレックスコントローラーとプレハブ用に、各 .fbx の隣に .dmx が書き出されます。",
     },
     'exportpanel_dmxver': {
         'en': "DMX Version:",
@@ -1393,6 +1400,10 @@ _data = {
     'prefab_export_mode_tip': {
         'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
         'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
+    },
+    'prefab_export_mode_fbx': {
+        'en': "EMBEDDED (companion DMX)",
+        'ja': "EMBEDDED (コンパニオン DMX)",
     },
     'prefab_export_mode_qci_tip': {
         'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",

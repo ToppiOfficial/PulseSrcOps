@@ -159,7 +159,8 @@ class Baker:
         # default values, normals from the regular bake are shape-deformed.
         # Re-evaluate with all values at 0 and override the baked normals.
         # The zero-state mesh goes through _put_in_object so face filtering matches baked.
-        if hasShapes(ob) and baked and getattr(ob.data.vs, 'bake_shapekey_as_basis_normals', False):
+        if (hasShapes(ob) and baked and getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'DEFAULT'
+                and getattr(ob.data.vs, 'bake_shapekey_as_basis_normals', False)):
             keys = ob.data.shape_keys.key_blocks
             has_nonzero = any(sk.value != 0.0 for sk in keys[1:])
             if has_nonzero:
@@ -291,7 +292,9 @@ class Baker:
             print("- Normalizing shape keys disabled, resetting all shapekey values to 0")
             for sk in ob.data.shape_keys.key_blocks:
                 sk.value = 0
-        else:
+        elif mt == 'DEFAULT':
+            # Normalization is evaluation-preserving, so it only matters for the deltas
+            # that get exported - collision/cloth proxies discard theirs.
             self._normalize_shapekeys(ob)
 
         VertexGroupNormalizer(ob, vgroup_limit=vgroup_limit, clean_tolerance=scene_vs.weightlink_threshold).run()

@@ -540,10 +540,11 @@ def animationFrameRange(ad : bpy.types.AnimData):
     first = floor(min(times))
     return first, ceil(max(times)) - first
 
-def getFileExt(flex=False):
+def getFileExt(flex=False, anim=False):
     fmt = bpy.context.scene.vs.export_format
     if fmt == 'FBX':
-        return ".fbx"
+        # Animations have no mesh to justify an FBX - they are written as DMX.
+        return ".dmx" if anim else ".fbx"
     if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
@@ -944,7 +945,9 @@ def make_export_list(scene: bpy.types.Scene):
 
     def makeDisplayName(item, name=None):
         base = name if name else item.name
-        return sanitize_string(base, allow_unicode=True) + getFileExt()
+        # Only armature rows produce animations, and those are DMX even in FBX mode.
+        anim = isinstance(item, bpy.types.Object) and item.type == 'ARMATURE'
+        return sanitize_string(base, allow_unicode=True) + getFileExt(anim=anim)
 
     if not State.exportableObjects:
         return
@@ -1421,10 +1424,12 @@ prefab_type_info = {
 
 
 def prefab_mode_is_dme(scene) -> bool:
-    """True when prefabs should be encoded into the model DMX (DME mode) rather than
-    written to .qci/.vmdl files. Supported on both Source 1 and Source 2 (PulseMDL /
-    PulseMDL2). Embedding only happens in the DMX writer, so SMD export always uses
-    file mode."""
+    """True when prefabs are encoded into the model file rather than written to
+    .qci/.vmdl files. DMX honours the user's prefab_export_mode (Source 1 and Source 2,
+    PulseMDL / PulseMDL2); FBX always embeds them, in the companion DMX it writes
+    alongside the .fbx. SMD has no embedding, so it always uses file mode."""
+    if State.exportFormat == ExportFormat.FBX:
+        return True
     return (State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 

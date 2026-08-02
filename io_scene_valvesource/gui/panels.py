@@ -129,7 +129,9 @@ class SMD_PT_Scene(Panel):
             row.label(text=get_id("export_format", True) + ":")
             row.row().prop(scene.vs, "export_format", expand=True)
 
-        if scene.vs.export_format == 'DMX':
+        # FBX writes a companion DMX holding the skeleton, flex controllers and prefabs,
+        # so it needs a datamodel version too.
+        if scene.vs.export_format in ('DMX', 'FBX'):
             if State.engineBranch is None:
                 row = l.split(factor=0.33)
                 row.label(text=get_id("exportpanel_dmxver"))
@@ -137,6 +139,8 @@ class SMD_PT_Scene(Panel):
                 sub.prop(scene.vs, "dmx_encoding", text="")
                 sub.prop(scene.vs, "dmx_format", text="")
                 sub.enabled = not sub.alert
+            if scene.vs.export_format == 'FBX':
+                l.label(text=get_id("exportpanel_fbx_companion"), icon='INFO')
         elif scene.vs.export_format == 'SMD':
             row = l.split(factor=0.33)
             row.label(text=get_id("smd_format", True) + ":")
@@ -176,7 +180,8 @@ class SMD_PT_SceneEncodingOptions(Panel):
 
     @classmethod
     def poll(cls, context):
-        return State.compiler != Compiler.MODELDOC or State.exportFormat == ExportFormat.DMX
+        return State.compiler != Compiler.MODELDOC or State.exportFormat in (
+            ExportFormat.DMX, ExportFormat.FBX)
 
     def draw(self, context) -> None:
         scene = context.scene
@@ -186,6 +191,11 @@ class SMD_PT_SceneEncodingOptions(Panel):
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
             row.row().prop(scene.vs, "prefab_export_mode", expand=True)
+        elif State.exportFormat == ExportFormat.FBX:
+            # Forced: FBX has nowhere else to put prefabs, so the companion DMX takes them.
+            row = l.row().split(factor=0.33)
+            row.label(text=get_id("prefab_export_mode", True) + ":")
+            row.label(text=get_id("prefab_export_mode_fbx"), icon='CHECKMARK')
 
         if State.compiler != Compiler.MODELDOC:
             row = l.row().split(factor=0.33)
@@ -968,7 +978,8 @@ class SMD_PT_Shapekey(Properties_Panel):
             row.operator("wm.url_open",text=get_id("exportables_flex_help", True),icon='HELP').url = "http://developer.valvesoftware.com/wiki/Blender_SMD_Tools_Help#Flex_properties"
 
         elif active_object.vs.flex_controller_mode == 'DME':
-            if State.exportFormat != ExportFormat.DMX:
+            # FBX carries the controllers in its companion DMX, so only SMD drops them.
+            if State.exportFormat not in (ExportFormat.DMX, ExportFormat.FBX):
                 info_row = box.row()
                 info_row.label(text=get_id("warn_dme_dmx_only_panel"), icon='INFO')
 

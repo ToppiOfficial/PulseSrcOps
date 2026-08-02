@@ -165,7 +165,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             if (not self.to_clipboard and prefab_mode_is_dme(context.scene)
                     and self.export_type in ('JIGGLEBONES', 'ATTACHMENTS', 'HITBOXES', 'PROCEDURAL')):
                 self.report({'ERROR'},
-                    f"{self.export_type.title()} are embedded into the model DMX in DME mode. "
+                    f"{self.export_type.title()} are embedded into the model DMX. "
                     f"Export the model instead, or switch Prefab Mode to QCI.")
                 return {'CANCELLED'}
 

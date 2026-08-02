@@ -1,23 +1,15 @@
-import bpy, collections, json, os
-from math import degrees
-from mathutils import Matrix
+import bpy, os
 
 from ..utils import *
-from ..keyvalues3 import KVBool, KVVector3
-from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
+from .. import ordered_set, flex
 
 from .records import BakeResult
 
 
-def _json_safe(v):
-    if isinstance(v, KVBool):    return v.value
-    if isinstance(v, KVVector3): return [v.x, v.y, v.z]
-    if isinstance(v, (bool, int, float, str)): return v
-    return list(v)  # Vector / Quaternion / datamodel arrays
-
-
 # Hands the Baker's output to Blender's bundled FBX exporter. The bake already applied the
 # axis/scale transform, so the operator runs with an identity conversion; the rest is glue.
+# Source data that has no FBX representation (skeleton flex controllers, jigglebones,
+# hitboxes, procedural bones) ships in the companion .dmx the exporter writes alongside.
 # ponytail: wraps bpy.ops.export_scene.fbx rather than forking io_scene_fbx.
 class FbxWriter:
     def __init__(self, reporter, id, bake_results, name, dir_path, *,
@@ -33,8 +25,6 @@ class FbxWriter:
         self.exportable_bones = exportable_bones
         self.exportable_boneNames = exportable_boneNames
         self.all_bake_results = all_bake_results
-        # Same test DmxWriter uses.
-        self.is_anim = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
 
     def _warning(self, *a): self.r.warning(*a)
     def _error(self, *a): self.r.error(*a)
@@ -56,8 +46,6 @@ class FbxWriter:
             if bake.object and bake.object.type == 'MESH' and bake.shapes:
                 self._restore_shapes(bake)
 
-        self._write_custom_props(meshes)
-
         if self.armature:
             self._apply_bone_names(meshes)
             for bake in self.bake_results:
@@ -78,19 +66,11 @@ class FbxWriter:
             ob.select_set(True)
         bpy.context.view_layer.objects.active = self.armature or objects[0]
 
-        scene = bpy.context.scene
-        # Only an animation export writes animation - a model whose rig merely has an action
-        # assigned must not drag it in, or every import spawns stray "<name>|Scene" actions.
-        action = self.armature.animation_data.action if (
-            self.is_anim and self.armature and self.armature.animation_data) else None
+        # Animations are DMX-only, so this is always a model: rest pose, and bake_anim off so
+        # a rig that merely has an action assigned does not drag it in - that spawns a stray
+        # "<name>|Scene" action on every import.
         if self.armature:
-            self.armature.data.pose_position = "POSE" if self.is_anim else "REST"
-        saved_range = None
-        if action:
-            saved_range = (scene.frame_start, scene.frame_end)
-            start, end = action.frame_range
-            scene.frame_start = int(start)
-            scene.frame_end = max(int(end), int(start))
+            self.armature.data.pose_position = "REST"
 
         # Matches how _setup_skeleton built exportable_bones.
         deform_only = bool(self.armature) and \
@@ -115,17 +95,10 @@ class FbxWriter:
                 use_mesh_modifiers=False,
                 mesh_smooth_type='FACE',
                 use_triangles=False,
-                use_custom_props=True,
                 add_leaf_bones=False,
                 use_armature_deform_only=deform_only,
                 armature_nodetype='NULL',
-                bake_anim=bool(action),
-                bake_anim_use_all_bones=True,
-                bake_anim_use_nla_strips=False,
-                bake_anim_use_all_actions=False,
-                bake_anim_force_startend_keying=True,
-                bake_anim_step=1.0,
-                bake_anim_simplify_factor=0.0,
+                bake_anim=False,
                 path_mode='AUTO',
                 embed_textures=False,
                 batch_mode='OFF',
@@ -134,8 +107,6 @@ class FbxWriter:
             self._error(get_id("exporter_err_open", True).format("FBX", err))
             return 0
         finally:
-            if saved_range:
-                scene.frame_start, scene.frame_end = saved_range
             for datablock, old_name in reversed(renamed):
                 datablock.name = old_name
 
@@ -155,19 +126,75 @@ class FbxWriter:
         return hasattr(bpy.ops.export_scene, "fbx")
 
     # The Baker bakes each shape key into its own Mesh; FBX wants them back as shape keys.
+    # Names go through the same resolution DmxWriter uses, so the blendshapes ship under the
+    # delta names the engine expects - including the L/R pair a split override expands into.
     def _restore_shapes(self, bake: BakeResult) -> None:
         ob = bake.object
         count = len(ob.data.vertices)
+        basis = [0.0] * (count * 3)
+        ob.data.vertices.foreach_get("co", basis)
         ob.shape_key_add(name="Basis", from_mix=False)
+
+        dme = getattr(getattr(bake.src, 'vs', None), 'flex_controller_mode', 'DME') == 'DME'
+        corrective_names = get_dme_corrective_delta_names(bake.src) if dme else set()
+        delta_map = get_dme_delta_name_map(bake.src) if dme else {}
+        split_map = get_dme_split_delta_map(bake.src) if dme else {}
+        balance = bake.stereo_balance(ob, self._warning)
+        if split_map and not bake.balance_vg:
+            self._warning(get_id("exporter_warn_dme_split_no_balance", True).format(bake.name))
+
+        # Correctives live as delta states on a DmeMesh, and the companion DMX carries no
+        # mesh. The blendshape still ships in the FBX, but nothing declares it a corrective.
+        sep = getCorrectiveShapeSeparator()
+        if corrective_names or any(sep in n for n in bake.shapes):
+            self._warning(get_id("exporter_warn_fbx_corrective", True).format(bake.name))
+
+        def add(name, co):
+            ob.shape_key_add(name=name, from_mix=False).data.foreach_set("co", co)
+
         for shape_name, mesh in bake.shapes.items():
             if len(mesh.vertices) != count:
                 self._warning(get_id("exporter_warn_fbx_shapeverts", True).format(shape_name, bake.name))
                 continue
             co = [0.0] * (count * 3)
             mesh.vertices.foreach_get("co", co)
-            kb = ob.shape_key_add(name=shape_name, from_mix=False)
-            kb.data.foreach_set("co", co)
+
+            if dme:
+                name, extras, split_base = resolve_dme_delta_names(
+                    shape_name, corrective_names, delta_map, split_map)
+            else:
+                name, extras, split_base = self._corrective_name(bake, shape_name), [], None
+
+            if split_base is not None:
+                add(split_base + "L", self._split_co(co, basis, balance, left=True))
+                add(split_base + "R", self._split_co(co, basis, balance, left=False))
+                continue
+            add(name, co)
+            for extra in extras:  # one shape key feeding several deltas
+                add(extra, co)
         ob.data.update()
+
+    # Scales the shape's offset from basis by the stereo balance, as DmxWriter does per delta.
+    @staticmethod
+    def _split_co(co, basis, balance, left) -> list:
+        out = []
+        for i, b in enumerate(balance):
+            w = (1.0 - b) if left else b
+            for k in range(i * 3, i * 3 + 3):
+                out.append(basis[k] + (co[k] - basis[k]) * w)
+        return out
+
+    # Legacy (non-DME) correctives: when the drivers disagree with the shape key's name, the
+    # driver-derived name is the one the compiler looks up. Mirrors DmxWriter.
+    def _corrective_name(self, bake: BakeResult, shape_name: str) -> str:
+        sep = getCorrectiveShapeSeparator()
+        kb = bake.src.data.shape_keys.key_blocks.get(shape_name) if sep in shape_name else None
+        if not kb:
+            return shape_name
+        drivers = ordered_set.OrderedSet(flex.getCorrectiveShapeKeyDrivers(kb) or [])
+        if drivers and drivers != ordered_set.OrderedSet(shape_name.split(sep)):
+            return sep.join(drivers)
+        return shape_name
 
     # Baked meshes carry no modifiers, so the skin bind is recreated. Bone-parented meshes
     # become one full-weight group, as DMX/SMD emit for them anyway.
@@ -193,9 +220,8 @@ class FbxWriter:
         bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
     # DMX/SMD apply bone.vs export offsets via get_bone_matrix(). The FBX is written from the
-    # armature itself, so they go into its rest pose. The mesh stays put (same rest backs the
-    # skin clusters), but an action needs re-keying to world @ off - the offset turns each
-    # bone's local space.
+    # armature itself, so they go into its rest pose. The mesh stays put - the same rest backs
+    # the skin clusters. No action to re-key: animations are DMX-only.
     def _apply_bone_offsets(self) -> None:
         arm = self.armature
         if not arm:
@@ -218,16 +244,6 @@ class FbxWriter:
             print(f"- No bone export offsets on \"{src_name}\" ({len(arm.pose.bones)} bones)")
             return
 
-        if self.is_anim and arm.animation_data and arm.animation_data.action:
-            # retarget_rest_pose re-keys this, and the baked armature shares the user's Action.
-            slot_id = getattr(arm.animation_data.action_slot, "identifier", None)
-            action = arm.animation_data.action.copy()
-            arm.animation_data.action = action
-            if slot_id:
-                slot = next((s for s in action.slots if s.identifier == slot_id), None)
-                if slot:
-                    arm.animation_data.action_slot = slot
-
         def mutate(edit_bones):
             # Connected children track their parent's tail, which the offset moves.
             for eb in edit_bones:
@@ -236,7 +252,7 @@ class FbxWriter:
                 eb = edit_bones[name]
                 eb.matrix = eb.matrix @ off
 
-        retarget_rest_pose(arm, offsets if self.is_anim else (), mutate, post=offsets)
+        retarget_rest_pose(arm, (), mutate, post=offsets)
         sample = ", ".join(sorted(offsets)[:5])
         print(f"- Baked export offsets into {len(offsets)}/{len(arm.pose.bones)} bones "
               f"of \"{src_name}\" ({sample}{', ...' if len(offsets) > 5 else ''})")
@@ -281,123 +297,6 @@ class FbxWriter:
     @staticmethod
     def _data_collection(data):
         return bpy.data.meshes if isinstance(data, bpy.types.Mesh) else bpy.data.armatures
-
-    # -- custom content ------------------------------------------------------
-    # use_custom_props turns Blender custom properties into FBX user properties (object ->
-    # Model node, pose bone -> that bone's Model node), so Source data rides there as JSON in
-    # the same vocabulary the KV3/DME writers use. Runs before _apply_bone_names.
-    def _write_custom_props(self, meshes: list) -> None:
-        for bake in self.bake_results:
-            if bake.object in meshes and bake.src:
-                payload = self._flex_payload(bake.src)
-                if payload:
-                    bake.object["source_flex"] = json.dumps(payload)
-
-        if not (self.armature and self.armature_src):
-            return
-        self._write_jigglebone_props()
-        self._write_hitbox_props()
-        self._write_procbone_props()
-
-    def _flex_payload(self, src: bpy.types.Object) -> dict:
-        vs = getattr(src, "vs", None)
-        if not vs:
-            return {}
-        # Only DME mode authors these collections. SIMPLE derives from shape key names, which a
-        # consumer can do from the blendshapes; ADVANCED points at a file that is not in here.
-        mode = getattr(vs, "flex_controller_mode", 'SIMPLE')
-        if mode != 'DME':
-            if mode == 'ADVANCED' and vs.flex_controller_source and hasShapes(src):
-                self._warning(get_id("exporter_warn_fbx_flex_advanced", True).format(src.name))
-            return {}
-        controllers = [
-            dict(name=fc.controller_name, shapekey=fc.shapekey, delta_name=fc.raw_delta_name,
-                 group=fc.resolved_flexgroup(), eyelid=fc.eyelid, stereo=fc.stereo,
-                 flex_min=fc.flex_min, flex_max=fc.flex_max)
-            for fc in getattr(vs, "dme_flexcontrollers", []) if fc.controller_name
-        ]
-        rules = [
-            dict(type=r.rule_type, name=r.name, expression=r.expression, components=r.components,
-                 dominators=r.dominator_names, suppressed=r.suppressed_names)
-            for r in getattr(vs, "dme_flex_rules", []) if r.name or r.dominator_names
-        ]
-        if not controllers and not rules:
-            return {}
-        return dict(controllers=controllers, rules=rules)
-
-    def _write_jigglebone_props(self) -> None:
-        for bone in self.armature_src.data.bones:
-            vs = getattr(bone, "vs", None)
-            if not vs or not vs.bone_is_jigglebone:
-                continue
-            pb = self.armature.pose.bones.get(bone.name)
-            if not pb:
-                continue
-            length = bone.length if vs.use_bone_length_for_jigglebone_length else vs.jiggle_length
-            kwargs = _jigglebone.kv3_kwargs(vs, self._export_name(bone.name), length)
-            pb["source_jigglebone"] = json.dumps({k: _json_safe(v) for k, v in kwargs.items()})
-
-    def _write_hitbox_props(self) -> None:
-        arm_data = self.armature_src.data
-        entries = [
-            {k: _json_safe(v) for k, v in
-             _hitbox.kv3_capsule_kwargs(e, self._export_name(e.bone_name)).items()}
-            for e in getattr(arm_data.vs, "hitboxes", [])
-            if e.bone_name and arm_data.bones.get(e.bone_name)
-        ]
-        if entries:
-            self.armature["source_hitboxes"] = json.dumps(entries)
-
-    # Mirrors prefab_io.proceduralbone.write_dme_* - same math, JSON instead of DME attrs.
-    def _write_procbone_props(self) -> None:
-        arm = self.armature_src
-        scale = self.armature.matrix_world.to_scale()
-        scene = bpy.context.scene
-        seen: set[str] = set()
-
-        for idx, entry in enumerate(getattr(arm.data.vs, "proc_bones", [])):
-            helper = entry.helper_bone
-            pb = self.armature.pose.bones.get(helper) if helper else None
-            if not pb or helper in seen:
-                continue
-            seen.add(helper)
-
-            helper_bone = arm.data.bones.get(helper)
-            parent = (helper_bone.parent.name if helper_bone and helper_bone.parent
-                      else entry.driver_bone)
-            base = _proceduralbone.basepos_local(arm, helper, parent)
-            payload = {
-                "type": entry.proc_type,
-                "parent_bone": self._export_name(parent),
-                "base_pos": [base.x * scale[0], base.y * scale[1], base.z * scale[2]],
-            }
-
-            if entry.proc_type == 'TRIGGER':
-                transforms = _proceduralbone.build_trigger_transforms(arm, entry, idx, scene)
-                if not (entry.action and entry.driver_bone and transforms):
-                    self._warning(get_id("exporter_warn_procbone_no_triggers", True).format(helper))
-                    continue
-                payload["control_bone"] = self._export_name(entry.driver_bone)
-                payload["tolerances"] = [degrees(t[2]) for t in transforms]
-                payload["trigger_rotations"] = [list(getDatamodelQuat(t[0].to_quaternion())) for t in transforms]
-                payload["target_rotations"] = [list(getDatamodelQuat(t[1].to_quaternion())) for t in transforms]
-                payload["target_positions"] = [
-                    [p.x * scale[0], p.y * scale[1], p.z * scale[2]]
-                    for p in (t[1].to_translation() for t in transforms)
-                ]
-            else:
-                if not entry.driver_bone:
-                    self._warning(get_id("exporter_warn_procbone_no_target", True).format(helper))
-                    continue
-                payload["aim_target"] = self._export_name(entry.driver_bone)
-                payload["aim_offset"] = list(entry.lookat_offset)
-                payload["aim_vector"] = list(_proceduralbone.axes_to_vec(entry.lookat_aim_axis))
-                payload["up_vector"] = list(_proceduralbone.axes_to_vec(entry.lookat_up_axis))
-
-            pb["source_procbone"] = json.dumps(payload)
-
-    def _export_name(self, bone_name: str) -> str:
-        return self.exportable_boneNames.get(bone_name, bone_name)
 
     # Groups before bones, so Blender's own bone-rename sync can't rename them twice.
     def _apply_bone_names(self, meshes: list) -> None:
