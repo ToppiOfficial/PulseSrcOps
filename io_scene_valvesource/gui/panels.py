@@ -13,7 +13,7 @@ from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
                      is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
-from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error
+from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
 from .operators import (
     SMD_OT_AssignBoneRotExportOffset,
     SMD_OT_AddFlexController,
@@ -652,7 +652,10 @@ class SMD_PT_Jigglebones(Properties_Panel):
         active_bone = context.active_bone
 
         box = layout.box()
-        if active_bone and active_bone.select:
+        if active_bone and active_bone.select and _bone_is_hidden(active_bone):
+            box = box.box()
+            box.label(text=get_id('label_bone_hidden', format_string=True), icon='ERROR')
+        elif active_bone and active_bone.select:
             self.draw_jigglebone_properties(box, active_bone)
         else:
             box = box.box()

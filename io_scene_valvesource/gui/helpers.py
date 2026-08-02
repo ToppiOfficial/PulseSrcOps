@@ -4,6 +4,19 @@ from ..utils import get_armature, vertex_float_maps, validate_corrective_compone
 from .. import procbones_sim as _procbones_sim
 
 
+def _bone_is_hidden(bone) -> bool:
+    """True if bone is hidden by its own hide flag or by bone-collection visibility.
+    `bone` may be a Bone or PoseBone; context.active_bone can keep pointing at a bone
+    hidden this way, so callers must check this before editing its properties."""
+    data_bone = getattr(bone, 'bone', bone)
+    if data_bone.hide:
+        return True
+    colls = data_bone.collections
+    if not colls:
+        return False
+    return not any(c.is_visible_effectively for c in colls)
+
+
 def _mesh_type_allows(ob, feature: str) -> bool:
     mt = getattr(ob.vs, 'mesh_type', 'DEFAULT') if ob and hasattr(ob, 'vs') else 'DEFAULT'
     if mt == 'DEFAULT':

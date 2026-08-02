@@ -557,6 +557,53 @@ class _StringDictionary(list):
 			for string in self:
 				out_file.write( _encode_binary_string(string) )
 	
+class _ElementList(list):
+	'''Element list that keeps a {id: first element with that id} index in sync, so DataModel.validate_element is O(1) instead of O(n).'''
+	def __init__(self,iterable=()):
+		super().__init__(iterable)
+		self.by_id = {}
+		self._reindex()
+
+	def _reindex(self):
+		self.by_id = {}
+		for elem in self: self.by_id.setdefault(elem.id,elem)
+
+	def _add(self,elem):
+		self.by_id.setdefault(elem.id,elem)
+
+	def append(self,elem):
+		super().append(elem)
+		self._add(elem)
+	def extend(self,elems):
+		for elem in elems: self.append(elem)
+	def insert(self,i,elem):
+		super().insert(i,elem)
+		self._add(elem)
+
+	# removal can expose a shadowed duplicate id, so rebuild wholesale - these paths are rare
+	def remove(self,elem):
+		super().remove(elem)
+		self._reindex()
+	def pop(self,i=-1):
+		elem = super().pop(i)
+		self._reindex()
+		return elem
+	def clear(self):
+		super().clear()
+		self.by_id.clear()
+	def __setitem__(self,i,value):
+		super().__setitem__(i,value)
+		self._reindex()
+	def __delitem__(self,i):
+		super().__delitem__(i)
+		self._reindex()
+	def sort(self,**kwargs):
+		super().sort(**kwargs)
+		self._reindex()
+	def reverse(self):
+		super().reverse()
+		self._reindex()
+
 class DataModel:
 	'''Container for Element objects. Has a format name (str) and format version (int). Can write itself to a string object or a file.'''
 	
@@ -585,7 +632,7 @@ class DataModel:
 		self.format = format
 		self.format_ver = format_ver
 		
-		self.__elements = []
+		self.__elements = _ElementList()
 		self.__prefix_attributes = Element(self,"")
 		self.root = None
 		self.allow_random_ids = True
@@ -597,11 +644,10 @@ class DataModel:
 		if elem._is_placeholder:
 			return
 
-		try:
-			collision = self.elements[self.elements.index(elem)]
-		except ValueError:
+		collision = self.elements.by_id.get(elem.id)
+		if collision is None:
 			return # no match
-		
+
 		if not collision._is_placeholder:
 			raise IDCollisionError("{} invalid for {}: ID collision with {}. ID is {}.".format(elem, self, collision, elem.id))
 		
@@ -1080,3 +1126,28 @@ def load(path = None, in_file = None, element_path = None):
 		return dm
 	finally:
 		if in_file: in_file.close()
+if __name__ == "__main__":
+	# self-check for the _ElementList id index used by validate_element
+	dm = DataModel("test",1)
+	a = dm.add_element("a",id="a")
+	b = dm.add_element("b",id="b")
+	assert dm.elements.by_id == {a.id:a, b.id:b}
+
+	try:
+		dm.add_element("a again",id="a")
+		assert False, "expected IDCollisionError"
+	except IDCollisionError: pass
+
+	# placeholders don't collide, and stay the indexed element once resolved
+	ph = dm.add_element("missing",id="c",_is_placeholder=True)
+	c = dm.add_element("c",id="c")
+	assert dm.elements.by_id[c.id] is ph
+
+	# index survives removal, including un-shadowing a duplicate id
+	dm.elements.remove(ph)
+	assert dm.elements.by_id[c.id] is c
+	dm.elements.remove(b)
+	assert b.id not in dm.elements.by_id
+	dm.add_element("b",id="b") # id is free again
+
+	print("ok")

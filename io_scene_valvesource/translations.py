@@ -942,6 +942,10 @@ _data = {
         'en': "Base Spring Properties:",
         'ja': "ベーススプリングプロパティ:",
     },
+    'label_bone_hidden': {
+        'en': "Active Bone is Hidden",
+        'ja': "アクティブなボーンは非表示です",
+    },
     'label_boing_properties': {
         'en': "Boing Properties:",
         'ja': "バネ動作プロパティ:",

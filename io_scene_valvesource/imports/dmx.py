@@ -79,7 +79,101 @@ def load_dmx(filepath: str, smd_type=None, upAxis: str | None = None) -> ParsedD
                 parsed.upAxis = axis[0]
                 break
 
+    _fix_vrf_nmskel_axis(parsed)
+    _fix_vrf_nmclip_axis(parsed)
+
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# ValveResourceFormat NM (vskel / vnmclip) axis fixup
+#
+# VRF re-rolls root_motion by F - a 120 degree turn about (-1,-1,-1) - and compensates
+# its children so nothing else moves. Both halves are broken:
+#   - vskel:   the child compensation composes on the wrong side (`orientation * F`
+#              instead of `F * orientation`), rotating every subtree under root_motion.
+#   - vnmclip: the fixup lands on the animation frames but not on the skeleton they are
+#              keyed against, so the animated pose comes out rotated by F.
+# Both are undone here, which leaves the raw NM skeleton and keeps clips lined up with
+# skeletons imported from the matching vskel.
+# ---------------------------------------------------------------------------
+
+_NM_FIXUP = Quaternion((0.5, -0.5, -0.5, -0.5))  # VRF's NmSkelRotationFixup
+_NM_FIXUP_INV = _NM_FIXUP.inverted()
+
+
+def _nm_unrotate(v):
+    """F^-1 applied to a vector. F cycles the axes, so this is a swizzle."""
+    return datamodel.Vector3([v[2], v[0], v[1]])
+
+
+def _dmx_quat(q: Quaternion):
+    return datamodel.Quaternion([q.x, q.y, q.z, q.w])
+
+
+def _nm_root(parsed: ParsedDmx):
+    """The root_motion joint of a ValveResourceFormat NM export, or None."""
+    tags = parsed.root.get("exportTags")
+    if not tags or "Source 2 Viewer" not in (tags.get("source") or ""):
+        return None
+    return next((c for c in cast(list, parsed.DmeModel.get("children") or [])
+                 if c.name == "root_motion"), None)
+
+
+def _fix_vrf_nmskel_axis(parsed: ParsedDmx) -> None:
+    root = _nm_root(parsed)
+    if not root:
+        return
+    q = root["transform"]["orientation"]
+    if any(abs(q[i] - 0.5) > 1e-3 for i in range(4)):  # not the fixup quaternion
+        return
+    root["transform"]["orientation"] = _dmx_quat(blender_quat(q) @ _NM_FIXUP)
+    for child in cast(list, root.get("children") or []):
+        trfm = child["transform"]
+        trfm["position"] = _nm_unrotate(trfm["position"])
+        trfm["orientation"] = _dmx_quat(blender_quat(trfm["orientation"]) @ _NM_FIXUP_INV)
+    parsed.warnings.append(
+        "Removed ValveResourceFormat's broken root_motion axis fixup from this skeleton")
+
+
+def _fix_vrf_nmclip_axis(parsed: ParsedDmx) -> None:
+    root = _nm_root(parsed)
+    anim_list = parsed.root.get("animationList")
+    if not root or not anim_list:
+        return
+
+    binds = {c["transform"].id: c["transform"]["position"]
+             for c in cast(list, root.get("children") or [])}
+    channels = [ch for ch in anim_list["animations"][0]["channels"]
+                if ch["toElement"] and ch["toElement"].id in binds]
+
+    # Bone offsets barely move over an animation, so the first keyed position sits near
+    # the bind position - unless the frames carry the fixup and the skeleton doesn't.
+    def error(rotated: bool) -> float:
+        total = 0.0
+        for ch in channels:
+            if ch["toAttribute"] != "position":
+                continue
+            values = ch["log"]["layers"][0]["values"]
+            if not values:
+                continue
+            first = _nm_unrotate(values[0]) if rotated else values[0]
+            bind = binds[ch["toElement"].id]
+            total += sum((first[i] - bind[i]) ** 2 for i in range(3))
+        return total
+
+    raw = error(False)
+    if raw < 1e-6 or error(True) * 4 > raw:
+        return
+
+    for ch in channels:
+        values = ch["log"]["layers"][0]["values"]
+        if ch["toAttribute"] == "position":
+            values[:] = [_nm_unrotate(v) for v in values]
+        elif ch["toAttribute"] == "orientation":
+            values[:] = [_dmx_quat(_NM_FIXUP_INV @ blender_quat(v)) for v in values]
+    parsed.warnings.append(
+        "Removed ValveResourceFormat's root_motion axis fixup from this animation")
 
 
 # ---------------------------------------------------------------------------
