@@ -176,7 +176,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
 
     @classmethod
     def poll(cls, context):
-        return State.compiler != Compiler.MODELDOC
+        return State.compiler != Compiler.MODELDOC or State.exportFormat == ExportFormat.DMX
 
     def draw(self, context) -> None:
         scene = context.scene
@@ -187,9 +187,10 @@ class SMD_PT_SceneEncodingOptions(Panel):
             row.label(text=get_id("prefab_export_mode", True) + ":")
             row.row().prop(scene.vs, "prefab_export_mode", expand=True)
 
-        row = l.row().split(factor=0.33)
-        row.label(text=get_id("bone_naming_label", True) + ":")
-        row.row().prop(scene.vs, "force_source2_bone_sanitize", toggle=True)
+        if State.compiler != Compiler.MODELDOC:
+            row = l.row().split(factor=0.33)
+            row.label(text=get_id("bone_naming_label", True) + ":")
+            row.row().prop(scene.vs, "force_source2_bone_sanitize", toggle=True)
 
 
 class SMD_PT_SceneTransform(Panel):

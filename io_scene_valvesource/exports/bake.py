@@ -84,6 +84,14 @@ class Baker:
         if ob.type == "MESH":
             self._pre_bake_mesh_ops(ob)
 
+        # A constraint-driven rig's motion is already baked into its actions by now, so its
+        # bone constraints are redundant - and harmful: they resolve their targets in world
+        # space, which the transform below is about to change out from under them.
+        if ob.type == "ARMATURE" and result.src.session_uid in getattr(self._exporter, "_constraint_bake_actions", {}):
+            for pb in ob.pose.bones:
+                for con in pb.constraints:
+                    con.mute = True
+
         # -- coordinate transform ---------------------------------------------
         ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
         # Subtract the top parent's origin in Blender space, right of the scale/axis

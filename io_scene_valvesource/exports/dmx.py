@@ -56,9 +56,9 @@ class DmxWriter:
         self.source2 = source2 = dm.format_ver >= 22
         self.export_bone_scale = source2
         self.keywords = getDmxKeywords(dm.format_ver)
-        # DME prefab mode (Source 1 only): embed jigglebones/hitboxes/procedural bones + keep
-        # attachments inside the model DMX instead of writing .qci prefabs.
-        self.dme_mode = (not source2) and prefab_mode_is_dme(bpy.context.scene)
+        # DME prefab mode: embed jigglebones/hitboxes/procedural bones + keep attachments
+        # inside the model DMX instead of writing .qci/.vmdl prefabs.
+        self.dme_mode = prefab_mode_is_dme(bpy.context.scene)
 
         self.want_jointlist = dm.format_ver >= 11
         self.want_jointtransforms = dm.format_ver in range(0, 21)
@@ -270,7 +270,7 @@ class DmxWriter:
             bench.report("Empties")
 
     def _write_procedural_bones(self):
-        if not (self.dme_mode and not self.is_anim and not self.source2 and self.armature and self.armature_src):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src):
             return
         avs = getattr(self.armature_src.data, 'vs', None)
         proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []

@@ -738,6 +738,47 @@ def valvesource_vertex_maps(id) -> set[str]:
     else:
         return set()
 
+def isConstraintDriven(ob : bpy.types.Object) -> bool:
+    """True when an armature's pose comes from bone constraints rather than its own
+    keyframes - a rig following another one. Such a rig has no action, so it has no frame
+    range and no name to export under; SmdExporter._bake_constraint_poses bakes the
+    constraint result into real actions before anything else looks at it."""
+    if ob.type != 'ARMATURE':
+        return False
+    ad = ob.animation_data
+    if ad and ad.action:
+        return False
+    return any(not c.mute for pb in ob.pose.bones for c in pb.constraints)
+
+def constraintBakeSource(ob : bpy.types.Object):
+    """The armature a constraint-driven rig follows, or None. The most-targeted one wins:
+    such a rig usually also carries a few constraints aimed at helpers or at itself, and
+    those must not outvote the rig actually supplying the motion."""
+    targets = collections.Counter()
+    for pb in ob.pose.bones:
+        for c in pb.constraints:
+            target = getattr(c, 'target', None)
+            if not c.mute and target and target != ob and target.type == 'ARMATURE':
+                targets[target] += 1
+    return targets.most_common(1)[0][0] if targets else None
+
+def constraintBakeAnimations(rig : bpy.types.Object, src : bpy.types.Object) -> list:
+    """(action, slot, export name) for every animation a constraint-driven `rig` should
+    produce, reading `rig`'s own action_selection mode against the rig that drives it."""
+    ad = src.animation_data
+    mode = rig.data.vs.action_selection
+    if mode == 'FILTERED_ACTIONS':
+        jobs = [(a, None) for a in actionsForFilter(rig.vs.action_filter)]
+    elif mode == 'FILTERED' and ad and ad.action:
+        jobs = [(ad.action, s) for s in actionSlotsForFilter(src)]
+    elif ad and ad.action:
+        jobs = [(ad.action, ad.action_slot)]
+    else:
+        jobs = []
+    # A single-slot action's slot is just named after the rig holding it, which says nothing
+    # about the animation - only fall back to slot names when one action holds several.
+    return [(a, s, s.name_display if s and len(a.slots) > 1 else a.name) for a, s in jobs if a]
+
 def actionSlotsForFilter(obj : bpy.types.Object):
     from fnmatch import fnmatch
     if not obj.animation_data:
@@ -971,6 +1012,22 @@ def make_export_list(scene: bpy.types.Scene):
                     # CURRENT mode with no active slot: keep the row so its action
                     # settings stay reachable instead of the row disappearing.
                     i_name = makeDisplayName(ob)
+            else:
+                # No action of its own, but its bone constraints follow a rig that has them.
+                # Export bakes those out, so label the row the same way a keyframed armature
+                # is labelled - the mode and count - and name where the motion comes from.
+                bake_src = constraintBakeSource(ob) if isConstraintDriven(ob) else None
+                if bake_src:
+                    i_icon = i_type = "ACTION_SLOT"
+                    jobs = constraintBakeAnimations(ob, bake_src)
+                    label = get_id("exportables_arm_bake_source", True).format(ob.name, bake_src.name)
+                    if ob.data.vs.action_selection == 'CURRENT':
+                        i_name = makeDisplayName(ob, jobs[0][2]) if jobs else label
+                    elif ob.data.vs.action_selection == 'FILTERED' and ob.vs.action_filter in ("", "*"):
+                        i_name = get_id("exportables_arm_no_slot_filter", True).format(label, len(jobs))
+                    else:
+                        i_name = get_id("exportables_arm_filter_result", True).format(
+                            label, ob.vs.action_filter, len(jobs))
         else:
             i_name = makeDisplayName(ob)
             i_icon = MakeObjectIcon(ob, prefix="OUTLINER_OB_")
@@ -1365,19 +1422,18 @@ prefab_type_info = {
 
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs should be encoded into the model DMX (DME mode) rather than
-    written to .qci files. DME embedding is a Source 1 concept only - it is always
-    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl.
-    Embedding only happens in the DMX writer, so SMD export always uses file mode."""
-    return (State.compiler != Compiler.MODELDOC
-            and State.exportFormat == ExportFormat.DMX
+    written to .qci/.vmdl files. Supported on both Source 1 and Source 2 (PulseMDL /
+    PulseMDL2). Embedding only happens in the DMX writer, so SMD export always uses
+    file mode."""
+    return (State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
 def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str, int]]:
     """Prefab types that the given armature currently has content for.
 
-    Returns a list of (prefab_type, count) in display order. PROCEDURAL is only
-    offered for Source 1 (.vrd); Source 2 procedural export is not implemented.
+    Returns a list of (prefab_type, count) in display order. PROCEDURAL needs either
+    Source 1 (.vrd) or DME mode; there is no Source 2 file-mode procedural writer.
     """
     if arm is None or arm.type != 'ARMATURE':
         return []
@@ -1389,21 +1445,21 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     proc_entries = list(getattr(avs, 'proc_bones', [])) if avs else []
 
     result: list[tuple[str, int]] = []
+    dme = prefab_mode_is_dme(scene)
 
     jiggles = get_jigglebones(arm)
     if jiggles:
         result.append(('JIGGLEBONES', len(jiggles)))
 
     # LOOKAT proc bones can surface as attachments, but only where the exporter
-    # actually writes one: MODELDOC never does; DME mode writes one only for a
-    # non-zero offset (a zero offset aims the bone directly, no attachment);
+    # actually writes one: MODELDOC file mode never does; DME mode writes one only
+    # for a non-zero offset (a zero offset aims the bone directly, no attachment);
     # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
     # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
     # DmxWriter._write_procedural_bones / PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
     lookat_pairs: set[tuple[str, tuple]] = set()
-    if State.compiler != Compiler.MODELDOC:
-        dme = prefab_mode_is_dme(scene)
+    if dme or State.compiler != Compiler.MODELDOC:
         for e in proc_entries:
             if getattr(e, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
@@ -1421,7 +1477,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     if hitboxes:
         result.append(('HITBOXES', len(hitboxes)))
 
-    if State.compiler != Compiler.MODELDOC:
+    if dme or State.compiler != Compiler.MODELDOC:
         valid_proc = [e for e in proc_entries if e.helper_bone and arm.data.bones.get(e.helper_bone)]
         if valid_proc:
             result.append(('PROCEDURAL', len(valid_proc)))

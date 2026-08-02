@@ -3,7 +3,7 @@ __all__ = ['ValveSource_Exportable', 'ValveSource_SceneProps']
 import bpy
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
                        CollectionProperty, FloatProperty, PointerProperty)
-from ..utils import (get_id, State, Compiler, axes, axes_forward, dmx_versions_source1,
+from ..utils import (get_id, State, axes, axes_forward, dmx_versions_source1,
                      dmx_versions_source2, get_active_exportable)
 from .. import datamodel, procbones_sim as _procbones_sim
 from .items import MaterialPathItem
@@ -26,20 +26,12 @@ _encoding_to_format = {'1': '1', '2': '1', '3': '15', '4': '15', '5': '18', '9':
 _format_to_encoding = {'1': '2', '15': '4', '18': '5', '22': '9', '22_modeldoc': '9'}
 
 
-# Cached so the strings we return stay referenced (dynamic enum items must not be
-# garbage-collected while Blender holds them).
-_prefab_export_mode_items_cache = []
-
-def _prefab_export_mode_items(self, context):
-    # Label the FILE option after the format it actually writes: .vmdl for ModelDoc,
-    # .qc(i) for Source 1.
-    file_label = "VMDL" if State.compiler == Compiler.MODELDOC else "QC"
-    global _prefab_export_mode_items_cache
-    _prefab_export_mode_items_cache = [
-        ('QCI', file_label, get_id("prefab_export_mode_qci_tip"), 0),
-        ('DME', "DME", get_id("prefab_export_mode_dme_tip"), 1),
-    ]
-    return _prefab_export_mode_items_cache
+# Identifiers are historical (QCI/DME); the labels describe where the data lands,
+# since the file format varies (.qci/.vmdl) and embedding applies to DMX and FBX.
+_prefab_export_mode_items = (
+    ('QCI', "FILE", get_id("prefab_export_mode_qci_tip"), 0),
+    ('DME', "EMBEDDED", get_id("prefab_export_mode_dme_tip"), 1),
+)
 
 
 def on_dmx_encoding_changed(self, context):
@@ -174,7 +166,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     force_source2_bone_sanitize : BoolProperty(name=get_id("force_source2_bone_sanitize"), description=get_id("force_source2_bone_sanitize_tip"), default=False)
 
     prefab_to_clipboard : BoolProperty(name=get_id("prefab_to_clipboard"), description=get_id("prefab_to_clipboard_tip"), default=False)
-    prefab_export_mode : EnumProperty(name=get_id("prefab_export_mode"), description=get_id("prefab_export_mode_tip"), items=_prefab_export_mode_items)
+    prefab_export_mode : EnumProperty(name=get_id("prefab_export_mode"), description=get_id("prefab_export_mode_tip"), items=_prefab_export_mode_items, default='QCI')
 
     preview_export_pose : BoolProperty(name=get_id('prop_preview_export_pose'), description=get_id('prop_preview_export_pose_tip'), default=True)
     preview_jigglebone_constraints : BoolProperty(name=get_id('prop_preview_jigglebone_constraints'), description=get_id('prop_preview_jigglebone_constraints_tip'), default=True)

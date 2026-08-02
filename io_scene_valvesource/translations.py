@@ -198,6 +198,10 @@ _data = {
         'en': "{0}: All action slots ({1})",
         'ja': "{0}: すべてのアクションスロット（{1}）",
     },
+    'exportables_arm_bake_source': {
+        'en': "{0} (baked from \"{1}\")",
+        'ja': "{0}（「{1}」からベイク）",
+    },
     'exportables_flex_generate': {
         'en': "Generate Controllers",
         'ja': "コントローラーを生成します",
@@ -451,6 +455,10 @@ _data = {
     'exporter_warn_procbone_anim': {
         'en': "Nothing exported for \"{0}\": it drives a procedural bone. Enable 'Export Procedural Bone Animations' to export it anyway.",
         'ja': "「{0}」はエクスポートされませんでした: プロシージャルボーンを駆動しています。エクスポートするには「プロシージャルボーンのアニメーションをエクスポート」を有効にしてください。",
+    },
+    'exporter_warn_constraint_bake_empty': {
+        'en': "\"{0}\" follows \"{1}\" through bone constraints, but that rig has no animation to bake.",
+        'ja': "「{0}」はボーンコンストレイントで「{1}」に追従していますが、そのリグにはベイクするアニメーションがありません。",
     },
     'exporter_warn_source2names': {
         'en': "Consider renaming \"{0}\": in Source 2, model names can contain only lower-case characters, digits, and/or underscores.",
@@ -1383,16 +1391,16 @@ _data = {
         'ja': "プレハブモード",
     },
     'prefab_export_mode_tip': {
-        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported (Source 1 only). QCI writes them to .qci/.vrd prefab files; DME encodes them into the model .dmx instead",
-        'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法 (Source 1 のみ)。QCI は .qci/.vrd プレハブファイルに書き出し、DME はそれらをモデルの .dmx に埋め込みます",
+        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
+        'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
     },
     'prefab_export_mode_qci_tip': {
-        'en': "Write jigglebones, attachments and hitboxes to separate .qci prefab files",
-        'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci プレハブファイルに書き出します",
+        'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",
+        'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci/.vmdl プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (PulseMDL)",
-        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (PulseMDL) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseMDL2)",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseMDL2) が必要です",
     },
     'bone_naming_label': {
         'en': "Bone Naming",

@@ -103,6 +103,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 unhide_all(view_layer.layer_collection)
 
             self.files_exported = self.attemptedExports = 0
+            self._bake_constraint_poses(context)
 
             export_ids = self._collect_export_ids(context)
             success = True
@@ -136,6 +137,64 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         self.export_scene = False
         self.object_name = ""
         return {"FINISHED"}
+
+    def _bake_constraint_poses(self, context) -> None:
+        """Bake every constraint-driven rig's pose into real actions, one per source animation.
+
+        A rig that follows another one through bone constraints owns no keyframes, so on its
+        own it has no frame range to sample and no name to export under - it comes out one
+        frame long, if it is offered for export at all. Baking here, on the untouched scene
+        rig, means the export list, the planner and the frame range all go on to see an
+        ordinary keyframed armature.
+
+        It has to happen before Baker copies and coordinate-transforms the rig: bone
+        constraints resolve their targets in *world* space, so once the copy has been
+        rotated, scaled and moved to the origin they would resolve into the wrong space.
+        The actions are left in the scene for the export to consume and are rolled back by
+        the undo in execute()'s finally.
+        """
+        self._constraint_bake_actions = {}   # rig session_uid -> [(action, export name)]
+        scene = context.scene
+        frame_back = scene.frame_current
+
+        for rig in [ob for ob in scene.objects if isConstraintDriven(ob)]:
+            src = constraintBakeSource(rig)
+            if not src:
+                continue
+            jobs = constraintBakeAnimations(rig, src)
+            if not jobs:
+                self.warning(get_id("exporter_warn_constraint_bake_empty", True).format(rig.name, src.name))
+                continue
+
+            src_ad = src.animation_data or src.animation_data_create()
+            baked = []
+            for action, slot, name in jobs:
+                src_ad.action = action
+                if slot:
+                    src_ad.action_slot = slot
+                first, span = animationFrameRange(src_ad)
+                if not span:
+                    first, span = scene.frame_start, scene.frame_end - scene.frame_start
+                print(f"- Baking \"{name}\" onto {rig.name}, frames {first}-{first + span}")
+
+                # Drop the previous pass's result first: constraints override it on the
+                # bones they drive, but any bone they don't would inherit that pose.
+                if rig.animation_data:
+                    rig.animation_data.action = None
+                select_only(rig)
+                ops.object.mode_set(mode="POSE")
+                try:
+                    ops.nla.bake(frame_start=first, frame_end=first + span, only_selected=False,
+                                 visual_keying=True, clear_constraints=False,
+                                 use_current_action=False, bake_types={'POSE'})
+                finally:
+                    ops.object.mode_set(mode="OBJECT")
+                baked.append((rig.animation_data.action, name))
+
+            if baked:
+                self._constraint_bake_actions[rig.session_uid] = baked
+
+        scene.frame_set(frame_back)
 
     def _collect_export_ids(self, context) -> list:
         ids = []
@@ -452,7 +511,24 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         }.get(State.exportFormat, self._run_smd_writer)
         bench.report("Post Bake")
 
-        if isinstance(source, bpy.types.Object) and source.type == "ARMATURE" and source.data.vs.action_selection != "CURRENT":
+        baked_actions = getattr(self, "_constraint_bake_actions", {}).get(original_id.session_uid) \
+            if isinstance(original_id, bpy.types.Object) else None
+
+        if baked_actions:
+            # Constraint-driven rig: one file per source animation, named after it rather
+            # than after the throwaway action _bake_constraint_poses baked it into.
+            baked_armature = bake_results[0].object
+            ad = baked_armature.animation_data or baked_armature.animation_data_create()
+            for action, name in baked_actions:
+                ad.action = action
+                # Assigning an action only auto-binds a slot when one matches by name, and
+                # the baked copy has been renamed - bind explicitly or nothing evaluates.
+                if action.slots:
+                    ad.action_slot = action.slots[0]
+                self.files_exported += write_func(source, bake_results, self.sanitiseFilename(name), path)
+        elif (isinstance(source, bpy.types.Object) and source.type == "ARMATURE"
+                and source.data.vs.action_selection != "CURRENT"
+                and source.animation_data and source.animation_data.action):
             baked_armature = bake_results[0].object
             if source.data.vs.action_selection == "FILTERED":
                 for slot in actionSlotsForFilter(baked_armature):
