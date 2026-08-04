@@ -66,6 +66,7 @@ class SMD_PT_ViewportSimulation(Panel):
 
         box.label(text=get_id('label_simulate_jigglebones', format_string=True))
         box.prop(context.scene.vs, 'jiggle_sim_enabled', toggle=True)
+        box.row(align=True).prop(vs, 'jiggle_sim_engine', expand=True)
         sub = box.column(align=True)
         sub.prop(vs, 'sim_jiggle_bones')
         sub.prop(vs, 'sim_proc_bones')

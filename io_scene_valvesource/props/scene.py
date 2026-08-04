@@ -173,6 +173,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     preview_proc_bones : BoolProperty(name=get_id('prop_preview_proc_bones'), description=get_id('prop_preview_proc_bones_tip'), default=True)
 
     jiggle_sim_enabled : BoolProperty(name=get_id('prop_proc_sim_enabled'), description=get_id('prop_proc_sim_enabled_tip'), default=False, update=lambda self, ctx: _procbones_sim.on_sim_enabled_changed(self, ctx))
+    jiggle_sim_engine : EnumProperty(name=get_id('prop_jiggle_sim_engine'), description=get_id('prop_jiggle_sim_engine_tip'), items=[('SOURCE1', "Source 1", ""), ('SOURCE2', "Source 2", "")], default='SOURCE1')
     jiggle_sim_rate : IntProperty(name=get_id('prop_jiggle_sim_rate'), description=get_id('prop_jiggle_sim_rate_tip'), default=60, min=12, max=240)
     sim_jiggle_bones : BoolProperty(name=get_id('prop_sim_jiggle_bones'), description=get_id('prop_sim_jiggle_bones_tip'), default=True)
     sim_proc_bones   : BoolProperty(name=get_id('prop_sim_proc_bones'), description=get_id('prop_sim_proc_bones_tip'), default=True)

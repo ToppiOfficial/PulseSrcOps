@@ -89,8 +89,7 @@ _helper_saved_mutes: dict[tuple, bool] = {}
 
 def _is_source2(scene) -> bool:
     try:
-        vs = scene.vs
-        return vs.export_format == 'DMX' and vs.dmx_format in ('22', '22_modeldoc')
+        return scene.vs.jiggle_sim_engine == 'SOURCE2'
     except Exception:
         return False
 

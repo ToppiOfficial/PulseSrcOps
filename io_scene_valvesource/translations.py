@@ -2105,6 +2105,14 @@ _data = {
         'en': "Enable real-time Jiggle/procedural in the 3D viewport",
         'ja': "3Dビューポートでのリアルタイムのジグル/プロシージャルを有効にします",
     },
+    'prop_jiggle_sim_engine': {
+        'en': "Engine",
+        'ja': "エンジン",
+    },
+    'prop_jiggle_sim_engine_tip': {
+        'en': "Source engine used for jigglebone/procbone simulation and viewport preview axis conventions - independent of the export format",
+        'ja': "ジグルボーン/プロシージャルボーンのシミュレーションとビューポートプレビューの軸規則に使うSourceエンジン - エクスポート形式とは独立しています",
+    },
     'prop_jiggle_sim_rate': {
         'en': "Sim Rate (Hz)",
         'ja': "シミュレーションレート (Hz)",
