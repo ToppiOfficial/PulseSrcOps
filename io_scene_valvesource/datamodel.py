@@ -146,7 +146,7 @@ class _Array(list):
 			out = "\n{}[\n".format(_kv2_indent)
 			_add_kv2_indent()
 			out += _kv2_indent
-			out += "\n{}".format(_kv2_indent).join([_quote(_get_kv2_repr(item)) for item in self])
+			out += ",\n{}".format(_kv2_indent).join([_quote(_get_kv2_repr(item)) for item in self])
 			_sub_kv2_indent()
 			return "{}\n{}]".format(out,_kv2_indent)
 		
