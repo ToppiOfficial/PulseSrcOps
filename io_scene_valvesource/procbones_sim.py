@@ -579,6 +579,7 @@ def _get_proc_trigger_frame_range(entry, arm_ob) -> tuple[int, int, bool]:
     return int(min(frames)), int(max(frames)), True
 
 
+# Dead code?
 def _get_or_create_proc_tol_fcurve(entry, dp: str):
     """Find or create the proc_tolerance fcurve in entry.action. Returns None on failure."""
     action = entry.action

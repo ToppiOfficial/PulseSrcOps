@@ -37,5 +37,5 @@ custom id to `icon=` will not work.
 | `fbx` | FBX import menu entry | Autodesk FBX simplified product icon |
 
 The Source ones were downsampled from the wiki's 2048x2048 originals. Note these
-are Valve and Autodesk marks, not original art - fine for a Source modding tool,
+are Valve Developer Community and Autodesk marks, not original art - fine for a Source modding tool,
 but they are not GPL-licensed alongside the rest of the add-on.
