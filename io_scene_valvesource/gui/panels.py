@@ -188,15 +188,23 @@ class SMD_PT_SceneEncodingOptions(Panel):
         scene = context.scene
         l = self.layout
 
+        dme_active = False
         if State.exportFormat == ExportFormat.DMX:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
             row.row().prop(scene.vs, "prefab_export_mode", expand=True)
+            dme_active = scene.vs.prefab_export_mode == 'DME'
         elif State.exportFormat == ExportFormat.FBX:
             # Forced: FBX has nowhere else to put prefabs, so the companion DMX takes them.
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
             row.label(text=get_id("prefab_export_mode_fbx"), icon='CHECKMARK')
+            dme_active = True
+
+        # Embedded jigglebones/procedural bones are Source 1 only (PulseMDL); Source 2
+        # (binary v9 / model 22) reads the embedded joints as ordinary bones and crashes.
+        if dme_active and State.datamodelFormat >= 22:
+            l.label(text=get_id("prefab_export_mode_dme_source2_warning", True), icon='ERROR')
 
         if State.compiler != Compiler.MODELDOC:
             row = l.row().split(factor=0.33)

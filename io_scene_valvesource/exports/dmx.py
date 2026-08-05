@@ -175,7 +175,8 @@ class DmxWriter:
         # (a DmeJoint subclass); the .vs props live on the data Bone (bone.bone).
         data_bone = bone.bone if bone is not None else None
         is_dme_jiggle = (self.dme_mode and not self.is_anim and not self.proxy_only
-                         and data_bone is not None and data_bone.vs.bone_is_jigglebone)
+                         and data_bone is not None and data_bone.vs.bone_is_jigglebone
+                         and self._prefab_type_enabled('JIGGLEBONES'))
         bone_elem_type = "DmeJiggleBone" if is_dme_jiggle else "DmeJoint"
         self.bone_elements[bone_name] = bone_elem = dm.add_element(bone_exportname, bone_elem_type, id=bone_name)
         if is_dme_jiggle:
@@ -223,6 +224,16 @@ class DmxWriter:
         return [bone_elem]
 
     # -- attachments / procedural bones / hitboxes --------------------------
+    def _prefab_type_enabled(self, prefab_type: str) -> bool:
+        """Whether the exportables-list checkbox for this prefab type is on.
+        File mode reads this via prefab_items in exporter.py; DME mode needs the
+        same check here since these types skip the file writer entirely."""
+        avs = getattr(self.armature_src.data, 'vs', None) if self.armature_src else None
+        if avs is None:
+            return True
+        item = next((p for p in avs.prefab_items if p.prefab_type == prefab_type), None)
+        return item.export if item is not None else True
+
     def _write_attach(self, name, relMat, boneelem):
         dm = self.dm
         dag = dm.add_element(name, "DmeDag", id=name)
@@ -272,8 +283,10 @@ class DmxWriter:
         return self._write_attach(empty.name, relMat, self.bone_elements[exportable_parent.name])
 
     def _write_attachments(self, bench):
-        # Source 2 (.vmdl) always embeds attachments; Source 1 embeds them only in DME mode.
-        embed_attachments = self.source2 or self.dme_mode
+        # Source 2 (.vmdl) always embeds attachments regardless of the checkbox - there is
+        # no file-based alternative. Source 1 embeds them only in DME mode, where the
+        # checkbox is the only way to opt out.
+        embed_attachments = self.source2 or (self.dme_mode and self._prefab_type_enabled('ATTACHMENTS'))
         if embed_attachments and not self.is_anim and self.exportable_empties and self.armature:
             for empty, world_matrix in self.exportable_empties:
                 self._write_attachment(empty, world_matrix)
@@ -281,6 +294,8 @@ class DmxWriter:
 
     def _write_procedural_bones(self):
         if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
+            return
+        if not self._prefab_type_enabled('PROCEDURAL'):
             return
         avs = getattr(self.armature_src.data, 'vs', None)
         proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
@@ -361,6 +376,8 @@ class DmxWriter:
 
     def _write_hitboxes(self, bench):
         if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
+            return
+        if not self._prefab_type_enabled('HITBOXES'):
             return
         dm = self.dm
         arm_data = self.armature_src.data

@@ -1413,6 +1413,10 @@ _data = {
         'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseMDL2)",
         'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseMDL2) が必要です",
     },
+    'prefab_export_mode_dme_source2_warning': {
+        'en': "Embedded Jigglebones and Procedural bones are Source 1 only - crashes Source 2 (binary v9 / model 22) on load",
+        'ja': "埋め込みジグルボーン・プロシージャルボーンは Source 1 専用です - Source 2 (binary v9 / model 22) では読み込み時にクラッシュします",
+    },
     'bone_naming_label': {
         'en': "Bone Naming",
         'ja': "ボーン命名",
