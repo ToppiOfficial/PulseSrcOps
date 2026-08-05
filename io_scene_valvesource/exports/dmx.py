@@ -921,17 +921,8 @@ class DmxWriter:
                 delta_lengths = [None] * num_verts if cache_deltas else None
                 max_delta = 0
 
-                for ob_vert in ob.data.vertices:
-                    sv = shape.vertices[ob_vert.index]
-                    if ob_vert.co != sv.co:
-                        delta = sv.co - ob_vert.co
-                        dl = delta.length
-                        if abs(dl) > 1e-5:
-                            if cache_deltas:
-                                delta_lengths[ob_vert.index] = dl  # pyright: ignore
-                            shape_pos.append(datamodel.Vector3(delta))
-                            shape_posIdx.append(ob_vert.index)
-
+                # Correctives must rebase before the deltas are read, or they export the
+                # full shape movement on top of the targets they are meant to correct.
                 if corrective:
                     corrective_target_shapes = []
                     for ct_name in corrective_targets:
@@ -942,6 +933,17 @@ class DmxWriter:
                                 sv.co -= ob.data.vertices[sv.index].co - ct.vertices[sv.index].co
                         else:
                             self._warning(get_id("exporter_err_missing_corrective_target", format_string=True).format(shape_name, ct_name))
+
+                for ob_vert in ob.data.vertices:
+                    sv = shape.vertices[ob_vert.index]
+                    if ob_vert.co != sv.co:
+                        delta = sv.co - ob_vert.co
+                        dl = delta.length
+                        if abs(dl) > 1e-5:
+                            if cache_deltas:
+                                delta_lengths[ob_vert.index] = dl  # pyright: ignore
+                            shape_pos.append(datamodel.Vector3(delta))
+                            shape_posIdx.append(ob_vert.index)
 
                 preserve_basis_normals = bake.src.data.vs.bake_shapekey_as_basis_normals
                 for ob_loop in ob.data.loops:

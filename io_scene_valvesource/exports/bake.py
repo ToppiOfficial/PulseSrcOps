@@ -473,6 +473,11 @@ class Baker:
         if preserve_basis_normals:
             print(f"- Ignoring changed normals for shapekeys in {result.name}")
 
+        # Deltas are read as shape.vertices[base_vert.index] / shape.loops[base_loop.index],
+        # so a shape mesh that bakes to different topology than the base silently pairs up
+        # unrelated vertices instead of failing.
+        base_data = result.object.data if result.object else None
+
         for i, shape in shapes_to_process:
             source_ob.active_shape_key_index = i
             if normalize:
@@ -480,11 +485,24 @@ class Baker:
                 shape.value = 1.0
 
             depsgraph = bpy.context.evaluated_depsgraph_get()
-            baked_shape_data = bpy.data.meshes.new_from_object(source_ob.evaluated_get(depsgraph))
+            # preserve_all_data_layers is required for the vertex groups _delete_filtered_faces
+            # reads - without it the face filter no-ops here but not on the base mesh.
+            baked_shape_data = bpy.data.meshes.new_from_object(
+                source_ob.evaluated_get(depsgraph), preserve_all_data_layers=True, depsgraph=depsgraph
+            )
             baked_shape_data.name = f"{source_ob.name} -> {shape.name}"
 
             self._finalize_shape_data(source_ob, baked_shape_data, solidify_fill_rim, should_tri)
-            result.shapes[shape.name] = baked_shape_data
+
+            if base_data and (len(baked_shape_data.vertices) != len(base_data.vertices)
+                              or len(baked_shape_data.loops) != len(base_data.loops)):
+                self._exporter.error(
+                    f"Shape key '{shape.name}' on '{result.name}' baked to {len(baked_shape_data.vertices)} verts / "
+                    f"{len(baked_shape_data.loops)} loops but the base mesh has {len(base_data.vertices)} / "
+                    f"{len(base_data.loops)}; skipping it.")
+                bpy.data.meshes.remove(baked_shape_data)
+            else:
+                result.shapes[shape.name] = baked_shape_data
 
             if normalize:
                 shape.value = original_value
@@ -501,18 +519,15 @@ class Baker:
             bake_matrix = Matrix.Translation(loc) @ rot.to_matrix().to_4x4() @ bake_matrix
         data.transform(bake_matrix)
 
-        if hasCurves(source_ob) or should_tri:
+        if hasCurves(source_ob):
             bm = bmesh.new()
             bm.from_mesh(data)
-            if hasCurves(source_ob):
-                if source_ob.data.vs.faces == "BOTH":
-                    bmesh.ops.duplicate(bm, geom=bm.faces[:])
-                    if solidify_fill_rim:
-                        self._exporter.warning(get_id("exporter_err_solidifyinside", True).format(source_ob.name))
-                if source_ob.data.vs.faces != "FORWARD":
-                    bmesh.ops.reverse_faces(bm, faces=bm.faces)
-            if should_tri:
-                bmesh.ops.triangulate(bm, faces=bm.faces, quad_method="FIXED")
+            if source_ob.data.vs.faces == "BOTH":
+                bmesh.ops.duplicate(bm, geom=bm.faces[:])
+                if solidify_fill_rim:
+                    self._exporter.warning(get_id("exporter_err_solidifyinside", True).format(source_ob.name))
+            if source_ob.data.vs.faces != "FORWARD":
+                bmesh.ops.reverse_faces(bm, faces=bm.faces)
             bm.to_mesh(data)
             bm.free()
 
@@ -520,6 +535,15 @@ class Baker:
 
         if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
             self._collapse_edgeline_materials(data)
+
+        # Must stay after the face filter: the base mesh triangulates last too, and filtering
+        # a quad is not the same decision as filtering the two tris it splits into.
+        if should_tri:
+            bm = bmesh.new()
+            bm.from_mesh(data)
+            bmesh.ops.triangulate(bm, faces=bm.faces, quad_method="FIXED")
+            bm.to_mesh(data)
+            bm.free()
 
         data.update()
 
