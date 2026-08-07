@@ -20,6 +20,7 @@ __all__ = [
     # scene
     'ValveSource_Exportable',
     'ValveSource_SceneProps',
+    '_on_blend_load_migrate_engine',
     # object
     'ValveSource_MeshProps',
     'ValveSource_SurfaceProps',

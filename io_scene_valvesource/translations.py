@@ -170,13 +170,21 @@ _data = {
         'en': "Create a dummy bone for vertices which don't move. Emulates Blender's behaviour in Source, but may break compatibility with existing files (SMD and Source 1 DMX)",
         'ja': "動かない頂点用のダミーボーンを作成（SMDおよびSource 1 DMX）",
     },
-    'engine_path': {
-        'en': "Engine Path",
-        'ja': "エンジンのパス",
+    'engine': {
+        'en': "Engine",
+        'ja': "エンジン",
     },
-    'engine_path_tip': {
-        'en': "Directory containing studiomdl (Source 1) or resourcecompiler (Source 2)",
-        'ja': "studiomdlまたはresourcecompilerを含むディレクトリ",
+    'engine_tip': {
+        'en': "GoldSrc exports SMD only. Source covers both Source 1 and Source 2 - which one is decided by the DMX model format",
+        'ja': "GoldSrc は SMD のみをエクスポートします。Source は Source 1 と Source 2 の両方に対応し、どちらになるかは DMX モデル形式で決まります",
+    },
+    'game': {
+        'en': "Game",
+        'ja': "ゲーム",
+    },
+    'game_tip': {
+        'en': "Preset that sets the engine, DMX encoding and model format for a known game. Changing any of those manually switches this back to Custom",
+        'ja': "既知のゲームに合わせてエンジン・DMXエンコーディング・モデルフォーマットを設定するプリセット。いずれかを手動で変更すると Custom に戻ります",
     },
     'export_format': {
         'en': "Export Format",
@@ -1405,6 +1413,10 @@ _data = {
         'en': "EMBEDDED (companion DMX)",
         'ja': "EMBEDDED (コンパニオン DMX)",
     },
+    'prefab_export_mode_source2_forced': {
+        'en': "FILE (Source 2 is hand-authored in ModelDoc/vmdl)",
+        'ja': "FILE (Source 2 は ModelDoc/vmdl で手動作成)",
+    },
     'prefab_export_mode_qci_tip': {
         'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",
         'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci/.vmdl プレハブファイルに書き出します",
@@ -1412,10 +1424,6 @@ _data = {
     'prefab_export_mode_dme_tip': {
         'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseMDL2)",
         'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseMDL2) が必要です",
-    },
-    'prefab_export_mode_dme_source2_warning': {
-        'en': "Embedded Jigglebones and Procedural bones are Source 1 only - crashes Source 2 (binary v9 / model 22) on load",
-        'ja': "埋め込みジグルボーン・プロシージャルボーンは Source 1 専用です - Source 2 (binary v9 / model 22) では読み込み時にクラッシュします",
     },
     'bone_naming_label': {
         'en': "Bone Naming",
@@ -1426,8 +1434,8 @@ _data = {
         'ja': "Source 2 ボーン名を強制",
     },
     'force_source2_bone_sanitize_tip': {
-        'en': "Apply Source 2 (ModelDoc) bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",
-        'ja': "Source 1 へのエクスポート時でも Source 2 (ModelDoc) のボーン名サニタイズを適用します。ドットや非 ASCII 文字を除去し (下記の保持プレフィックスを除く)、例として 'Bone.001' は 'Bone_001' になります",
+        'en': "Apply Source 2 bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",
+        'ja': "Source 1 へのエクスポート時でも Source 2 のボーン名サニタイズを適用します。ドットや非 ASCII 文字を除去し (下記の保持プレフィックスを除く)、例として 'Bone.001' は 'Bone_001' になります",
     },
     'bone_name_prefixes_title': {
         'en': "Preserved Bone Name Prefixes",

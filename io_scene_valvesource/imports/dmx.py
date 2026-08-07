@@ -364,7 +364,7 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
             name=layer_name, kind=kind, values=values, indices=indices))
 
         if vertexMap != "textureCoordinates":
-            parsed.version_bumps.append(dmx_version(9, 22))
+            parsed.version_bumps.append(dmx_version(9, 22, compiler=Compiler.RESOURCECOMPILER))
 
     _read_weights(parsed, DmeVertexData, mesh)
     _read_faces(DmeMesh, mesh)
@@ -378,7 +378,7 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
             DmeVertexData.get(stream),
             DmeVertexData.get(stream + "Indices"),
         ))
-        parsed.version_bumps.append(dmx_version(9, 22))  # cloth streams are Source 2 only
+        parsed.version_bumps.append(dmx_version(9, 22, compiler=Compiler.RESOURCECOMPILER))  # cloth streams are Source 2 only
 
     if keywords['balance'] in vertex_format:
         mesh.balance = (DmeVertexData[keywords['balance']],

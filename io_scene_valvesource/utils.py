@@ -101,11 +101,24 @@ class ExportFormat:
     DMX = 2
     FBX = 3
 
+# Engine only separates GoldSrc from Source - which Source engine a DMX targets is
+# carried by dmx_format's compiler suffix, not by a second engine setting.
+export_formats_by_engine = {
+    'GOLDSRC': ('SMD',),
+    'SOURCE': ('SMD', 'DMX', 'FBX'),
+}
+
 class Compiler:
     UNKNOWN = 0
-    STUDIOMDL = 1 # Source 1
-    RESOURCECOMPILER = 2 # Source 2
-    MODELDOC = 3 # Source 2 post-Alyx
+    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseMDL2)
+    RESOURCECOMPILER = 2 # Source 2 pre-Alyx (Dota 2)
+    MODELDOC = 3 # Source 2 post-Alyx (Alyx / CS2 / Deadlock)
+
+# Model 22 is shared by all three compilers, so dmx_format carries the compiler as a
+# suffix: bare '22' is Source 1 (PulseMDL2), '22_resourcecompiler' and '22_modeldoc'
+# are Source 2. This suffix is the single source of truth for State.compiler.
+compiler_suffixes = {'': Compiler.STUDIOMDL, 'resourcecompiler': Compiler.RESOURCECOMPILER, 'modeldoc': Compiler.MODELDOC}
+compiler_to_suffix = {v: (f"_{k}" if k else "") for k, v in compiler_suffixes.items()}
 
 @dataclasses.dataclass(frozen = True)
 class dmx_version:
@@ -116,37 +129,26 @@ class dmx_version:
     compiler : int = Compiler.STUDIOMDL
 
     @property
-    def format_enum(self): return str(self.format) + ("_modeldoc" if self.compiler == Compiler.MODELDOC else "")
-    @property
-    def format_title(self): return f"Model {self.format}" + (" (ModelDoc)" if self.compiler == Compiler.MODELDOC else "")
+    def format_enum(self): return str(self.format) + compiler_to_suffix.get(self.compiler, "")
 
-dmx_versions_source1 = {
-'Ep1': dmx_version(0,0, "Half-Life 2: Episode One"),
-'Source2007': dmx_version(2,1, "Source 2007"),
-'Source2009': dmx_version(2,1, "Source 2009"),
-'Garrysmod': dmx_version(2,1, "Garry's Mod"),
-'Orangebox': dmx_version(5,18, "OrangeBox / Source MP"),
-'nmrih': dmx_version(2,1, "No More Room In Hell"),
-}
-
-dmx_versions_source1.update({version.title:version for version in [
-dmx_version(2,1, 'Team Fortress 2'),
-dmx_version(0,0, 'Left 4 Dead'), # wants model 7, but it's not worth working out what that is when L4D2 in far more popular and SMD export works
-dmx_version(4,15, 'Left 4 Dead 2'),
-dmx_version(5,18, 'Alien Swarm'),
-dmx_version(5,18, 'Portal 2'),
-dmx_version(5,18, 'Source Filmmaker'),
-# and now back to 2/1 for some reason...
-dmx_version(2,1, 'Half-Life 2'),
-dmx_version(2,1, 'Source SDK Base 2013 Singleplayer'),
-dmx_version(2,1, 'Source SDK Base 2013 Multiplayer'),
-]})
-
-dmx_versions_source2 = {
-'dota2': dmx_version(9,22, "Dota 2", Compiler.RESOURCECOMPILER),
-'steamtours': dmx_version(9,22, "SteamVR", Compiler.RESOURCECOMPILER),
-'hlvr': dmx_version(9,22, "Half-Life: Alyx", Compiler.MODELDOC), # format is still declared as 22, but modeldoc introduces breaking changes
-'cs2': dmx_version(9,22, 'Counter-Strike 2', Compiler.MODELDOC),
+# Game presets: id -> (label, engine, dmx_encoding, dmx_format). Picking one just writes
+# scene.vs.engine/dmx_encoding/dmx_format - there is no auto-detection. Engine is
+# 'GOLDSRC' or 'SOURCE'; Source 2 games are identified by their dmx_format suffix.
+game_presets = {
+    'HL1':        ("Half-Life",                     'GOLDSRC', '2', '1'),
+    'HL2':        ("Half-Life 2",                   'SOURCE', '2', '1'),
+    'SDK2013SP':  ("Source SDK Base 2013 SP",       'SOURCE', '2', '1'),
+    'SDK2013MP':  ("Source SDK Base 2013 MP",       'SOURCE', '2', '1'),
+    'L4D1':       ("Left 4 Dead",                   'SOURCE', '4', '15'),
+    'L4D2':       ("Left 4 Dead 2",                 'SOURCE', '4', '15'),
+    'ALIENSWARM': ("Alien Swarm",                   'SOURCE', '5', '18'),
+    'PORTAL2':    ("Portal 2",                      'SOURCE', '5', '18'),
+    'CSGO':       ("Counter-Strike: Global Offensive", 'SOURCE', '5', '18'),
+    'SFM':        ("Source Filmmaker",              'SOURCE', '5', '18'),
+    'DOTA2':      ("Dota 2",                        'SOURCE', '9', '22_resourcecompiler'),
+    'HLA':        ("Half-Life: Alyx",               'SOURCE', '9', '22_modeldoc'),
+    'CS2':        ("Counter-Strike 2",              'SOURCE', '9', '22_modeldoc'),
+    'DEADLOCK':   ("Deadlock",                      'SOURCE', '9', '22_modeldoc'),
 }
 
 def getAllDataNameTranslations(string : str) -> set[str]:
@@ -179,7 +181,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     def __init__(cls, *args, **kwargs):
         cls._exportableObjects = set()
         cls.last_export_refresh = 0
-        cls._engineBranch = None
         cls._gamePathValid = False
         cls._legacySlotTranslations = getAllDataNameTranslations("Legacy Slot")
 
@@ -187,23 +188,18 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     def exportableObjects(cls) -> set[int]: return cls._exportableObjects
 
     @property
-    def engineBranch(cls) -> dmx_version | None: return cls._engineBranch
-
-    @property
     def datamodelEncoding(cls):
-        if cls._engineBranch: return cls._engineBranch.encoding
         enc = bpy.context.scene.vs.dmx_encoding
         return 1 if enc == 'kv2' else int(enc)
 
     @property
-    def use_kv2(cls):
-        return not cls._engineBranch and bpy.context.scene.vs.dmx_encoding == 'kv2'
+    def use_kv2(cls): return bpy.context.scene.vs.dmx_encoding == 'kv2'
 
     @property
-    def datamodelFormat(cls): return cls._engineBranch.format if cls._engineBranch else int(bpy.context.scene.vs.dmx_format.split("_")[0])
+    def datamodelFormat(cls): return int(bpy.context.scene.vs.dmx_format.split("_")[0])
 
     @property
-    def compiler(cls): return cls._engineBranch.compiler if cls._engineBranch else Compiler.MODELDOC if "modeldoc" in bpy.context.scene.vs.dmx_format else Compiler.UNKNOWN
+    def compiler(cls): return compiler_suffixes.get(bpy.context.scene.vs.dmx_format.partition("_")[2], Compiler.STUDIOMDL)
 
     @property
     def exportFormat(cls):
@@ -261,7 +257,6 @@ class State(metaclass=_StateMeta):
     @persistent
     def _onLoad(_):
         State.update_scene()
-        State._updateEngineBranch()
         State._validateGamePath()
 
     @classmethod
@@ -275,18 +270,6 @@ class State(metaclass=_StateMeta):
         if cls.update_scene in depsgraph_update_post:
             depsgraph_update_post.remove(cls._onDepsgraphUpdate)
             load_post.remove(cls._onLoad)
-
-    @staticmethod
-    def onEnginePathChanged(props,context):
-        if props == context.scene.vs:
-            State._updateEngineBranch()
-
-    @classmethod
-    def _updateEngineBranch(cls):
-        try:
-            cls._engineBranch = getEngineBranch()
-        except:
-            cls._engineBranch = None
 
     @staticmethod
     def onGamePathChanged(props,context):
@@ -387,9 +370,6 @@ def smdContinue(line):
 def getDatamodelQuat(blender_quat):
     return datamodel.Quaternion([blender_quat[1], blender_quat[2], blender_quat[3], blender_quat[0]])
 
-# Decimal places bone scale is rounded to. Enough to collapse matrix-decomposition noise
-# (0.9999999999999998, 1.0000000794728596) without touching a genuinely small scale.
-DATAMODEL_SCALE_PRECISION = 6
 
 def getDatamodelScale(matrix, divisor=None):  # THIS IS ABSOLUTE BS!
     """Average a matrix's decomposed scale into the single uniform float DmeTransform wants.
@@ -402,28 +382,9 @@ def getDatamodelScale(matrix, divisor=None):  # THIS IS ABSOLUTE BS!
     if divisor and all(divisor):
         comps = [c / d for c, d in zip(comps, divisor)]
     avg = sum(comps) / 3.0
-    rounded = round(avg, DATAMODEL_SCALE_PRECISION)
+    rounded = round(avg, 6)
     # never let a small-but-real scale round away to zero - that collapses the mesh
     return rounded if rounded != 0.0 or avg == 0.0 else avg
-
-def getEngineBranch() -> dmx_version | None:
-    if not bpy.context.scene.vs.engine_path: return None
-    path = os.path.abspath(bpy.path.abspath(bpy.context.scene.vs.engine_path))
-
-    # Source 2: search for executable name
-    engine_path_files = set(name[:-4] if name.endswith(".exe") else name for name in os.listdir(path))
-    if "resourcecompiler" in engine_path_files: # Source 2
-        for executable,dmx_version in dmx_versions_source2.items():
-            if executable in engine_path_files:
-                return dmx_version
-
-    # Source 1 SFM special case
-    if path.lower().find("sourcefilmmaker") != -1:
-        return dmx_versions_source1["Source Filmmaker"] # hack for weird SFM folder structure, add a space too
-    
-    # Source 1 standard: use parent dir's name
-    name = os.path.basename(os.path.dirname(bpy.path.abspath(path))).title().replace("Sdk","SDK")
-    return dmx_versions_source1.get(name)
 
 def getCorrectiveShapeSeparator(): return '__' if State.compiler == Compiler.MODELDOC else '_'
 
@@ -1425,9 +1386,13 @@ prefab_type_info = {
 
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs are encoded into the model file rather than written to
-    .qci/.vmdl files. DMX honours the user's prefab_export_mode (Source 1 and Source 2,
-    PulseMDL / PulseMDL2); FBX always embeds them, in the companion DMX it writes
-    alongside the .fbx. SMD has no embedding, so it always uses file mode."""
+    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseMDL2) - Source 2
+    models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
+    GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
+    DMX honours the user's prefab_export_mode; FBX always embeds, in the companion
+    DMX it writes alongside the .fbx. SMD has no embedding, so it always uses file mode."""
+    if getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL:
+        return False
     if State.exportFormat == ExportFormat.FBX:
         return True
     return (State.exportFormat == ExportFormat.DMX
@@ -1456,15 +1421,13 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     if jiggles:
         result.append(('JIGGLEBONES', len(jiggles)))
 
-    # LOOKAT proc bones can surface as attachments, but only where the exporter
-    # actually writes one: MODELDOC file mode never does; DME mode writes one only
-    # for a non-zero offset (a zero offset aims the bone directly, no attachment);
-    # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
-    # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
-    # DmxWriter._write_procedural_bones / PrefabExporter._collect_lookat_attachments.
+    # LOOKAT proc bones surface as attachments only where the exporter writes one:
+    # Source 2 file mode never does; DME mode only for a non-zero offset; QCI mode once
+    # per unique (driver, offset). Mirrors DmxWriter._write_procedural_bones /
+    # PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
     lookat_pairs: set[tuple[str, tuple]] = set()
-    if dme or State.compiler != Compiler.MODELDOC:
+    if dme or State.compiler == Compiler.STUDIOMDL:
         for e in proc_entries:
             if getattr(e, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
@@ -1482,7 +1445,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     if hitboxes:
         result.append(('HITBOXES', len(hitboxes)))
 
-    if dme or State.compiler != Compiler.MODELDOC:
+    if dme or State.compiler == Compiler.STUDIOMDL:
         valid_proc = [e for e in proc_entries if e.helper_bone and arm.data.bones.get(e.helper_bone)]
         if valid_proc:
             result.append(('PROCEDURAL', len(valid_proc)))
@@ -1597,20 +1560,24 @@ def get_prefix_shortcut_map() -> dict:
                 result[sc] = p if '.' in p else p + "."
     return result
 
-def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_modeldoc: bool = False) -> typing.Union[str, list]:
+def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_source2: bool = False) -> typing.Union[str, list]:
     if isinstance(data, list):
-        return [sanitize_string(item, allow_unicode, force_modeldoc) for item in data]
+        return [sanitize_string(item, allow_unicode, force_source2) for item in data]
 
     _data = data.strip()
 
-    if (State.compiler == Compiler.MODELDOC or force_modeldoc) and not allow_unicode:
-        matched = next((p for p in get_preserved_bone_prefixes() if _data.startswith(p)), None)
-        if matched:
-            _data = matched + re.sub(r'[^a-zA-Z0-9_]+', '_', _data[len(matched):])
-        else:
-            _data = re.sub(r'[^a-zA-Z0-9_]+', '_', _data)
+    # ModelDoc inherited ResourceCompiler's naming rules, so both Source 2 compilers
+    # take the strict ASCII path.
+    strict = (State.compiler > Compiler.STUDIOMDL or force_source2) and not allow_unicode
+    pattern = r'[^a-zA-Z0-9_]+' if strict else r'[^\w.]+'
+
+    # Registered prefixes ("ValveBiped." and friends) pass through verbatim on every
+    # compiler - every one accepts the dot namespace, and ModelDoc strips it itself.
+    matched = next((p for p in get_preserved_bone_prefixes() if _data.startswith(p)), None)
+    if matched:
+        _data = matched + re.sub(pattern, '_', _data[len(matched):])
     else:
-        _data = re.sub(r'[^\w.]+', '_', _data, flags=re.UNICODE)
+        _data = re.sub(pattern, '_', _data)
 
     _data = re.sub(r'_+', '_', _data)
     _data = _data.strip('_')
@@ -2009,7 +1976,7 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
 
     if arm_prop.ignore_bone_exportnames and not for_write:
         # Still sanitize: the Blender name may contain chars invalid for the compiler.
-        return sanitize_string(data_bone.name, force_modeldoc=force_s2)
+        return sanitize_string(data_bone.name, force_source2=force_s2)
 
     def get_bone_side(b: bpy.types.Bone) -> str:
         bone_x = b.matrix_local.to_translation().x
@@ -2036,7 +2003,7 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         else:
             final_name = raw_name
 
-        final_name = sanitize_string(final_name, force_modeldoc=force_s2)
+        final_name = sanitize_string(final_name, force_source2=force_s2)
         export_names[b.name] = final_name
 
     return export_names[data_bone.name]

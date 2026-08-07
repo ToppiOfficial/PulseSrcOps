@@ -408,10 +408,11 @@ class ImporterBase(bpy.types.Operator, Logger):
 
     @classmethod
     def _ensureSceneDmxVersion(cls, version: dmx_version):
-        if State.datamodelFormat < version.format:
-            bpy.context.scene.vs.dmx_format = version.format_enum
+        vs = bpy.context.scene.vs
+        if State.datamodelFormat < version.format or State.compiler < version.compiler:
+            vs.dmx_format = version.format_enum
         if State.datamodelEncoding < version.encoding:
-            bpy.context.scene.vs.dmx_encoding = str(version.encoding)
+            vs.dmx_encoding = str(version.encoding)
 
     def _populate_dme_flex_from_dmx(self, ob: bpy.types.Object, combo_op) -> None:
         populate_dme_flex_from_dmx(ob, combo_op)

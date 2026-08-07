@@ -3,7 +3,8 @@ from bpy.types import Panel, UILayout, Collection, PoseBone, Bone, EditBone
 from .. import procbones_sim as _procbones_sim
 from .. import updater as _updater
 from bpy.app.translations import pgettext
-from ..utils import (get_id, State, Compiler, ExportFormat, is_armature, is_mesh, is_empty,
+from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_engine, is_armature,
+                     is_mesh, is_empty,
                      is_curve, is_mesh_compatible, modifier_compatible, vertex_maps, vertex_float_maps,
                      cloth_map_groups, hasFlexControllerSource, get_armature, countShapes,
                      MakeObjectIcon, get_active_exportable, get_valid_vertexanimation_object,
@@ -119,33 +120,41 @@ class SMD_PT_Scene(Panel):
         row.alert = len(scene.vs.export_path) == 0
         row.prop(scene.vs, "export_path")
 
-        row = l.row()
-        row.alert = len(scene.vs.engine_path) > 0 and State.compiler == Compiler.UNKNOWN
-        row.prop(scene.vs, "engine_path")
+        row = l.row().split(factor=0.33)
+        row.label(text=get_id("game", True) + ":")
+        row.prop(scene.vs, "game", text="")
+
+        # A preset already fixes the engine, so only Custom needs the control.
+        if scene.vs.game == 'CUSTOM':
+            row = l.row().split(factor=0.33)
+            row.label(text=get_id("engine", True) + ":")
+            row.row().prop(scene.vs, "engine", expand=True)
 
         # Format
 
         if State.datamodelEncoding != 0:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("export_format", True) + ":")
-            row.row().prop(scene.vs, "export_format", expand=True)
+            sub = row.row(align=True)
+            # prop_enum draws one button per identifier, so only the ones this engine
+            # allows appear - export_format's own item list stays static/unfiltered
+            # (see props/scene.py on_export_format_changed for why).
+            for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX', 'FBX')):
+                sub.prop_enum(scene.vs, "export_format", _fmt_id)
 
         # FBX writes a companion DMX holding the skeleton, flex controllers and prefabs,
         # so it needs a datamodel version too.
         if scene.vs.export_format in ('DMX', 'FBX'):
-            if State.engineBranch is None:
+            if scene.vs.game == 'CUSTOM':
                 row = l.split(factor=0.33)
                 row.label(text=get_id("exportpanel_dmxver"))
                 sub = row.row(align=True)
                 sub.prop(scene.vs, "dmx_encoding", text="")
                 sub.prop(scene.vs, "dmx_format", text="")
-                sub.enabled = not sub.alert
             if scene.vs.export_format == 'FBX':
                 l.label(text=get_id("exportpanel_fbx_companion"), icon='INFO')
-        elif scene.vs.export_format == 'SMD':
-            row = l.split(factor=0.33)
-            row.label(text=get_id("smd_format", True) + ":")
-            row.row().prop(scene.vs, "smd_format", expand=True)
+        # smd_format (Source/GoldSrc SMD byte layout) is driven entirely by Engine now -
+        # no separate control needed here.
 
 
 class SMD_PT_SceneMaterialPaths(Panel):
@@ -181,7 +190,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
 
     @classmethod
     def poll(cls, context):
-        return State.compiler != Compiler.MODELDOC or State.exportFormat in (
+        return State.compiler == Compiler.STUDIOMDL or State.exportFormat in (
             ExportFormat.DMX, ExportFormat.FBX)
 
     def draw(self, context) -> None:
@@ -189,24 +198,29 @@ class SMD_PT_SceneEncodingOptions(Panel):
         l = self.layout
 
         dme_active = False
+        # The DMX model format decides Source 1 vs 2, not scene.vs.engine.
+        is_source1 = State.compiler == Compiler.STUDIOMDL
         if State.exportFormat == ExportFormat.DMX:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
-            row.row().prop(scene.vs, "prefab_export_mode", expand=True)
-            dme_active = scene.vs.prefab_export_mode == 'DME'
+            if is_source1:
+                row.row().prop(scene.vs, "prefab_export_mode", expand=True)
+                dme_active = scene.vs.prefab_export_mode == 'DME'
+            else:
+                # Source 2 is hand-authored in ModelDoc/vmdl - no embedding target exists.
+                row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
         elif State.exportFormat == ExportFormat.FBX:
-            # Forced: FBX has nowhere else to put prefabs, so the companion DMX takes them.
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
-            row.label(text=get_id("prefab_export_mode_fbx"), icon='CHECKMARK')
-            dme_active = True
+            if is_source1:
+                # Forced: FBX has nowhere else to put prefabs, so the companion DMX takes them.
+                row.label(text=get_id("prefab_export_mode_fbx"), icon='CHECKMARK')
+                dme_active = True
+            else:
+                row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
 
-        # Embedded jigglebones/procedural bones are Source 1 only (PulseMDL); Source 2
-        # (binary v9 / model 22) reads the embedded joints as ordinary bones and crashes.
-        if dme_active and State.datamodelFormat >= 22:
-            l.label(text=get_id("prefab_export_mode_dme_source2_warning", True), icon='ERROR')
-
-        if State.compiler != Compiler.MODELDOC:
+        # Both Source 2 compilers sanitize unconditionally, so the toggle is Source 1 only.
+        if State.compiler == Compiler.STUDIOMDL:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("bone_naming_label", True) + ":")
             row.row().prop(scene.vs, "force_source2_bone_sanitize", toggle=True)

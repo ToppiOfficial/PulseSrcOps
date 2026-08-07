@@ -30,10 +30,10 @@ _PREFAB_EXTENSIONS = {'.qc', '.qci', '.vmdl', '.vmdl_prefab', '.vrd'}
 
 def _prefab_extension(prefab_type: str) -> str:
     """File extension for a prefab type: .vrd for procedural (Source 1 only),
-    otherwise .vmdl for Source 2 (ModelDoc) and .qci for Source 1."""
+    otherwise .vmdl for Source 2 and .qci for Source 1."""
     if prefab_type == 'PROCEDURAL':
         return '.vrd'
-    return '.vmdl' if State.compiler == Compiler.MODELDOC else '.qci'
+    return '.vmdl' if State.compiler > Compiler.STUDIOMDL else '.qci'
 
 
 def _prefab_format_from_ext(ext: str) -> str | None:
@@ -215,7 +215,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             collection_groups.setdefault(group_name, []).append(bone)
 
         if self.to_clipboard:
-            return self._jigglebones_vmdl(collection_groups, None) if State.compiler == Compiler.MODELDOC else self._jigglebones_qc(collection_groups)
+            return self._jigglebones_vmdl(collection_groups, None) if State.compiler > Compiler.STUDIOMDL else self._jigglebones_qc(collection_groups)
         if fmt == 'QC':
             return self._jigglebones_qc(collection_groups)
         if fmt == 'VMDL':
@@ -288,7 +288,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
     def _run_attachments(self, arm, fmt, export_path, context):
         attachments = get_attachments(arm)
 
-        is_qc = (fmt == 'QC') or (self.to_clipboard and State.compiler != Compiler.MODELDOC)
+        is_qc = (fmt == 'QC') or (self.to_clipboard and State.compiler == Compiler.STUDIOMDL)
         lookat_attachments = self._collect_lookat_attachments(arm) if is_qc else []
 
         if not attachments and not lookat_attachments:
@@ -296,7 +296,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             return None
 
         if self.to_clipboard:
-            if State.compiler == Compiler.MODELDOC:
+            if State.compiler > Compiler.STUDIOMDL:
                 return self._attachments_vmdl(arm, attachments, None)
             return self._attachments_qc(arm, attachments, lookat_attachments)
         if fmt == 'QC':
@@ -378,7 +378,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         hboxset = getattr(avs, 'hboxset_name', '').strip() or 'default'
 
         if self.to_clipboard:
-            use_vmdl = (State.compiler == Compiler.MODELDOC)
+            use_vmdl = (State.compiler > Compiler.STUDIOMDL)
         else:
             use_vmdl = (fmt == 'VMDL')
 

@@ -367,6 +367,7 @@ def register():
     bpy.app.handlers.depsgraph_update_post.append(_on_armature_data_updated)
     bpy.app.handlers.load_post.append(_on_blend_load_refresh_hitbox_snapshot)
     bpy.app.handlers.load_post.append(_on_blend_load_migrate_material_paths)
+    bpy.app.handlers.load_post.append(_on_blend_load_migrate_engine)
 
     procbones_sim.register()
 
@@ -402,6 +403,8 @@ def unregister():
         bpy.app.handlers.load_post.remove(_on_blend_load_refresh_hitbox_snapshot)
     if _on_blend_load_migrate_material_paths in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_on_blend_load_migrate_material_paths)
+    if _on_blend_load_migrate_engine in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_on_blend_load_migrate_engine)
     State.unhook_events()
 
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
