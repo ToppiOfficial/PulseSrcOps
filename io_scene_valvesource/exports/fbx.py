@@ -6,11 +6,6 @@ from .. import ordered_set, flex
 from .records import BakeResult
 
 
-# Hands the Baker's output to Blender's bundled FBX exporter. The bake already applied the
-# axis/scale transform, so the operator runs with an identity conversion; the rest is glue.
-# Source data that has no FBX representation (skeleton flex controllers, jigglebones,
-# hitboxes, procedural bones) ships in the companion .dmx the exporter writes alongside.
-# ponytail: wraps bpy.ops.export_scene.fbx rather than forking io_scene_fbx.
 class FbxWriter:
     def __init__(self, reporter, id, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,

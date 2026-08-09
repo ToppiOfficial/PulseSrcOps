@@ -8,9 +8,6 @@ from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, procedural
 from .records import BakeResult, ExportTask, is_proxy_only
 
 
-# DmxWriter - the DMX model exporter (replaces the old SmdExporter.writeDMX). Covers skeleton,
-# mesh (Source 1 + Source 2 vertex streams), shape-key flex deltas, bone animation channels,
-# attachments, hitboxes, procedural-bone DME embedding, and vertex animations (VCA).
 class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,

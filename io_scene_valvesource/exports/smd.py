@@ -7,12 +7,6 @@ from .. import ordered_set
 from .records import BakeResult
 
 
-# SmdWriter - the SMD/VTA model+animation exporter (replaces the old SmdExporter.writeSMD).
-# Still actively used (GoldSrc modding, existing SMD projects). Mirrors DmxWriter's decomposed
-# structure. Weightmap / material derivation is duplicated from DmxWriter for now; a shared
-# helper is a future cleanup once both writers are verified together.
-# ponytail: build_weightmap/resolve_material duplicated with DmxWriter; extract to a shared
-# export/derive.py when SMD is verified.
 class SmdWriter:
     def __init__(self, reporter, id, bake_results, name, dir_path, filetype="smd", *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
@@ -380,7 +374,6 @@ class SmdWriter:
         f.close()
         return 1
 
-    # -- shared derivation (see ponytail note at top) -----------------------
     def _evaluated_pose_bones(self):
         depsgraph = bpy.context.evaluated_depsgraph_get()
         evaluated = self.armature.evaluated_get(depsgraph)
