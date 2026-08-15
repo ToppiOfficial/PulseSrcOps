@@ -19,7 +19,7 @@ formats = [
     ('1', "Model 1", "Half-Life 2 / SDK 2013"),
     ('15', "Model 15", "Left 4 Dead 1-2"),
     ('18', "Model 18", "Source Filmmaker / Portal 2 / CS:GO / Alien Swarm"),
-    ('22', "Model 22 (Source 1)", "PulseMDL2 - the only compiler that supports Model 22"),
+    ('22', "Model 22 (Source 1)", "PulseModel - the only compiler that supports Model 22"),
     ('22_resourcecompiler', "Model 22 (ResourceCompiler)", "Source 2 pre-Alyx - Dota 2"),
     ('22_modeldoc', "Model 22 (ModelDoc)", "Source 2 post-Alyx - Half-Life: Alyx / CS2 / Deadlock"),
 ]

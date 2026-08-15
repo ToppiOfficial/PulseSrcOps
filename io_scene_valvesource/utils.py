@@ -110,12 +110,12 @@ export_formats_by_engine = {
 
 class Compiler:
     UNKNOWN = 0
-    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseMDL2)
+    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseModel)
     RESOURCECOMPILER = 2 # Source 2 pre-Alyx (Dota 2)
     MODELDOC = 3 # Source 2 post-Alyx (Alyx / CS2 / Deadlock)
 
 # Model 22 is shared by all three compilers, so dmx_format carries the compiler as a
-# suffix: bare '22' is Source 1 (PulseMDL2), '22_resourcecompiler' and '22_modeldoc'
+# suffix: bare '22' is Source 1 (PulseModel), '22_resourcecompiler' and '22_modeldoc'
 # are Source 2. This suffix is the single source of truth for State.compiler.
 compiler_suffixes = {'': Compiler.STUDIOMDL, 'resourcecompiler': Compiler.RESOURCECOMPILER, 'modeldoc': Compiler.MODELDOC}
 compiler_to_suffix = {v: (f"_{k}" if k else "") for k, v in compiler_suffixes.items()}
@@ -1386,7 +1386,7 @@ prefab_type_info = {
 
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs are encoded into the model file rather than written to
-    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseMDL2) - Source 2
+    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseModel) - Source 2
     models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
     GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
     DMX honours the user's prefab_export_mode; FBX always embeds, in the companion
