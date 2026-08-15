@@ -1,0 +1,31 @@
+name: Feature Request
+description: Suggest a new feature or change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The workflow or limitation behind the request, not just the proposed solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed feature
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Relevant game / compiler
+      description: Leave blank if it applies everywhere.
+      placeholder: "Source 2 / resourcecompiler"
+
+  - type: textarea
+    id: refs
+    attributes:
+      label: References
+      description: Links to format docs, an existing implementation, or screenshots.
