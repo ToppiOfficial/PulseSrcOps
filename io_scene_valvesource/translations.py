@@ -1683,6 +1683,10 @@ _data = {
         'en': "'{0}' uses DME Rule mode which is DMX-only - flex rules are ignored for SMD export",
         'ja': "'{0}' はDMEルールモードを使用していますがSMDエクスポートでは無視されます",
     },
+    'exporter_err_clothproxy_source2': {
+        'en': "Cloth Proxy meshes require DMX export with a Source 2 compiler (ModelDoc / ResourceCompiler): {0}",
+        'ja': "クロスプロキシメッシュはSource 2コンパイラ（ModelDoc / ResourceCompiler）でのDMXエクスポートが必要です: {0}",
+    },
     'prop_float_map_group_tip': {
         'en': "Vertex map group name to remap",
         'ja': "リマップする頂点マップのグループ名",

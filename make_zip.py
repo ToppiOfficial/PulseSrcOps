@@ -33,6 +33,8 @@ for path, dirnames, filenames in os.walk(script_dir):
         relative_path = os.path.relpath(file_path, ".")
         zip_file.write(file_path, relative_path)
 
+zip_file.write("LICENSE", os.path.join(script_dir, "LICENSE"))
+
 zip_file.close()
 zip_size = os.path.getsize(os.path.join("..", zip_name)) / (1024 * 1024)
 print(f"{zip_name} ({zip_size:.2f} MB)")

@@ -1,13 +1,16 @@
-# PulseSrcOps
+<h1 align="center">PulseSrcOps</h1>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/STATUS-RELEASE-brightgreen?style=for-the-badge&labelColor=444444" alt="Status: Release">
+  <img src="https://img.shields.io/badge/BLENDER-4.5%2B-EA7600?style=for-the-badge&labelColor=444444" alt="Blender 4.5+">
+  <img src="https://img.shields.io/badge/TOOL-EXPORTER%20%26%20IMPORTER-0078D7?style=for-the-badge&labelColor=444444" alt="Tool: Exporter and Importer">
+  <img src="https://img.shields.io/badge/LICENSE-GPL--3.0-5C2D91?style=for-the-badge&labelColor=444444" alt="License: GPL-3.0">
+</p>
 
 A heavily modified, character-modding-focused fork of [BlenderSourceTools](https://github.com/Artfunkel/BlenderSourceTools) targeting Blender 4.5+. Far beyond a simple edit, it adds many new features and major code rewrites for DMX-based Source Engine workflows with automated post-processing on export.
 
 > [!IMPORTANT]
 > This add-on shares the same property names as Blender Source Tools and its other forks, so it will conflict with them. Disable or uninstall any other Source Tools add-on before installing or enabling this one.
-
-## Requirements
-
-- Blender 4.5 or later
 
 ## Installation
 
@@ -17,6 +20,16 @@ A heavily modified, character-modding-focused fork of [BlenderSourceTools](https
 2. In Blender, go to *Edit > Preferences > Add-ons > Install*.
 3. Select the `io_scene_valvesource` folder or the packaged zip.
 4. Enable the add-on.
+
+## Updating
+
+The add-on updates itself. Open *Edit > Preferences > Add-ons*, expand **PulseSrcOps**, then open its **Preferences > Updates** section:
+
+- **Check on startup** - looks for a new build when Blender launches.
+- **Stable / Development** - the channel to track.
+- **Check for Updates** - checks now; if a newer build exists the button becomes *Install*, which downloads and replaces the add-on files in place. Restart Blender afterwards.
+
+**Stable** follows the latest [Release](https://github.com/ToppiOfficial/PulseSrcOps/releases). **Development** follows the rolling `dev` release, rebuilt from every push to `master` - newest features and fixes first, at the cost of stability. Switching to Development is the easiest way to help test changes before they ship; report anything broken in [Issues](https://github.com/ToppiOfficial/PulseSrcOps/issues).
 
 ## Features
 
@@ -53,3 +66,9 @@ Based on [BlenderSourceTools](https://github.com/Artfunkel/BlenderSourceTools) b
 - [Rectus/BlenderSourceTools](https://github.com/Rectus/BlenderSourceTools)
 - [FellOffFuji/BlenderSource2Tools](https://github.com/FellOffFuji/BlenderSource2Tools) - some export code was adapted from this fork.
 - [srcprocbones](https://github.com/NameIsJakob/srcprocbones) by NameIsJakob - the jigglebone physics algorithm in `procbones_sim.py` is adapted from this project.
+
+## License
+
+PulseSrcOps is distributed under the [GNU General Public License v3.0 or later](LICENSE).
+
+It derives from BlenderSourceTools, Copyright (c) 2014 Tom Edwards, released under the GNU General Public License version 2 **or (at your option) any later version**. That grant is what permits this fork to be distributed under GPL-3.0-or-later. The original copyright notices and license headers remain intact in the files that carry them.

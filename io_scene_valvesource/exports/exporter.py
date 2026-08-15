@@ -344,12 +344,18 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 vs = getattr(_ob, 'vs', None)
                 if not vs:
                     continue
-                if getattr(vs, 'mesh_type', 'DEFAULT') == 'CLOTHPROXY':
-                    self.warning(f"'{_ob.name}' is set to Cloth Proxy but scene export format is not DMX - cloth attributes will be omitted.")
                 # FBX carries DME flex rules in its companion DMX, so only SMD drops them.
                 if (State.exportFormat == ExportFormat.SMD
                         and getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob)):
                     self.warning(get_id("exporter_warn_dme_smd", True).format(_ob.name))
+
+        # Cloth proxies only mean anything to the Source 2 compilers.
+        if State.exportFormat != ExportFormat.DMX or State.compiler <= Compiler.STUDIOMDL:
+            cloth_obs = [ob.name for ob in check_obs
+                         if getattr(getattr(ob, 'vs', None), 'mesh_type', 'DEFAULT') == 'CLOTHPROXY']
+            if cloth_obs:
+                self.error(get_id("exporter_err_clothproxy_source2", True).format(", ".join(cloth_obs)))
+                return False
 
         for _ob in check_obs:
             vs = getattr(_ob, 'vs', None)
