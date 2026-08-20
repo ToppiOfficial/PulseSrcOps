@@ -143,7 +143,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         if jiggle_was_enabled:
             context.scene.vs.jiggle_sim_enabled = False
 
-        ops.ed.undo_push(message=self.bl_label)
+        bpy.ops.ed.undo_push(message=self.bl_label)
         try:
             for view_layer in bpy.context.scene.view_layers:
                     unhide_all(view_layer.layer_collection)
@@ -194,8 +194,8 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             if not self._write_output(compiled, export_path, warnings):
                 return {'CANCELLED'}
         finally:
-            ops.ed.undo_push(message=self.bl_label)
-            if bpy.app.debug_value <= 1: ops.ed.undo()
+            bpy.ops.ed.undo_push(message=self.bl_label)
+            if bpy.app.debug_value <= 1: bpy.ops.ed.undo()
             if jiggle_was_enabled:
                 context.scene.vs.jiggle_sim_enabled = True
 

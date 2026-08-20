@@ -24,6 +24,17 @@ def _group_id(group_str: str) -> int:
     return int(group_str) if group_str.isdigit() else 0
 
 
+def _capsule_points(entry):
+    """The two capsule endpoints with the entry rotation baked in. Source stores a
+    capsule as the bbmin->bbmax segment plus radius and ignores angOffsetOrientation,
+    so the rotation has to live in the endpoints."""
+    mn  = Vector(entry.vec_min)
+    mx  = Vector(entry.vec_max)
+    ctr = (mn + mx) * 0.5
+    rot = Euler((entry.rotation[0], entry.rotation[1], entry.rotation[2]), 'XYZ').to_matrix()
+    return ctr + rot @ (mn - ctr), ctr + rot @ (mx - ctr)
+
+
 # -----------------------------------------------------------------------------
 # DME (model-DMX / PulseMDL)
 # -----------------------------------------------------------------------------
@@ -32,18 +43,22 @@ def write_dme_attrs(hb, entry, bone_export: str) -> None:
     """Populate a DmeHitbox element from a hitbox entry. Inverse of
     ``import_hitboxes_from_dmx_root`` below. ``bone_export`` is the resolved
     export bone name (the exporter maps it through ``exportable_boneNames``)."""
+    capsule = entry.scale > 0.0
+    if capsule:
+        mn, mx = _capsule_points(entry)
+        rot = (0.0, 0.0, 0.0)
+    else:
+        mn, mx = Vector(entry.vec_min), Vector(entry.vec_max)
+        rot = tuple(math.degrees(a) for a in entry.rotation)
     hb["boneName"]   = bone_export
     hb["groupId"]    = _group_id(entry.group)
-    hb["minBounds"]  = datamodel.Vector3(entry.vec_min)
-    hb["maxBounds"]  = datamodel.Vector3(entry.vec_max)
+    hb["minBounds"]  = datamodel.Vector3(mn)
+    hb["maxBounds"]  = datamodel.Vector3(mx)
     # radius: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius).
     hb["radius"]     = float(entry.scale) if entry.scale >= 0.0 else -1.0
     # Euler degrees (pitch, yaw, roll). Vector3 not Angle, to avoid the
     # "angle"/"qangle" DMX type-name mismatch with PulseMDL.
-    hb["orientation"] = datamodel.Vector3((
-        math.degrees(entry.rotation[0]),
-        math.degrees(entry.rotation[1]),
-        math.degrees(entry.rotation[2])))
+    hb["orientation"] = datamodel.Vector3(rot)
 
 
 def import_hitboxes_from_dmx_root(dm_root, armature: 'object') -> 'tuple[int, int, list]':
@@ -122,14 +137,17 @@ def parse_hitbox_line(line: str):
 def qc_line(entry, bone_export: str) -> str:
     """Return one ``$hbox`` line. Inverse of ``import_hitboxes_from_content``."""
     grp = _group_id(entry.group)
+    if entry.scale > 0.0:
+        mn, mx = _capsule_points(entry)
+        rx = ry = rz = 0.0
+    else:
+        mn, mx = Vector(entry.vec_min), Vector(entry.vec_max)
+        rx, ry, rz = (math.degrees(a) for a in entry.rotation)
     base = (
         f'$hbox\t{grp}\t"{bone_export}"\t\t'
-        f'{entry.vec_min[0]:.4f}\t{entry.vec_min[1]:.4f}\t{entry.vec_min[2]:.4f}\t'
-        f'{entry.vec_max[0]:.4f}\t{entry.vec_max[1]:.4f}\t{entry.vec_max[2]:.4f}'
+        f'{mn[0]:.4f}\t{mn[1]:.4f}\t{mn[2]:.4f}\t'
+        f'{mx[0]:.4f}\t{mx[1]:.4f}\t{mx[2]:.4f}'
     )
-    rx  = math.degrees(entry.rotation[0])
-    ry  = math.degrees(entry.rotation[1])
-    rz  = math.degrees(entry.rotation[2])
     scl = entry.scale if entry.scale >= 0.0 else -1.0
     return f'{base}\t{rx:.4f}\t{ry:.4f}\t{rz:.4f}\t{scl:.4f}'
 
@@ -196,12 +214,7 @@ def kv3_capsule_kwargs(entry, parent_bone: str) -> dict:
     Converts the box+rotation representation into the two capsule endpoints,
     mirroring the viewport draw in viewport_draw.py. Inverse of
     ``import_hitboxes_from_kv3``."""
-    mn  = Vector(entry.vec_min)
-    mx  = Vector(entry.vec_max)
-    ctr = (mn + mx) * 0.5
-    rot_mat = Euler((entry.rotation[0], entry.rotation[1], entry.rotation[2]), 'XYZ').to_matrix()
-    p0 = ctr + rot_mat @ (mn - ctr)
-    p1 = ctr + rot_mat @ (mx - ctr)
+    p0, p1 = _capsule_points(entry)
     grp = int(entry.group) if entry.group.lstrip('-').isdigit() else 0
     return dict(
         parent_bone=parent_bone,
