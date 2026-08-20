@@ -2,16 +2,23 @@ import bpy
 from bpy.types import Menu
 from ..utils import (get_id, getSelectedExportables, count_exports, is_armature,
                      prefab_available_types, prefab_type_info, prefab_mode_is_dme)
-from ..export_smd import SmdExporter, PrefabExporter
+from ..icons import icon
+from ..exports import SmdExporter, PrefabExporter
+from ..imports import ImportDMX, ImportSMD, ImportQC, ImportVMDL, ImportPrefab, ImportFBX
 from .operators import (
     SMD_OT_AddAllFlexControllers,
     SMD_OT_ImportFlexControllersFromText,
+    SMD_OT_ExportFlexControllersToText,
     SMD_OT_CombineStereoFlexControllers,
     SMD_OT_SortFlexControllers,
     SMD_OT_AutoAssignFlexGroups,
     SMD_OT_CopyFlexControllers,
     SMD_OT_ClearFlexControllers,
     SMD_OT_MigrateQCDeltasToOverrides,
+    SMD_OT_FlexControllerRegexReplace,
+    SMD_OT_DeltaOverrideRegexReplace,
+    SMD_OT_FlexRuleRegexReplace,
+    SMD_OT_ClearFlexRules,
     SMD_OT_ProcBoneDuplicate,
     SMD_OT_ProcBoneCopyActive,
     SMD_OT_ProcBoneCopyByDriverBone,
@@ -29,6 +36,21 @@ from .operators import (
 )
 
 
+class SMD_MT_ImportChoice(Menu):
+    bl_label = get_id("importmenu_title")
+
+    def draw(self, context) -> None:
+        l = self.layout
+        # One entry per format - picking the format is the user's choice, not a guess.
+        l.operator(ImportSMD.bl_idname, text=get_id("import_menuitem_smd", True), icon='MESH_DATA')
+        l.operator(ImportDMX.bl_idname, text=get_id("import_menuitem_dmx", True), icon='MESH_DATA')
+        l.operator(ImportFBX.bl_idname, text=get_id("import_menuitem_fbx", True), icon_value=icon('fbx'))
+        l.operator(ImportQC.bl_idname, text=get_id("import_menuitem_qc", True), icon_value=icon('source1'))
+        l.operator(ImportVMDL.bl_idname, text=get_id("import_menuitem_vmdl", True), icon_value=icon('source2'))
+        l.separator()
+        l.operator(ImportPrefab.bl_idname, text=get_id("import_menuitem_prefab", True), icon='CONSTRAINT_BONE')
+
+
 class SMD_MT_ExportChoice(Menu):
     bl_label = get_id("exportmenu_title")
 
@@ -42,12 +64,9 @@ class SMD_MT_ExportChoice(Menu):
             groups = list([ex for ex in exportables if ex.ob_type == 'COLLECTION'])
             groups.sort(key=lambda g: g.name.lower())
 
-            group_layout = l
-            for i,group in enumerate(groups): # always display all possible groups, as an object could be part of several
-                if type(self).__name__ == 'SMD_PT_Scene':
-                    if i == 0: group_col = l.column(align=True)
-                    if i % 2 == 0: group_layout = group_col.row(align=True)
-                group_layout.operator(SmdExporter.bl_idname, text=group.name, icon='GROUP').collection = group.item.name
+            # always display all possible groups, as an object could be part of several
+            for group in groups:
+                l.operator(SmdExporter.bl_idname, text=group.name, icon='GROUP').collection = group.item.name
 
             if len(exportables) - len(groups) > 1:
                 l.operator(SmdExporter.bl_idname, text=get_id("exportmenu_selected", True).format(len(exportables)), icon='OBJECT_DATA')
@@ -114,14 +133,30 @@ class SMD_MT_FlexControllerSpecials(Menu):
         layout = self.layout
         layout.operator(SMD_OT_AddAllFlexControllers.bl_idname, icon='IMPORT',      text=get_id('label_add_all', True))
         layout.operator(SMD_OT_ImportFlexControllersFromText.bl_idname, icon='TEXT', text=get_id('label_import_flex_text', True))
+        layout.operator(SMD_OT_ExportFlexControllersToText.bl_idname, icon='TEXT', text=get_id('label_export_flex_text', True))
         layout.operator(SMD_OT_SortFlexControllers.bl_idname,   icon='SORTALPHA',   text=get_id('label_sort_by_name', True))
         layout.operator(SMD_OT_AutoAssignFlexGroups.bl_idname,  icon='GROUP')
         layout.operator(SMD_OT_CombineStereoFlexControllers.bl_idname, icon='MOD_MIRROR', text=get_id('label_combine_stereo', True))
         layout.operator(SMD_OT_CopyFlexControllers.bl_idname,   icon='PASTEDOWN')
         layout.separator()
+        layout.operator(SMD_OT_FlexControllerRegexReplace.bl_idname, icon='VIEWZOOM')
+        layout.separator()
         layout.operator(SMD_OT_MigrateQCDeltasToOverrides.bl_idname, icon='FORWARD', text="Migrate QC Deltas to Overrides")
         layout.separator()
         layout.operator(SMD_OT_ClearFlexControllers.bl_idname,  icon='TRASH',       text="Delete All")
+
+
+class SMD_MT_FlexRuleSpecials(Menu):
+    bl_label = "Flex Rule Specials"
+
+    def draw(self, context):
+        layout = self.layout
+        layout.operator(SMD_OT_FlexRuleRegexReplace.bl_idname, icon='VIEWZOOM')
+        layout.separator()
+        layout.operator(SMD_OT_ClearFlexRules.bl_idname, icon='TRASH', text="Delete All")
+        layout.separator()
+        layout.operator("wm.url_open", icon='HELP', text=get_id('label_dme_flex_help', True)
+                        ).url = "https://developer.valvesoftware.com/wiki/Flex_animation"
 
 
 class SMD_MT_HitboxSpecials(Menu):

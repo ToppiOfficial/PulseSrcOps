@@ -3,12 +3,12 @@
 Converts between the armature's ``vs.hitboxes`` collection entries and:
 
 * **QC text** - ``$hbox`` lines (Source 1 / studiomdl)
-* **DME** - ``DmeHitbox`` element attributes (model-DMX / KitsuneMDL)
+* **DME** - ``DmeHitbox`` element attributes (model-DMX / PulseMDL)
 * **KV3** - ``HitboxCapsule`` KVNodes (Source 2 / ModelDoc .vmdl)
 
 A hitbox entry stores ``vec_min`` / ``vec_max`` (bone-local box), ``rotation``
 (radians) and ``scale`` (capsule radius; ``0`` or negative = oriented box). Each format's
-writer (called by ``export_smd.PrefabExporter``) sits next to its reader so the
+writer (called by ``exports.prefab.PrefabExporter``) sits next to its reader so the
 two halves stay in sync.
 """
 
@@ -25,7 +25,7 @@ def _group_id(group_str: str) -> int:
 
 
 # -----------------------------------------------------------------------------
-# DME (model-DMX / KitsuneMDL)
+# DME (model-DMX / PulseMDL)
 # -----------------------------------------------------------------------------
 
 def write_dme_attrs(hb, entry, bone_export: str) -> None:
@@ -39,7 +39,7 @@ def write_dme_attrs(hb, entry, bone_export: str) -> None:
     # radius: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius).
     hb["radius"]     = float(entry.scale) if entry.scale >= 0.0 else -1.0
     # Euler degrees (pitch, yaw, roll). Vector3 not Angle, to avoid the
-    # "angle"/"qangle" DMX type-name mismatch with KitsuneMDL.
+    # "angle"/"qangle" DMX type-name mismatch with PulseMDL.
     hb["orientation"] = datamodel.Vector3((
         math.degrees(entry.rotation[0]),
         math.degrees(entry.rotation[1]),
@@ -98,6 +98,27 @@ def import_hitboxes_from_dmx_root(dm_root, armature: 'object') -> 'tuple[int, in
 # QC text ($hbox)
 # -----------------------------------------------------------------------------
 
+def parse_hitbox_line(line: str):
+    """Parse a $hbox line. Returns dict with group, bone, min, max, rotation (degrees), scale or None."""
+    import re
+    pattern = (r'\$hbox\s+(\d+)\s+"([^"]+)"\s+'
+               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+'
+               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
+               r'(?:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+))?'
+               r'(?:\s+([-\d.]+))?')
+    match = re.match(pattern, line.strip())
+    if not match:
+        return None
+    g = match.groups()
+    return {
+        'group':    int(g[0]),
+        'bone':     g[1],
+        'min':      Vector((float(g[2]), float(g[3]), float(g[4]))),
+        'max':      Vector((float(g[5]), float(g[6]), float(g[7]))),
+        'rotation': (float(g[8] or 0), float(g[9] or 0), float(g[10] or 0)),
+        'scale':    float(g[11]) if g[11] is not None else -1.0,
+    }
+
 def qc_line(entry, bone_export: str) -> str:
     """Return one ``$hbox`` line. Inverse of ``import_hitboxes_from_content``."""
     grp = _group_id(entry.group)
@@ -121,7 +142,7 @@ def import_hitboxes_from_content(content: str, armature: 'object', context, crea
     parsed = []
     for line in content.split('\n'):
         if line.strip().lower().startswith('$hbox'):
-            data = utils.parse_hitbox_line(line)
+            data = parse_hitbox_line(line)
             if data:
                 parsed.append(data)
 

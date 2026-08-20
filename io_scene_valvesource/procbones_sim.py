@@ -27,8 +27,6 @@ import math
 import bpy
 from mathutils import Vector, Matrix, Quaternion
 
-# FIXME: When the driver bone is also the parent of the helper, the procedural simulation just borked. WHY!?
-
 # -- Per-bone simulation state -------------------------------------------------
 
 class BoneSimState:
@@ -91,8 +89,7 @@ _helper_saved_mutes: dict[tuple, bool] = {}
 
 def _is_source2(scene) -> bool:
     try:
-        vs = scene.vs
-        return vs.export_format == 'DMX' and vs.dmx_format in ('22', '22_modeldoc')
+        return scene.vs.jiggle_sim_engine == 'SOURCE2'
     except Exception:
         return False
 
@@ -102,6 +99,18 @@ def _get_state(arm_ob, pb) -> BoneSimState:
     if key not in _states:
         _states[key] = BoneSimState()
     return _states[key]
+
+
+def _jiggle_names(arm_ob) -> list[str]:
+    """Depth-sorted jiggle bone names, cached - the scan touches .vs on every
+    pose bone, which is far too costly to repeat each tick on a dense rig.
+    Invalidated by _depsgraph_update on any armature data change."""
+    names = _jiggle_bone_cache.get(arm_ob.name)
+    if names is None:
+        pbs = [pb for pb in arm_ob.pose.bones if pb.bone.vs.bone_is_jigglebone]
+        pbs.sort(key=_bone_depth)
+        names = _jiggle_bone_cache[arm_ob.name] = [pb.name for pb in pbs]
+    return names
 
 
 def _bone_depth(pb) -> int:
@@ -128,9 +137,32 @@ def _get_export_offset_mat(pb) -> Matrix:
     bvs = pb.bone.vs
     if bvs.ignore_rotation_offset:
         return Matrix.Identity(4)
-    return (Matrix.Rotation(bvs.export_rotation_offset_z, 4, 'Z') @
-            Matrix.Rotation(bvs.export_rotation_offset_y, 4, 'Y') @
-            Matrix.Rotation(bvs.export_rotation_offset_x, 4, 'X'))
+    rx, ry, rz = (bvs.export_rotation_offset_x,
+                  bvs.export_rotation_offset_y,
+                  bvs.export_rotation_offset_z)
+    if rx == 0.0 and ry == 0.0 and rz == 0.0:
+        return Matrix.Identity(4)
+    return (Matrix.Rotation(rz, 4, 'Z') @
+            Matrix.Rotation(ry, 4, 'Y') @
+            Matrix.Rotation(rx, 4, 'X'))
+
+
+def _write_basis(pb, mat: Matrix, eps: float = 1e-6) -> None:
+    """Assign matrix_basis only when it actually differs.
+
+    Every write tags the armature for depsgraph re-evaluation, which re-skins
+    and re-runs the modifier stack on every attached mesh - the cost that makes
+    the sim scale with model density rather than bone count. A settled bone
+    writes nothing, so an idle rig costs no re-evaluation at all.
+    Compared against the live value (not a cached one) so an external change -
+    animation flush, undo - is always overwritten."""
+    cur = pb.matrix_basis
+    for r in range(4):
+        cr, nr = cur[r], mat[r]
+        if (abs(cr[0] - nr[0]) > eps or abs(cr[1] - nr[1]) > eps
+                or abs(cr[2] - nr[2]) > eps or abs(cr[3] - nr[3]) > eps):
+            pb.matrix_basis = mat
+            return
 
 
 def _get_animated_goal(arm_ob, pb, arm_world_inv: Matrix) -> tuple:
@@ -460,23 +492,27 @@ def _sim_bone(arm_ob, pb, dt: float, is_s2: bool, arm_world_inv: Matrix) -> None
     else:
         local_mat = pb.bone.matrix_local.inverted_safe() @ pose_mat
     if jvs.jiggle_base_type == 'BASESPRING':
-        pb.matrix_basis = local_mat
+        _write_basis(pb, local_mat)
     else:
-        pb.matrix_basis = local_mat.to_3x3().to_4x4()
+        _write_basis(pb, local_mat.to_3x3().to_4x4())
 
 
 # -- Procedural bone simulation ------------------------------------------------
 
 def _find_action_slot(action, slot_name: str):
-    """Return the ActionSlot matching slot_name (by any name form), or first slot."""
+    """Return the ActionSlot matching slot_name (by any name form), or None.
+
+    No first-slot fallback: an entry that names nothing, or names a slot that no
+    longer exists, is invalid rather than silently bound to whichever slot happens
+    to be first - that samples the wrong animation with no indication anything is wrong."""
     if not slot_name:
-        return action.slots[0] if action.slots else None
+        return None
     for s in action.slots:
         if (s.identifier == slot_name
                 or s.name_display == slot_name
                 or getattr(s, 'name', '') == slot_name):
             return s
-    return action.slots[0] if action.slots else None
+    return None
 
 
 def _get_action_fcurves(action, slot_name: str) -> list:
@@ -543,6 +579,7 @@ def _get_proc_trigger_frame_range(entry, arm_ob) -> tuple[int, int, bool]:
     return int(min(frames)), int(max(frames)), True
 
 
+# Dead code?
 def _get_or_create_proc_tol_fcurve(entry, dp: str):
     """Find or create the proc_tolerance fcurve in entry.action. Returns None on failure."""
     action = entry.action
@@ -573,6 +610,8 @@ def _get_or_create_proc_tol_fcurve(entry, dp: str):
 def _set_helper_mute(arm_ob, bone_name: str, mute: bool) -> None:
     """Mute or restore constraints and driver fcurves on a helper bone.
     Original states are saved on first mute and restored on unmute."""
+    # Re-asserted every tick, so never write a mute flag that already holds the
+    # wanted value - a redundant write still tags a full depsgraph re-evaluation.
     pb = arm_ob.pose.bones.get(bone_name)
     if pb:
         for c in pb.constraints:
@@ -580,9 +619,12 @@ def _set_helper_mute(arm_ob, bone_name: str, mute: bool) -> None:
             if mute:
                 if key not in _helper_saved_mutes:
                     _helper_saved_mutes[key] = c.mute
-                c.mute = True
+                if not c.mute:
+                    c.mute = True
             else:
-                c.mute = _helper_saved_mutes.pop(key, False)
+                want = _helper_saved_mutes.pop(key, False)
+                if c.mute != want:
+                    c.mute = want
     anim = arm_ob.animation_data
     if anim:
         prefix = f'pose.bones["{bone_name}"].'
@@ -592,9 +634,12 @@ def _set_helper_mute(arm_ob, bone_name: str, mute: bool) -> None:
                 if mute:
                     if key not in _helper_saved_mutes:
                         _helper_saved_mutes[key] = fc.mute
-                    fc.mute = True
+                    if not fc.mute:
+                        fc.mute = True
                 else:
-                    fc.mute = _helper_saved_mutes.pop(key, False)
+                    want = _helper_saved_mutes.pop(key, False)
+                    if fc.mute != want:
+                        fc.mute = want
 
 
 def _temp_unmute_helper(arm_ob, bone_name: str) -> None:
@@ -667,6 +712,12 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
 
     action = entry.action
     if not action:
+        return []
+
+    # Slotted actions must name a slot that resolves - see _find_action_slot.
+    if not getattr(action, 'is_action_legacy', True) and _find_action_slot(action, entry.action_slot_name) is None:
+        print(f"[ProcBones] Entry {entry_idx} ('{entry.helper_bone}'): action '{action.name}' "
+              f"has no slot named '{entry.action_slot_name}' - assign one in the Procedural Bones list")
         return []
 
     # A reference armature lets near-identical rigs (e.g. the same character with a
@@ -930,14 +981,12 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
         local_mat = (parent_pose @ bone_rest).inverted_safe() @ pose_mat
     else:
         local_mat = pb.bone.matrix_local.inverted_safe() @ pose_mat
-    helper_pb.matrix_basis = local_mat.to_3x3().to_4x4()
+    _write_basis(helper_pb, local_mat.to_3x3().to_4x4())
 
 
 def _sim_proc_entries(arm_ob, scene, is_s2: bool, arm_world_inv: Matrix) -> int:
     """Drive procedural (helper) bones. Returns the number of helpers simulated."""
-    jiggle_helpers: set[str] = {
-        pb.name for pb in arm_ob.pose.bones if pb.bone.vs.bone_is_jigglebone
-    }
+    jiggle_helpers = _jiggle_names(arm_ob)
     seen_helpers: set[str] = set()
     sim_count = 0
 
@@ -1025,7 +1074,7 @@ def _sim_proc_entries(arm_ob, scene, is_s2: bool, arm_world_inv: Matrix) -> int:
         helper_pb = arm_ob.pose.bones[entry.helper_bone]
         mat = blended_rot.to_matrix().to_4x4()
         mat.translation = blended_loc
-        helper_pb.matrix_basis = mat
+        _write_basis(helper_pb, mat)
         sim_count += 1
 
     return sim_count
@@ -1042,13 +1091,8 @@ def simulate_armature(arm_ob, scene, dt: float, skip_selected: bool = False) -> 
     arm_world_inv = arm_ob.matrix_world.inverted_safe()
 
     if getattr(scene.vs, 'sim_jiggle_bones', True):
-        arm_name = arm_ob.name
-        if arm_name not in _jiggle_bone_cache:
-            pbs = [pb for pb in arm_ob.pose.bones if pb.bone.vs.bone_is_jigglebone]
-            pbs.sort(key=_bone_depth)
-            _jiggle_bone_cache[arm_name] = [pb.name for pb in pbs]
-        jiggle_pbs = [arm_ob.pose.bones[n] for n in _jiggle_bone_cache[arm_name]
-                      if n in arm_ob.pose.bones]
+        pose_bones = arm_ob.pose.bones
+        jiggle_pbs = [pose_bones[n] for n in _jiggle_names(arm_ob) if n in pose_bones]
         # In Pose Mode, selected jiggle bones are skipped so the user can pose
         # them manually. Stale detection resumes sim cleanly after deselection.
         if skip_selected and bpy.context.mode == 'POSE':

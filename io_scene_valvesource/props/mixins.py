@@ -98,7 +98,7 @@ class ExportableProps():
 
     export : BoolProperty(name=get_id("scene_export"), description=get_id("use_scene_export_tip"), default=True)
     subdir : StringProperty(name=get_id("subdir"), description=get_id("subdir_tip"))
-    flex_controller_mode : EnumProperty(name=get_id("controllers_mode"), description=get_id("controllers_mode_tip"), items=flex_controller_modes, default='DME')
+    flex_controller_mode : EnumProperty(name=get_id("controllers_mode"), description=get_id("controllers_mode_tip"), items=flex_controller_modes, default='SIMPLE')
     flex_controller_source : StringProperty(name=get_id("controller_source"), description=get_id("controllers_source_tip"), subtype='FILE_PATH', options={'PATH_SUPPORTS_BLEND_RELATIVE'})
 
     vertex_animations : CollectionProperty(name=get_id("vca_group_props"), type=VertexAnimation)

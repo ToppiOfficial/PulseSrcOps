@@ -6,6 +6,18 @@ _data = {
         'en': "Action Filter",
         'ja': "アクションフィルター",
     },
+    'action_preview_actions': {
+        'en': "Actions to export:",
+        'ja': "エクスポートするアクション：",
+    },
+    'action_preview_none_slots': {
+        'en': "No animation data on this armature",
+        'ja': "このアーマチュアにアニメーションデータがありません",
+    },
+    'action_preview_slots': {
+        'en': "Action slots to export:",
+        'ja': "エクスポートするアクションスロット：",
+    },
     'action_selection_filter_tip': {
         'en': "All actions that match the armature's filter term and have users",
         'ja': "アーマチュアのフィルターに一致するすべてのアクション",
@@ -94,10 +106,6 @@ _data = {
         'en': "Define flex controllers and flex rules following the DMX model spec (DMX export only)",
         'ja': "DMXモデル仕様に従いフレックスコントローラーとルールを定義（DMXエクスポート専用）",
     },
-    'controllers_builder_tip': {
-        'en': "Only shapekeys explicitly listed as flex controllers will be exported. All other shapekeys are ignored.",
-        'ja': "明示的にリストされたシェイプキーのみエクスポート",
-    },
     'curve_poly_side': {
         'en': "Polygon Generation",
         'ja': "ポリゴン生成",
@@ -142,6 +150,18 @@ _data = {
         'en': "Folder relative to game root containing VMTs referenced in this scene (DMX only)",
         'ja': "VMTを含むゲームルートからの相対フォルダー（DMXのみ）",
     },
+    'dmx_mat_path_none': {
+        'en': "(game root)",
+        'ja': "（ゲームルート）",
+    },
+    'dmx_mat_path_add_tip': {
+        'en': "Add a material path that materials in this scene can be assigned to",
+        'ja': "このシーンのマテリアルに割り当てられるマテリアルパスを追加",
+    },
+    'dmx_mat_path_remove_tip': {
+        'en': "Remove the selected material path. Materials using it fall back to the first path",
+        'ja': "選択したマテリアルパスを削除。使用中のマテリアルは最初のパスに戻ります",
+    },
     'dummy_bone': {
         'en': "Implicit motionless bone",
         'ja': "暗黙の静止ボーン",
@@ -150,13 +170,21 @@ _data = {
         'en': "Create a dummy bone for vertices which don't move. Emulates Blender's behaviour in Source, but may break compatibility with existing files (SMD and Source 1 DMX)",
         'ja': "動かない頂点用のダミーボーンを作成（SMDおよびSource 1 DMX）",
     },
-    'engine_path': {
-        'en': "Engine Path",
-        'ja': "エンジンのパス",
+    'engine': {
+        'en': "Engine",
+        'ja': "エンジン",
     },
-    'engine_path_tip': {
-        'en': "Directory containing studiomdl (Source 1) or resourcecompiler (Source 2)",
-        'ja': "studiomdlまたはresourcecompilerを含むディレクトリ",
+    'engine_tip': {
+        'en': "GoldSrc exports SMD only. Source covers both Source 1 and Source 2 - which one is decided by the DMX model format",
+        'ja': "GoldSrc は SMD のみをエクスポートします。Source は Source 1 と Source 2 の両方に対応し、どちらになるかは DMX モデル形式で決まります",
+    },
+    'game': {
+        'en': "Game",
+        'ja': "ゲーム",
+    },
+    'game_tip': {
+        'en': "Preset that sets the engine, DMX encoding and model format for a known game. Changing any of those manually switches this back to Custom",
+        'ja': "既知のゲームに合わせてエンジン・DMXエンコーディング・モデルフォーマットを設定するプリセット。いずれかを手動で変更すると Custom に戻ります",
     },
     'export_format': {
         'en': "Export Format",
@@ -167,24 +195,20 @@ _data = {
         'ja': "シーンエクスポーターが書き込むファイル形式",
     },
     'export_menuitem': {
-        'en': "Source Engine (.smd, .vta, .dmx)",
-        'ja': "Source Engine (.smd, .vta, .dmx)",
+        'en': "Source Engine",
+        'ja': "Source Engine",
     },
     'exportables_arm_filter_result': {
-        'en': "\"{0}\" actions ({1})",
-        'ja': "「{0}」アクション ({1})",
+        'en': "{0}: \"{1}\" actions ({2})",
+        'ja': "{0}: 「{1}」アクション ({2})",
     },
     'exportables_arm_no_slot_filter': {
-        'en': "All action slots ({0}) for \"{1}\"",
-        'ja': "「{1}」のすべてのアクションスロット（{0}）",
+        'en': "{0}: All action slots ({1})",
+        'ja': "{0}: すべてのアクションスロット（{1}）",
     },
-    'exportables_flex_count': {
-        'en': "Shapes: {0}",
-        'ja': "シェイプ：{0}",
-    },
-    'exportables_flex_count_corrective': {
-        'en': "Corrective Shapes: {0}",
-        'ja': "是正シェイプ：{0}",
+    'exportables_arm_bake_source': {
+        'en': "{0} (baked from \"{1}\")",
+        'ja': "{0}（「{1}」からベイク）",
     },
     'exportables_flex_generate': {
         'en': "Generate Controllers",
@@ -353,6 +377,21 @@ _data = {
         'en': "Could not create {0} file. Python reports: {1}.",
         'ja': "{0}ファイルを作成できませんでした。Pythonの報告: {1}",
     },
+    'exporter_err_fbx_addon': {
+        'en': "FBX export requires Blender's \"Import-Export: FBX format\" add-on, which could not be enabled.",
+    },
+    'exporter_warn_fbx_vca': {
+        'en': "\"{0}\" has vertex animations, which FBX export does not support - they were skipped.",
+    },
+    'importer_warn_fbx_companion': {
+        'en': "Could not read the companion DMX \"{0}\", so no flex controllers or prefab data were imported. Python reports: {1}.",
+    },
+    'exporter_warn_fbx_corrective': {
+        'en': "\"{0}\" has corrective shape keys. The companion DMX has no mesh, so it cannot declare them as correctives - export as DMX instead if you need them.",
+    },
+    'exporter_warn_fbx_shapeverts': {
+        'en': "Shape key \"{0}\" on \"{1}\" baked to a different vertex count to its base mesh - skipped.",
+    },
     'exporter_err_relativeunsaved': {
         'en': "Cannot export to a relative path until the blend file has been saved.",
         'ja': "blendファイルが保存されるまで相対パスにエクスポートできません",
@@ -385,12 +424,12 @@ _data = {
         'en': "Export all items selected in the Source Engine Exportables panel",
         'ja': "Source Engine Exportablesパネルで選択されたすべてのアイテムをエクスポート",
     },
+    'exporter_report_aborted': {
+        'en': "Export aborted after {0} files ({1} seconds)",
+    },
     'exporter_report': {
         'en': "{0} files exported in {1} seconds",
         'ja': "{0}個のファイルを{1}秒でエクスポートしました",
-    },
-    'exporter_report_aborted': {
-        'en': "Export aborted after {0} files ({1} seconds)",
     },
     'exporter_report_menu': {
         'en': "Source Tools Error Report",
@@ -413,8 +452,8 @@ _data = {
         'ja': "是正シェイプキー「{0}」は「{2}」と同じ有効化条件({1})です。スキップします",
     },
     'exporter_warn_multiarmature': {
-        'en': "Multiple armatures detected",
-        'ja': "複数のアーマチュアが検出されました",
+        'en': "Multiple armatures detected: \"{0}\" is bound to \"{1}\", but \"{2}\" already selected \"{3}\" as the export skeleton - only \"{3}\" will be used",
+        'ja': "複数のアーマチュアが検出されました: \"{0}\" は \"{1}\" にバインドされていますが、\"{2}\" が既に \"{3}\" をエクスポートスケルトンとして選択しています - \"{3}\" のみ使用されます",
     },
     'exporter_warn_unkeyframed_pose': {
         'en': "Animation \"{0}\": {1} posed but un-keyframed bone(s) will be reset to rest ({2}). Keyframe them, or disable 'Reset Pose Per Anim' to keep the pose.",
@@ -423,6 +462,14 @@ _data = {
     'exporter_warn_sanitised_filename': {
         'en': "Sanitised exportable name \"{0}\" to \"{1}\"",
         'ja': "エクスポート名「{0}」を「{1}」にサニタイズしました",
+    },
+    'exporter_warn_procbone_anim': {
+        'en': "Nothing exported for \"{0}\": it drives a procedural bone. Enable 'Export Procedural Bone Animations' to export it anyway.",
+        'ja': "「{0}」はエクスポートされませんでした: プロシージャルボーンを駆動しています。エクスポートするには「プロシージャルボーンのアニメーションをエクスポート」を有効にしてください。",
+    },
+    'exporter_warn_constraint_bake_empty': {
+        'en': "\"{0}\" follows \"{1}\" through bone constraints, but that rig has no animation to bake.",
+        'ja': "「{0}」はボーンコンストレイントで「{1}」に追従していますが、そのリグにはベイクするアニメーションがありません。",
     },
     'exporter_warn_source2names': {
         'en': "Consider renaming \"{0}\": in Source 2, model names can contain only lower-case characters, digits, and/or underscores.",
@@ -467,6 +514,10 @@ _data = {
     'exportname_tip': {
         'en': "Override the bone name written to exported files",
         'ja': "エクスポートされるファイルに書き込まれるボーン名を上書き",
+    },
+    'exportpanel_fbx_companion': {
+        'en': "A .dmx is written beside each .fbx for the flex controllers and prefabs.",
+        'ja': "フレックスコントローラーとプレハブ用に、各 .fbx の隣に .dmx が書き出されます。",
     },
     'exportpanel_dmxver': {
         'en': "DMX Version:",
@@ -552,9 +603,147 @@ _data = {
         'en': "Export bones using their Blender names, ignoring any export name overrides",
         'ja': "エクスポート名の上書きを無視し、Blenderのボーン名を使用",
     },
-    'import_menuitem': {
-        'en': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
-        'ja': "Source Engine (.smd, .vta, .dmx, .qc, .qci)",
+    'importmenu_title': {
+        'en': "Source Engine",
+        'ja': "Source Engine",
+    },
+    'import_menuitem_fbx': {
+        'en': "FBX (.fbx)",
+    },
+    'importer_fbx_title': {
+        'en': "Import FBX",
+    },
+    'importer_fbx_tip': {
+        'en': "Imports an FBX model, restoring any Source data an FBX export wrote into it",
+    },
+    'importer_fbx_scale': {
+        'en': "Scale",
+    },
+    'importer_fbx_scale_tip': {
+        'en': "Scale applied on import. Defaults to the inverse of the scene's world scale, undoing the conversion to engine units",
+    },
+    'importer_err_fbx': {
+        'en': "Could not import \"{0}\". Blender's FBX importer reports: {1}",
+    },
+    'import_menuitem_dmx': {
+        'en': "DMX (.dmx)",
+        'ja': "DMX (.dmx)",
+    },
+    'importer_dmx_title': {
+        'en': "Import DMX",
+        'ja': "インポート DMX",
+    },
+    'importer_dmx_tip': {
+        'en': "Imports an uncompiled Source Engine DMX model or animation",
+        'ja': "未コンパイルのSource Engine DMXモデルまたはアニメーションをインポート",
+    },
+    'content_path': {
+        'en': "Content Path",
+        'ja': "コンテンツパス",
+    },
+    'content_path_tip': {
+        'en': "Source 2 content root that VMDL file references are relative to (e.g. .../content/csgo_addons/my_addon). Leave empty to detect it from the VMDL's own location",
+        'ja': "VMDLのファイル参照の基準となるSource 2コンテンツルート (例: .../content/csgo_addons/my_addon)。空欄の場合はVMDLの場所から自動検出",
+    },
+    'importer_contentpath_hint': {
+        'en': "Leave empty to find it automatically from the VMDL's own location",
+        'ja': "空欄のままにすると、VMDLの場所から自動的に検出します",
+    },
+    'importer_prefabdata': {
+        'en': "Import Prefab Data",
+        'ja': "プレハブデータをインポート",
+    },
+    'importer_prefabdata_tip': {
+        'en': "Which kinds of prefab data to import alongside the model. Clear all to import only the skeleton and meshes",
+        'ja': "モデルと一緒にインポートするプレハブデータの種類。すべて解除するとスケルトンとメッシュのみをインポートします",
+    },
+    'importer_prefabdata_jiggle': {
+        'en': "Jigglebones",
+        'ja': "ジグルボーン",
+    },
+    'importer_prefabdata_jiggle_tip': {
+        'en': "Import jigglebone definitions onto the armature's bones",
+        'ja': "ジグルボーン定義をアーマチュアのボーンにインポート",
+    },
+    'importer_prefabdata_hitbox': {
+        'en': "Hitboxes",
+        'ja': "ヒットボックス",
+    },
+    'importer_prefabdata_hitbox_tip': {
+        'en': "Import hitbox volumes",
+        'ja': "ヒットボックスボリュームをインポート",
+    },
+    'importer_prefabdata_proc': {
+        'en': "Procedural Bones",
+        'ja': "プロシージャルボーン",
+    },
+    'importer_prefabdata_proc_tip': {
+        'en': "Import procedural (helper) bone rules",
+        'ja': "プロシージャル(ヘルパー)ボーンのルールをインポート",
+    },
+    'importer_prefabdata_attach': {
+        'en': "Attachments",
+        'ja': "アタッチメント",
+    },
+    'importer_prefabdata_attach_tip': {
+        'en': "Import attachment points as empties parented to their bone",
+        'ja': "アタッチメントポイントをボーンにペアレントしたエンプティとしてインポート",
+    },
+    'import_menuitem_prefab': {
+        'en': "Prefab data only (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
+        'ja': "プレハブデータのみ (.qc, .qci, .vrd, .dmx, .vmdl_prefab)",
+    },
+    'importer_prefab_title': {
+        'en': "Import Prefab Data",
+        'ja': "プレハブデータをインポート",
+    },
+    'importer_prefab_tip': {
+        'en': "Attaches jigglebones, hitboxes and procedural bones to the active armature without importing geometry",
+        'ja': "ジグルボーン、ヒットボックス、プロシージャルボーンをジオメトリなしでアクティブなアーマチュアに追加",
+    },
+    'importer_err_prefab_noarm': {
+        'en': "Prefab import needs an active armature to attach to",
+        'ja': "プレハブのインポートには、対象となるアクティブなアーマチュアが必要です",
+    },
+    'importer_err_prefab_empty': {
+        'en': "No jigglebones, hitboxes or procedural bones found in {0}",
+        'ja': "{0}にジグルボーン、ヒットボックス、プロシージャルボーンが見つかりません",
+    },
+    'import_menuitem_vmdl': {
+        'en': "VMDL (.vmdl, .vmdl_prefab)",
+        'ja': "VMDL (.vmdl, .vmdl_prefab)",
+    },
+    'importer_vmdl_title': {
+        'en': "Import VMDL",
+        'ja': "インポート VMDL",
+    },
+    'importer_vmdl_tip': {
+        'en': "Imports a Source 2 VMDL model definition and the DMX files it references",
+        'ja': "Source 2 VMDLモデル定義と参照DMXファイルをインポート",
+    },
+    'import_menuitem_qc': {
+        'en': "QC / QCI (.qc, .qci)",
+        'ja': "QC / QCI (.qc, .qci)",
+    },
+    'importer_qc_title': {
+        'en': "Import QC",
+        'ja': "インポート QC",
+    },
+    'importer_qc_tip': {
+        'en': "Imports a Source Engine QC compile script and the models it references",
+        'ja': "Source Engine QCコンパイルスクリプトと参照モデルをインポート",
+    },
+    'import_menuitem_smd': {
+        'en': "SMD / VTA (.smd, .vta)",
+        'ja': "SMD / VTA (.smd, .vta)",
+    },
+    'importer_smd_title': {
+        'en': "Import SMD",
+        'ja': "インポート SMD",
+    },
+    'importer_smd_tip': {
+        'en': "Imports an uncompiled Source Engine SMD model, animation or VTA flex library",
+        'ja': "未コンパイルのSource Engine SMDモデル、アニメーションまたはVTAフレックスライブラリをインポート",
     },
     'importer_balance_group': {
         'en': "DMX Stereo Balance",
@@ -619,10 +808,6 @@ _data = {
     'importer_err_badweights': {
         'en': "{0} vertices weighted to invalid bones on {1}",
         'ja': "{1}の{0}頂点が無効なボーンにウェイト付けされています",
-    },
-    'importer_err_bonelimit_smd': {
-        'en': "SMD only supports 128 bones!",
-        'ja': "SMDは128ボーンまでしかサポートしていません",
     },
     'importer_err_missingbones': {
         'en': "{0} contains {1} bones not present in {2}. Check the console for a list.",
@@ -692,17 +877,17 @@ _data = {
         'en': "Determines the type of rotation Keyframes created when importing bones or animation",
         'ja': "ボーンまたはアニメーションのインポート時に作成されるキーフレームの回転タイプ",
     },
-    'importer_tip': {
-        'en': "Imports uncompiled Source Engine model data",
-        'ja': "未コンパイルのSource Engineモデルデータをインポート",
-    },
-    'importer_title': {
-        'en': "Import SMD/VTA, DMX, QC",
-        'ja': "インポート SMD/VTA, DMX, QC",
-    },
     'importer_up_tip': {
         'en': "Which axis represents 'up' (ignored for QCs)",
         'ja': "上方向軸を設定（QCは無視）",
+    },
+    'importer_forward_tip': {
+        'en': "Which axis the model faces. Match the Forward Axis it was exported with",
+        'ja': "モデルの正面軸。エクスポート時の前方向軸に合わせてください",
+    },
+    'importer_up_offset_tip': {
+        'en': "Vertical offset to undo. Match the Up Axis Offset it was exported with",
+        'ja': "打ち消す垂直オフセット。エクスポート時の上方向軸オフセットに合わせてください",
     },
     'importer_use_collections': {
         'en': "Create Collections",
@@ -720,14 +905,6 @@ _data = {
         'en': "Inserts a random UUID at the current location",
         'ja': "現在の位置にランダムなUUIDを挿入",
     },
-    'label_armature_data': {
-        'en': "Armature Data",
-        'jp': "アーマチュアデータ"
-    },
-    'label_activate': {
-        'en': "Activate",
-        'ja': "有効化",
-    },
     'label_add_all': {
         'en': "Add All",
         'ja': "すべて追加",
@@ -744,6 +921,10 @@ _data = {
         'en': "Merge left_/right_ controller pairs into a single base-named stereo controller (e.g. left_lid_raise + right_lid_raise -> lid_raise)",
         'ja': "left_/right_ コントローラーのペアを単一のベース名ステレオコントローラーに統合 (例: left_lid_raise + right_lid_raise -> lid_raise)",
     },
+    'op_flex_auto_name_tip': {
+        'en': "Name each new controller after its shape key, sanitised to a lowercase legal name",
+        'ja': "新しい各コントローラーにシェイプキー名を設定し、小文字の有効な名前に整形します",
+    },
     'op_import_flex_text_tip': {
         'en': "Import flex controllers and rules from QC-style text in a Blender text block",
         'ja': "BlenderのテキストブロックのQC形式テキストからフレックスコントローラーとルールをインポート",
@@ -752,13 +933,21 @@ _data = {
         'en': "Blender text block containing the flexcontroller / localvar / %expression definitions",
         'ja': "flexcontroller / localvar / %式の定義を含むBlenderテキストブロック",
     },
+    'label_export_flex_text': {
+        'en': "Export to Text Block",
+        'ja': "テキストブロックへエクスポート",
+    },
+    'op_export_flex_text_tip': {
+        'en': "Write flex controllers and rules to a Blender text block as QC-style text for editing, then clear them from the list (delta overrides are kept). Re-import with 'Import from Text Block'",
+        'ja': "フレックスコントローラーとルールをQC形式テキストとしてBlenderテキストブロックに書き出して編集できるようにし、リストからは削除します（デルタオーバーライドは保持）。「テキストブロックからインポート」で読み込めます",
+    },
+    'op_export_flex_text_block_tip': {
+        'en': "Name of the Blender text block to write to; created if it does not exist",
+        'ja': "書き込み先のBlenderテキストブロック名。存在しない場合は作成されます",
+    },
     'label_all_attachments': {
         'en': "All Attachments",
         'ja': "すべてのアタッチメント",
-    },
-    'label_all_hitboxes': {
-        'en': "All Hitboxes",
-        'ja': "すべてのヒットボックス",
     },
     'label_all_jigglebones': {
         'en': "All Jigglebones",
@@ -772,40 +961,25 @@ _data = {
         'en': "Angle Constraints:",
         'ja': "角度制約:",
     },
-    'label_attachment_no_parent': {
-        'en': "Attachment cannot be a parent",
-        'ja': "アタッチメントは親になれません",
-    },
     'label_base_spring_properties': {
         'en': "Base Spring Properties:",
         'ja': "ベーススプリングプロパティ:",
+    },
+    'label_bone_hidden': {
+        'en': "Active Bone is Hidden",
+        'ja': "アクティブなボーンは非表示です",
     },
     'label_boing_properties': {
         'en': "Boing Properties:",
         'ja': "バネ動作プロパティ:",
     },
-    'label_controller_name': {
-        'en': "Controller Name",
-        'ja': "コントローラー名",
-    },
     'label_damping': {
         'en': "Damping",
         'ja': "減衰",
     },
-    'label_delete_all': {
-        'en': "Delete All",
-        'ja': "すべて削除",
-    },
-    'label_delta_name': {
-        'en': "Delta Name",
-        'ja': "デルタ名",
-    },
     'label_direction_naming': {
         'en': "Direction Naming:",
         'ja': "方向命名:",
-    },
-    'label_dme_components_valid': {
-        'en': "Components valid",
     },
     'label_dme_override_conflict': {
         'en': "Conflict: renames to an existing or duplicated delta name",
@@ -841,11 +1015,9 @@ _data = {
     'label_dme_dominator_hint': {
         'en': "Dominators: controller names, comma-separated",
     },
-    'label_dme_expression_hint': {
-        'en': "%localvar  or  controller:  + - * / () min() max() sqrt()",
-    },
-    'label_dme_expression_valid': {
-        'en': "Expression valid",
+    'label_dme_flex_help': {
+        'en': "Flex Animation Reference",
+        'ja': "Flex アニメーション リファレンス",
     },
     'label_dme_flex_controllers': {
         'en': "Flex Controllers",
@@ -858,6 +1030,9 @@ _data = {
     },
     'label_dme_unknown_controller': {
         'en': "{0}: unknown controller",
+    },
+    'label_dme_unknown_target': {
+        'en': "{0}: not a shape key, delta or local var",
     },
     'label_dme_unknown_delta': {
         'en': "%{0}: unknown shape key or local var",
@@ -873,14 +1048,6 @@ _data = {
         'en': "Export Name",
         'ja': "エクスポート名",
     },
-    'label_extra_args': {
-        'en': "Extra Args",
-        'ja': "追加引数",
-    },
-    'label_flex_type': {
-        'en': "Flex Type",
-        'ja': "フレックスタイプ",
-    },
     'label_forward': {
         'en': "Forward",
         'ja': "前方",
@@ -893,29 +1060,9 @@ _data = {
         'en': "Friction",
         'ja': "摩擦",
     },
-    'label_generate_lods': {
-        'en': "Generate LODs on export",
-        'ja': "エクスポート時にLODを生成",
-    },
-    'label_hitbox_group': {
-        'en': "Hitbox Group",
-        'ja': "ヒットボックスグループ",
-    },
-    'label_ignore': {
-        'en': "Ignore",
-        'ja': "無視",
-    },
     'label_in_multiple_collection': {
         'en': "In Multiple Collections",
         'ja': "複数のコレクションに存在",
-    },
-    'label_is_eyelid': {
-        'en': "Is Eyelid",
-        'ja': "まぶた",
-    },
-    'label_is_stereo': {
-        'en': "Is Stereo",
-        'ja': "ステレオ",
     },
     'label_jiggle_flexibility': {
         'en': "Flexibility",
@@ -945,25 +1092,9 @@ _data = {
         'en': "Min",
         'ja': "最小",
     },
-    'label_no_attachments': {
-        'en': "No Attachments",
-        'ja': "アタッチメントなし",
-    },
-    'label_no_hitboxes': {
-        'en': "No Hitboxes",
-        'ja': "ヒットボックスなし",
-    },
-    'label_no_jigglebones': {
-        'en': "No Jigglebones",
-        'ja': "ジグルボーンなし",
-    },
     'label_not_in_collection': {
         'en': "Not in Collection",
         'ja': "コレクションに未登録",
-    },
-    'label_options': {
-        'en': "Options",
-        'ja': "オプション",
     },
     'label_physical_properties': {
         'en': "Physical Properties:",
@@ -977,18 +1108,6 @@ _data = {
         'en': "Pitch Limits:",
         'ja': "ピッチ制限:",
     },
-    'label_preview_additive': {
-        'en': "Preview (Additive)",
-        'ja': "プレビュー (加算)",
-    },
-    'label_preview_reset': {
-        'en': "Preview (Reset)",
-        'ja': "プレビュー (リセット)",
-    },
-    'label_properties_to_copy': {
-        'en': "Properties to copy:",
-        'ja': "コピーするプロパティ:",
-    },
     'label_rotation_offset': {
         'en': "Rotation Offset:",
         'ja': "回転オフセット:",
@@ -996,10 +1115,6 @@ _data = {
     'label_select_valid_bone': {
         'en': "Select a Valid Bone",
         'ja': "有効なボーンを選択",
-    },
-    'label_shapekey': {
-        'en': "Shapekey",
-        'ja': "シェイプキー",
     },
     'label_side': {
         'en': "Side",
@@ -1069,13 +1184,9 @@ _data = {
         'en': "Use Bone Length",
         'ja': "ボーンの長さを使用",
     },
-    'label_vertex_animations_help': {
-        'en': "Vertex Animations Help",
-        'ja': "頂点アニメーションのヘルプ",
-    },
     'label_vertex_float_maps': {
-        'en': "Vertex Float Maps:",
-        'ja': "頂点フロートマップ:",
+        'en': "Cloth Proxy Mesh:",
+        'ja': "クロスプロキシメッシュ:",
     },
     'label_vertex_maps': {
         'en': "Vertex Maps:",
@@ -1092,10 +1203,6 @@ _data = {
     'valvesource_vertex_blend1': {
         'en': "Paint Blend Params 1",
         'ja': "ペイントブレンドパラメータ 1",
-    },
-    'label_y_to': {
-        'en': "Y to...",
-        'ja': "Yを...",
     },
     'label_yaw': {
         'en': "Yaw",
@@ -1124,66 +1231,6 @@ _data = {
     'vertex_influence_limit_mode_manual_tip': {
         'en': "Manually set the vertex influence limit",
         'ja': "頂点ウェイトの上限を手動で設定",
-    },
-    'menu_flex_controller_specials': {
-        'en': "Flex Controller Specials",
-        'ja': "フレックスコントローラー特別メニュー",
-    },
-    'op_add_all_flex_controllers': {
-        'en': "Add All Flex Controllers",
-        'ja': "すべてのフレックスコントローラーを追加",
-    },
-    'op_add_flex_controller': {
-        'en': "Add Flex Controller",
-        'ja': "フレックスコントローラーを追加",
-    },
-    'op_apply_remap_range': {
-        'en': "Apply Remap Range",
-        'ja': "リマップ範囲を適用",
-    },
-    'op_assign_bone_rot_export_offset': {
-        'en': "Assign Bone Target Forward",
-        'ja': "ボーンターゲット前方を割り当て",
-    },
-    'op_auto_assign_flex_groups': {
-        'en': "Auto Assign Flex Groups",
-        'ja': "フレックスグループを自動割り当て",
-    },
-    'op_auto_assign_flex_groups_tip': {
-        'en': "Automatically categorize flex controllers based on keywords",
-        'ja': "キーワードに基づいてフレックスコントローラーを自動分類",
-    },
-    'op_clear_flex_controllers': {
-        'en': "Clear All Flex Controllers",
-        'ja': "すべてのフレックスコントローラーをクリア",
-    },
-    'op_copy_bone_export_name': {
-        'en': "Copy Name to Clipboard",
-        'ja': "クリップボードに名前をコピー",
-    },
-    'op_copy_flex_controllers': {
-        'en': "Copy Flex Data to Selected",
-        'ja': "選択オブジェクトにフレックスデータをコピー",
-    },
-    'op_copy_flex_controllers_tip': {
-        'en': "Copy flex controllers, rules, and delta overrides from the active object to other selected mesh objects",
-        'ja': "アクティブオブジェクトのフレックスコントローラー、ルール、デルタ上書きを選択メッシュにコピー",
-    },
-    'op_copy_jigglebone_props': {
-        'en': "Copy Jigglebone Properties",
-        'ja': "ジグルボーンプロパティをコピー",
-    },
-    'op_copy_source_bone_props': {
-        'en': "Copy Source Bone Properties",
-        'ja': "Sourceボーンプロパティをコピー",
-    },
-    'op_move_flex_controller': {
-        'en': "Move Flex Controller",
-        'ja': "フレックスコントローラーを移動",
-    },
-    'op_preview_flex_controller': {
-        'en': "Preview Flex Controller",
-        'ja': "フレックスコントローラーをプレビュー",
     },
     'op_proc_bone_copy_tolerance': {
         'en': "Copy Tolerance",
@@ -1253,10 +1300,6 @@ _data = {
         'en': "Add each selected bone as a helper bone for new LookAt Procedural Bone entries, aiming at a chosen bone or attachment",
         'ja': "選択した各ボーンを新しいLookAt Procedural Boneのエントリとして追加し、選択したボーンまたはアタッチメントを向かせます。",
     },
-    'op_remove_flex_controller': {
-        'en': "Remove Flex Controller",
-        'ja': "フレックスコントローラーを削除",
-    },
     'op_reset_jiggle_simulation': {
         'en': "Reset Simulation",
         'ja': "シミュレーションをリセット",
@@ -1280,21 +1323,39 @@ _data = {
     'op_copy_jigglebones_only_selected_tip': {
         'en': "Only copy onto the currently selected bones instead of every matching bone in this armature",
     },
-    'op_sort_flex_controllers': {
-        'en': "Sort Flex Controllers",
-        'ja': "フレックスコントローラーをソート",
+    'op_copy_bone_props_from_armature': {
+        'en': "Copy Bone Props From Armature",
+    },
+    'op_copy_bone_props_from_armature_tip': {
+        'en': "Copy export name and export rotation/location offsets from another armature onto this armature's bones, matched by bone name (and optionally export name)",
     },
     'panel_backface': {
         'en': "Backface",
         'ja': "裏面",
     },
-    'panel_bone_data': {
-        'en': "Bone Data",
-        'ja': "ボーンデータ",
-    },
     'panel_jigglebones': {
         'en': "Jigglebones",
         'ja': "ジグルボーン",
+    },
+    'panel_material_paths': {
+        'en': "Material Paths",
+        'ja': "マテリアルパス",
+    },
+    'label_dme_delta_map': {
+        'en': "Delta Map",
+        'ja': "デルタマップ",
+    },
+    'panel_encoding_options': {
+        'en': "Encoding Options",
+        'ja': "エンコードオプション",
+    },
+    'panel_scene_transform': {
+        'en': "Orientation & Scale",
+        'ja': "向きとスケール",
+    },
+    'panel_model_options': {
+        'en': "Model Options",
+        'ja': "モデルオプション",
     },
     'panel_level_of_detail': {
         'en': "Level Of Detail",
@@ -1320,21 +1381,13 @@ _data = {
         'en': "Select a material",
         'ja': "マテリアルを選択",
     },
+    'panel_no_material_paths': {
+        'en': "Add a material path in the scene panel",
+        'ja': "シーンパネルでマテリアルパスを追加してください",
+    },
     'panel_toon_outline_edgeline': {
         'en': "Toon Outline/Edgeline",
         'ja': "トゥーンアウトライン/エッジライン",
-    },
-    'panel_vertex_animations': {
-        'en': "Vertex Animations",
-        'ja': "頂点アニメーション",
-    },
-    'panel_vertex_float_maps': {
-        'en': "Vertex Float Maps",
-        'ja': "頂点フロートマップ",
-    },
-    'panel_vertex_maps': {
-        'en': "Vertex Maps",
-        'ja': "頂点マップ",
     },
     'panel_viewport_simulation': {
         'en': "Source Engine Preview & Simulation",
@@ -1353,16 +1406,24 @@ _data = {
         'ja': "プレハブモード",
     },
     'prefab_export_mode_tip': {
-        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported (Source 1 only). QCI writes them to .qci/.vrd prefab files; DME encodes them into the model .dmx instead",
-        'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法 (Source 1 のみ)。QCI は .qci/.vrd プレハブファイルに書き出し、DME はそれらをモデルの .dmx に埋め込みます",
+        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
+        'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
+    },
+    'prefab_export_mode_fbx': {
+        'en': "EMBEDDED (companion DMX)",
+        'ja': "EMBEDDED (コンパニオン DMX)",
+    },
+    'prefab_export_mode_source2_forced': {
+        'en': "FILE (Source 2 is hand-authored in ModelDoc/vmdl)",
+        'ja': "FILE (Source 2 は ModelDoc/vmdl で手動作成)",
     },
     'prefab_export_mode_qci_tip': {
-        'en': "Write jigglebones, attachments and hitboxes to separate .qci prefab files",
-        'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci プレハブファイルに書き出します",
+        'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",
+        'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci/.vmdl プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd is written). Requires a DME-capable Source 1 compiler (KitsuneMDL)",
-        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd は書き出されません)。DME 対応の Source 1 コンパイラ (KitsuneMDL) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseModel)",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseModel) が必要です",
     },
     'bone_naming_label': {
         'en': "Bone Naming",
@@ -1373,8 +1434,8 @@ _data = {
         'ja': "Source 2 ボーン名を強制",
     },
     'force_source2_bone_sanitize_tip': {
-        'en': "Apply Source 2 (ModelDoc) bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",
-        'ja': "Source 1 へのエクスポート時でも Source 2 (ModelDoc) のボーン名サニタイズを適用します。ドットや非 ASCII 文字を除去し (下記の保持プレフィックスを除く)、例として 'Bone.001' は 'Bone_001' になります",
+        'en': "Apply Source 2 bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",
+        'ja': "Source 1 へのエクスポート時でも Source 2 のボーン名サニタイズを適用します。ドットや非 ASCII 文字を除去し (下記の保持プレフィックスを除く)、例として 'Bone.001' は 'Bone_001' になります",
     },
     'bone_name_prefixes_title': {
         'en': "Preserved Bone Name Prefixes",
@@ -1491,10 +1552,6 @@ _data = {
     'prop_delta_override_name_tip': {
         'en': "Delta name to use in the exported DMX instead of the shape key name",
         'ja': "シェイプキー名の代わりにDMXエクスポートで使用するデルタ名",
-    },
-    'prop_dme_flexcontrollers': {
-        'en': "Flex Controllers",
-        'ja': "フレックスコントローラー",
     },
     'prop_dmx_attachment': {
         'en': "Is Attachment",
@@ -1626,6 +1683,10 @@ _data = {
         'en': "'{0}' uses DME Rule mode which is DMX-only - flex rules are ignored for SMD export",
         'ja': "'{0}' はDMEルールモードを使用していますがSMDエクスポートでは無視されます",
     },
+    'exporter_err_clothproxy_source2': {
+        'en': "Cloth Proxy meshes require DMX export with a Source 2 compiler (ModelDoc / ResourceCompiler): {0}",
+        'ja': "クロスプロキシメッシュはSource 2コンパイラ（ModelDoc / ResourceCompiler）でのDMXエクスポートが必要です: {0}",
+    },
     'prop_float_map_group_tip': {
         'en': "Vertex map group name to remap",
         'ja': "リマップする頂点マップのグループ名",
@@ -1694,20 +1755,11 @@ _data = {
     'op_hitbox_mirror_x': {
         'en': "Mirror X",
     },
-    'op_hitbox_mirror_x_tip': {
-        'en': "Mirror the active hitbox along the X axis",
-    },
     'op_hitbox_mirror_y': {
         'en': "Mirror Y",
     },
-    'op_hitbox_mirror_y_tip': {
-        'en': "Mirror the active hitbox along the Y axis",
-    },
     'op_hitbox_mirror_z': {
         'en': "Mirror Z",
-    },
-    'op_hitbox_mirror_z_tip': {
-        'en': "Mirror the active hitbox along the Z axis",
     },
     'prop_hitbox_sync_pose': {
         'en': "Pose Sync",
@@ -2069,6 +2121,14 @@ _data = {
         'en': "Enable real-time Jiggle/procedural in the 3D viewport",
         'ja': "3Dビューポートでのリアルタイムのジグル/プロシージャルを有効にします",
     },
+    'prop_jiggle_sim_engine': {
+        'en': "Engine",
+        'ja': "エンジン",
+    },
+    'prop_jiggle_sim_engine_tip': {
+        'en': "Source engine used for jigglebone/procbone simulation and viewport preview axis conventions - independent of the export format",
+        'ja': "ジグルボーン/プロシージャルボーンのシミュレーションとビューポートプレビューの軸規則に使うSourceエンジン - エクスポート形式とは独立しています",
+    },
     'prop_jiggle_sim_rate': {
         'en': "Sim Rate (Hz)",
         'ja': "シミュレーションレート (Hz)",
@@ -2269,6 +2329,10 @@ _data = {
         'en': "Normalize shapekeys so max value is 1 and min is -1 or 0",
         'ja': "シェイプキーの最大値を1、最小値を-1または0に正規化",
     },
+    'prop_material_path_index_tip': {
+        'en': "Which of the scene's material paths this material is exported under",
+        'ja': "このマテリアルの書き出しに使用するシーンのマテリアルパス",
+    },
     'prop_override_dmx_export_path_tip': {
         'en': "Override the material path written into DMX for this material",
         'ja': "このマテリアルのDMXに書き込まれるマテリアルパスを上書き",
@@ -2461,10 +2525,6 @@ _data = {
         'en': "Target Bone",
         'ja': "ターゲットボーン",
     },
-    'prop_proc_bone_lookat_target_tip': {
-        'en': "Bone whose head position this bone aims at",
-        'ja': "このボーンが向くヘッド位置を持つボーン",
-    },
     'prop_proc_bone_lookat_target_type': {
         'en': "Target Type",
         'ja': "ターゲットタイプ",
@@ -2517,6 +2577,14 @@ _data = {
         'en': "Angular cone within which this trigger pose is active when used as a Proc Bone driver. Keyframe in the driver's action to vary per trigger",
         'ja': "このボーンがProcボーンのドライバーとして使用される場合のトリガーポーズが有効になるコーンの角度。アクション内でキーフレームを打つとトリガーごとに変化させることができます。",
     },
+    'prop_export_proc_bone_actions': {
+        'en': "Export Procedural Bone Animations",
+        'ja': "プロシージャルボーンのアニメーションをエクスポート",
+    },
+    'prop_export_proc_bone_actions_tip': {
+        'en': "Also export animations that are used as trigger animations by this armature's procedural bones. They are excluded by default because they only exist to author helper bone poses",
+        'ja': "このアーマチュアのプロシージャルボーンがトリガーアニメーションとして使用しているアニメーションもエクスポートします。ヘルパーボーンのポーズ作成専用のため、既定では除外されます",
+    },
     'prop_reset_pose_per_anim': {
         'en': "Reset Pose Per Animation Export",
         'ja': "アニメーションエクスポートごとにポーズをリセット",
@@ -2556,10 +2624,6 @@ _data = {
     'prop_rotation_copy_target_tip': {
         'en': "When set, X/Y/Z rotation offset values are mirrored from this bone, adjusted for any difference in rest-pose orientation. Clear to set offsets manually",
         'ja': "設定すると、このボーンからX/Y/Z回転オフセットが自動的にコピーされ、レストポーズの向きの差に応じて調整されます。手動設定する場合は空欄にしてください",
-    },
-    'prop_shapekey': {
-        'en': "ShapeKey",
-        'ja': "シェイプキー",
     },
     'prop_sim_jiggle_bones': {
         'en': "Simulate Jiggle Bones",

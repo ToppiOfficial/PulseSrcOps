@@ -10,7 +10,7 @@ The helper bone's own joint element is promoted to one of these types, so no
 separate ``.vrd`` is needed in DME prefab mode.
 
 The per-trigger transform math is shared with the text/VRD writer
-(``export_smd.PrefabExporter._write_proc_vrd``) via ``build_trigger_transforms``
+(``exports.prefab.PrefabExporter._write_proc_vrd``) via ``build_trigger_transforms``
 and the helpers below, so the two paths can't drift: the VRD path converts the
 matrices to Euler degrees, this module to DMX quaternions.
 
@@ -26,7 +26,7 @@ from .. import utils, datamodel
 
 
 # -----------------------------------------------------------------------------
-# Shared transform helpers (also used by export_smd._write_proc_vrd)
+# Shared transform helpers (also used by exports.prefab.PrefabExporter._write_proc_vrd)
 # -----------------------------------------------------------------------------
 
 _AXIS_VEC = {
@@ -265,15 +265,43 @@ def _axes_from_vec(vec):
 
 
 def _bone_resolver(armature):
-    """Map an exported/raw bone-name string back to a data-bone (name-only)."""
+    """Map an exported/raw bone-name string back to a data-bone (name-only).
+
+    Also matches across a missing namespace. Crowbar writes VRD helper/driver names with
+    the namespace stripped ("Bip01_Pelvis") while the armature keeps the full name
+    ("ValveBiped.Bip01_Pelvis"), so a plain lookup misses nearly every bone. Prefixes come
+    from the add-on's preserved-prefix list, so a custom rig namespace registered in
+    preferences is handled the same way.
+    """
     by_name = {b.name: b for b in armature.data.bones}
     by_export = {utils.get_bone_exportname(b): b for b in armature.data.bones}
     by_lower = {b.name.lower(): b for b in armature.data.bones}
 
+    prefixes = utils.get_preserved_bone_prefixes()
+    by_stripped: dict = {}
+    for b in armature.data.bones:
+        lower = b.name.lower()
+        for p in prefixes:
+            if lower.startswith(p.lower()):
+                by_stripped.setdefault(lower[len(p):], b)
+                break
+
     def resolve(name):
         if not name:
             return None
-        return by_name.get(name) or by_export.get(name) or by_lower.get(name.lower())
+        bone = by_name.get(name) or by_export.get(name) or by_lower.get(name.lower())
+        if bone:
+            return bone
+        lower = name.lower()
+        # File dropped the namespace the armature carries
+        bone = by_stripped.get(lower)
+        if bone:
+            return bone
+        # or carries one the armature does not
+        for p in prefixes:
+            if lower.startswith(p.lower()):
+                return by_lower.get(lower[len(p):])
+        return None
     return resolve
 
 

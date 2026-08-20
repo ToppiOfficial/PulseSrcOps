@@ -18,17 +18,17 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math, bmesh
-from typing import Optional, Any
+import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
+from typing import Optional
+# NB: `math` and `Optional` above are re-exported to every `from .utils import *`
+# consumer in exports/ - they are used there without a local import.
 from bpy.app.translations import pgettext
-from contextlib import contextmanager
 from bpy.app.handlers import depsgraph_update_post, load_post, persistent
 from mathutils import Matrix, Vector
 from math import radians, pi, ceil, floor
 from io import TextIOWrapper
 from . import datamodel
 from . import keyvalues3
-import numpy as np
 
 intsize = struct.calcsize("i")
 floatsize = struct.calcsize("f")
@@ -96,17 +96,29 @@ hitbox_group = [
     ('8', 'Neck', 'Used for human neck (to fix penetration to head from behind), appears Orange in HLMV (In all games since CS:GO)'),
 ]
 
-kitsune_data_keys: list[str] = []
-
 class ExportFormat:
     SMD = 1
     DMX = 2
+    FBX = 3
+
+# Engine only separates GoldSrc from Source - which Source engine a DMX targets is
+# carried by dmx_format's compiler suffix, not by a second engine setting.
+export_formats_by_engine = {
+    'GOLDSRC': ('SMD',),
+    'SOURCE': ('SMD', 'DMX', 'FBX'),
+}
 
 class Compiler:
     UNKNOWN = 0
-    STUDIOMDL = 1 # Source 1
-    RESOURCECOMPILER = 2 # Source 2
-    MODELDOC = 3 # Source 2 post-Alyx
+    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseModel)
+    RESOURCECOMPILER = 2 # Source 2 pre-Alyx (Dota 2)
+    MODELDOC = 3 # Source 2 post-Alyx (Alyx / CS2 / Deadlock)
+
+# Model 22 is shared by all three compilers, so dmx_format carries the compiler as a
+# suffix: bare '22' is Source 1 (PulseModel), '22_resourcecompiler' and '22_modeldoc'
+# are Source 2. This suffix is the single source of truth for State.compiler.
+compiler_suffixes = {'': Compiler.STUDIOMDL, 'resourcecompiler': Compiler.RESOURCECOMPILER, 'modeldoc': Compiler.MODELDOC}
+compiler_to_suffix = {v: (f"_{k}" if k else "") for k, v in compiler_suffixes.items()}
 
 @dataclasses.dataclass(frozen = True)
 class dmx_version:
@@ -117,37 +129,26 @@ class dmx_version:
     compiler : int = Compiler.STUDIOMDL
 
     @property
-    def format_enum(self): return str(self.format) + ("_modeldoc" if self.compiler == Compiler.MODELDOC else "")
-    @property
-    def format_title(self): return f"Model {self.format}" + (" (ModelDoc)" if self.compiler == Compiler.MODELDOC else "")
+    def format_enum(self): return str(self.format) + compiler_to_suffix.get(self.compiler, "")
 
-dmx_versions_source1 = {
-'Ep1': dmx_version(0,0, "Half-Life 2: Episode One"),
-'Source2007': dmx_version(2,1, "Source 2007"),
-'Source2009': dmx_version(2,1, "Source 2009"),
-'Garrysmod': dmx_version(2,1, "Garry's Mod"),
-'Orangebox': dmx_version(5,18, "OrangeBox / Source MP"),
-'nmrih': dmx_version(2,1, "No More Room In Hell"),
-}
-
-dmx_versions_source1.update({version.title:version for version in [
-dmx_version(2,1, 'Team Fortress 2'),
-dmx_version(0,0, 'Left 4 Dead'), # wants model 7, but it's not worth working out what that is when L4D2 in far more popular and SMD export works
-dmx_version(4,15, 'Left 4 Dead 2'),
-dmx_version(5,18, 'Alien Swarm'),
-dmx_version(5,18, 'Portal 2'),
-dmx_version(5,18, 'Source Filmmaker'),
-# and now back to 2/1 for some reason...
-dmx_version(2,1, 'Half-Life 2'),
-dmx_version(2,1, 'Source SDK Base 2013 Singleplayer'),
-dmx_version(2,1, 'Source SDK Base 2013 Multiplayer'),
-]})
-
-dmx_versions_source2 = {
-'dota2': dmx_version(9,22, "Dota 2", Compiler.RESOURCECOMPILER),
-'steamtours': dmx_version(9,22, "SteamVR", Compiler.RESOURCECOMPILER),
-'hlvr': dmx_version(9,22, "Half-Life: Alyx", Compiler.MODELDOC), # format is still declared as 22, but modeldoc introduces breaking changes
-'cs2': dmx_version(9,22, 'Counter-Strike 2', Compiler.MODELDOC),
+# Game presets: id -> (label, engine, dmx_encoding, dmx_format). Picking one just writes
+# scene.vs.engine/dmx_encoding/dmx_format - there is no auto-detection. Engine is
+# 'GOLDSRC' or 'SOURCE'; Source 2 games are identified by their dmx_format suffix.
+game_presets = {
+    'HL1':        ("Half-Life",                     'GOLDSRC', '2', '1'),
+    'HL2':        ("Half-Life 2",                   'SOURCE', '2', '1'),
+    'SDK2013SP':  ("Source SDK Base 2013 SP",       'SOURCE', '2', '1'),
+    'SDK2013MP':  ("Source SDK Base 2013 MP",       'SOURCE', '2', '1'),
+    'L4D1':       ("Left 4 Dead",                   'SOURCE', '4', '15'),
+    'L4D2':       ("Left 4 Dead 2",                 'SOURCE', '4', '15'),
+    'ALIENSWARM': ("Alien Swarm",                   'SOURCE', '5', '18'),
+    'PORTAL2':    ("Portal 2",                      'SOURCE', '5', '18'),
+    'CSGO':       ("Counter-Strike: Global Offensive", 'SOURCE', '5', '18'),
+    'SFM':        ("Source Filmmaker",              'SOURCE', '5', '18'),
+    'DOTA2':      ("Dota 2",                        'SOURCE', '9', '22_resourcecompiler'),
+    'HLA':        ("Half-Life: Alyx",               'SOURCE', '9', '22_modeldoc'),
+    'CS2':        ("Counter-Strike 2",              'SOURCE', '9', '22_modeldoc'),
+    'DEADLOCK':   ("Deadlock",                      'SOURCE', '9', '22_modeldoc'),
 }
 
 def getAllDataNameTranslations(string : str) -> set[str]:
@@ -180,7 +181,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     def __init__(cls, *args, **kwargs):
         cls._exportableObjects = set()
         cls.last_export_refresh = 0
-        cls._engineBranch = None
         cls._gamePathValid = False
         cls._legacySlotTranslations = getAllDataNameTranslations("Legacy Slot")
 
@@ -188,29 +188,24 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     def exportableObjects(cls) -> set[int]: return cls._exportableObjects
 
     @property
-    def engineBranch(cls) -> dmx_version | None: return cls._engineBranch
-
-    @property
     def datamodelEncoding(cls):
-        if cls._engineBranch: return cls._engineBranch.encoding
         enc = bpy.context.scene.vs.dmx_encoding
         return 1 if enc == 'kv2' else int(enc)
 
     @property
-    def use_kv2(cls):
-        return not cls._engineBranch and bpy.context.scene.vs.dmx_encoding == 'kv2'
+    def use_kv2(cls): return bpy.context.scene.vs.dmx_encoding == 'kv2'
 
     @property
-    def datamodelFormat(cls): return cls._engineBranch.format if cls._engineBranch else int(bpy.context.scene.vs.dmx_format.split("_")[0])
+    def datamodelFormat(cls): return int(bpy.context.scene.vs.dmx_format.split("_")[0])
 
     @property
-    def engineBranchTitle(cls): return cls._engineBranch.title if cls._engineBranch else None
+    def compiler(cls): return compiler_suffixes.get(bpy.context.scene.vs.dmx_format.partition("_")[2], Compiler.STUDIOMDL)
 
     @property
-    def compiler(cls): return cls._engineBranch.compiler if cls._engineBranch else Compiler.MODELDOC if "modeldoc" in bpy.context.scene.vs.dmx_format else Compiler.UNKNOWN
-
-    @property
-    def exportFormat(cls): return ExportFormat.DMX if bpy.context.scene.vs.export_format == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
+    def exportFormat(cls):
+        fmt = bpy.context.scene.vs.export_format
+        if fmt == 'FBX': return ExportFormat.FBX
+        return ExportFormat.DMX if fmt == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
 
     @property
     def gamePath(cls):
@@ -262,7 +257,6 @@ class State(metaclass=_StateMeta):
     @persistent
     def _onLoad(_):
         State.update_scene()
-        State._updateEngineBranch()
         State._validateGamePath()
 
     @classmethod
@@ -276,18 +270,6 @@ class State(metaclass=_StateMeta):
         if cls.update_scene in depsgraph_update_post:
             depsgraph_update_post.remove(cls._onDepsgraphUpdate)
             load_post.remove(cls._onLoad)
-
-    @staticmethod
-    def onEnginePathChanged(props,context):
-        if props == context.scene.vs:
-            State._updateEngineBranch()
-
-    @classmethod
-    def _updateEngineBranch(cls):
-        try:
-            cls._engineBranch = getEngineBranch()
-        except:
-            cls._engineBranch = None
 
     @staticmethod
     def onGamePathChanged(props,context):
@@ -325,6 +307,33 @@ def get_active_exportable(context = None):
 
     return context.scene.vs.export_list[context.scene.vs.export_list_active]
 
+def get_material_path(scene, matdata = None) -> str:
+    """Resolve the DMX material path a material exports under. Materials point at an entry
+    in scene.vs.material_paths by index; anything out of range falls back to the first."""
+    paths = scene.vs.material_paths
+    if not len(paths):
+        return ""
+    index = 0
+    if matdata:
+        try:
+            index = int(matdata.vs.material_path_index)
+        except ValueError:
+            index = 0
+    if not 0 <= index < len(paths):
+        index = 0
+    return paths[index].path
+
+
+def find_or_add_material_path(scene, path: str) -> int:
+    """Index of path in scene.vs.material_paths, appending it if it isn't there yet."""
+    path = path.strip().replace('\\', '/').strip('/')
+    for i, item in enumerate(scene.vs.material_paths):
+        if item.path == path:
+            return i
+    scene.vs.material_paths.add().path = path
+    return len(scene.vs.material_paths) - 1
+
+
 class BenchMarker:
     def __init__(self,indent = 0, prefix = None):
         self._indent = indent * 4
@@ -361,9 +370,6 @@ def smdContinue(line):
 def getDatamodelQuat(blender_quat):
     return datamodel.Quaternion([blender_quat[1], blender_quat[2], blender_quat[3], blender_quat[0]])
 
-# Decimal places bone scale is rounded to. Enough to collapse matrix-decomposition noise
-# (0.9999999999999998, 1.0000000794728596) without touching a genuinely small scale.
-DATAMODEL_SCALE_PRECISION = 6
 
 def getDatamodelScale(matrix, divisor=None):  # THIS IS ABSOLUTE BS!
     """Average a matrix's decomposed scale into the single uniform float DmeTransform wants.
@@ -376,28 +382,9 @@ def getDatamodelScale(matrix, divisor=None):  # THIS IS ABSOLUTE BS!
     if divisor and all(divisor):
         comps = [c / d for c, d in zip(comps, divisor)]
     avg = sum(comps) / 3.0
-    rounded = round(avg, DATAMODEL_SCALE_PRECISION)
+    rounded = round(avg, 6)
     # never let a small-but-real scale round away to zero - that collapses the mesh
     return rounded if rounded != 0.0 or avg == 0.0 else avg
-
-def getEngineBranch() -> dmx_version | None:
-    if not bpy.context.scene.vs.engine_path: return None
-    path = os.path.abspath(bpy.path.abspath(bpy.context.scene.vs.engine_path))
-
-    # Source 2: search for executable name
-    engine_path_files = set(name[:-4] if name.endswith(".exe") else name for name in os.listdir(path))
-    if "resourcecompiler" in engine_path_files: # Source 2
-        for executable,dmx_version in dmx_versions_source2.items():
-            if executable in engine_path_files:
-                return dmx_version
-
-    # Source 1 SFM special case
-    if path.lower().find("sourcefilmmaker") != -1:
-        return dmx_versions_source1["Source Filmmaker"] # hack for weird SFM folder structure, add a space too
-    
-    # Source 1 standard: use parent dir's name
-    name = os.path.basename(os.path.dirname(bpy.path.abspath(path))).title().replace("Sdk","SDK")
-    return dmx_versions_source1.get(name)
 
 def getCorrectiveShapeSeparator(): return '__' if State.compiler == Compiler.MODELDOC else '_'
 
@@ -514,11 +501,12 @@ def animationFrameRange(ad : bpy.types.AnimData):
     first = floor(min(times))
     return first, ceil(max(times)) - first
 
-def animationLength(ad : bpy.types.AnimData):
-    return animationFrameRange(ad)[1]
-    
-def getFileExt(flex=False):
-    if State.datamodelEncoding != 0 and bpy.context.scene.vs.export_format == 'DMX':
+def getFileExt(flex=False, anim=False):
+    fmt = bpy.context.scene.vs.export_format
+    if fmt == 'FBX':
+        # Animations have no mesh to justify an FBX - they are written as DMX.
+        return ".dmx" if anim else ".fbx"
+    if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
         if flex: return ".vta"
@@ -586,6 +574,16 @@ def getForwardAxisMat(axis: str) -> Matrix:
             return Matrix.Rotation(pi / 2, 4, 'X')
         case _:
             raise AttributeError(f"getForwardAxisMat got invalid axis argument '{axis}'")
+
+def getImportAxisMat(up_axis, forward_axis='-Y', up_axis_offset=0.0) -> Matrix:
+    """Undoes the axis transform the exporter applies in bake.py, world scale aside.
+
+    Export is up^-1 @ forward^-1 @ offset, so an import needs offset^-1 @ forward @ up.
+    With the default -Y forward and no offset this reduces to getUpAxisMat(up_axis).
+    """
+    return (getUpAxisOffsetMat(up_axis, up_axis_offset).inverted()
+            @ getForwardAxisMat(forward_axis)
+            @ getUpAxisMat(up_axis))
 
 def MakeObjectIcon(object,prefix=None,suffix=None):
     if not (prefix or suffix):
@@ -702,6 +700,47 @@ def valvesource_vertex_maps(id) -> set[str]:
     else:
         return set()
 
+def isConstraintDriven(ob : bpy.types.Object) -> bool:
+    """True when an armature's pose comes from bone constraints rather than its own
+    keyframes - a rig following another one. Such a rig has no action, so it has no frame
+    range and no name to export under; SmdExporter._bake_constraint_poses bakes the
+    constraint result into real actions before anything else looks at it."""
+    if ob.type != 'ARMATURE':
+        return False
+    ad = ob.animation_data
+    if ad and ad.action:
+        return False
+    return any(not c.mute for pb in ob.pose.bones for c in pb.constraints)
+
+def constraintBakeSource(ob : bpy.types.Object):
+    """The armature a constraint-driven rig follows, or None. The most-targeted one wins:
+    such a rig usually also carries a few constraints aimed at helpers or at itself, and
+    those must not outvote the rig actually supplying the motion."""
+    targets = collections.Counter()
+    for pb in ob.pose.bones:
+        for c in pb.constraints:
+            target = getattr(c, 'target', None)
+            if not c.mute and target and target != ob and target.type == 'ARMATURE':
+                targets[target] += 1
+    return targets.most_common(1)[0][0] if targets else None
+
+def constraintBakeAnimations(rig : bpy.types.Object, src : bpy.types.Object) -> list:
+    """(action, slot, export name) for every animation a constraint-driven `rig` should
+    produce, reading `rig`'s own action_selection mode against the rig that drives it."""
+    ad = src.animation_data
+    mode = rig.data.vs.action_selection
+    if mode == 'FILTERED_ACTIONS':
+        jobs = [(a, None) for a in actionsForFilter(rig.vs.action_filter)]
+    elif mode == 'FILTERED' and ad and ad.action:
+        jobs = [(ad.action, s) for s in actionSlotsForFilter(src)]
+    elif ad and ad.action:
+        jobs = [(ad.action, ad.action_slot)]
+    else:
+        jobs = []
+    # A single-slot action's slot is just named after the rig holding it, which says nothing
+    # about the animation - only fall back to slot names when one action holds several.
+    return [(a, s, s.name_display if s and len(a.slots) > 1 else a.name) for a, s in jobs if a]
+
 def actionSlotsForFilter(obj : bpy.types.Object):
     from fnmatch import fnmatch
     if not obj.animation_data:
@@ -711,6 +750,46 @@ def actionSlotsForFilter(obj : bpy.types.Object):
 def actionsForFilter(filter):
     import fnmatch
     return list([action for action in bpy.data.actions if action.users and fnmatch.fnmatch(action.name, filter)])
+
+def _procBoneSlotDisplayName(action, slot_name : str):
+    """Mirror procbones_sim._find_action_slot, but return the slot's display name so it
+    can be compared against what the exporter iterates. An entry naming no slot, or a
+    slot that no longer exists, resolves to nothing - it drives no procedural bone, so
+    it must not suppress any animation."""
+    if not slot_name:
+        return None
+    for s in getattr(action, 'slots', ()):
+        if slot_name in (s.identifier, s.name_display, getattr(s, 'name', '')):
+            return s.name_display
+    return None
+
+def procBoneTriggerSlotNames(arm_ob : bpy.types.Object) -> set:
+    """Display names of the action slots that drive one of `arm_ob`'s procedural bones.
+    Only slots of the action currently assigned to `arm_ob` can collide, so entries
+    pointing at another action are ignored."""
+    ad = getattr(arm_ob, 'animation_data', None)
+    if not ad or not ad.action or arm_ob.type != 'ARMATURE':
+        return set()
+    names = (_procBoneSlotDisplayName(ad.action, e.action_slot_name)
+             for e in arm_ob.data.vs.proc_bones
+             if e.proc_type == 'TRIGGER' and e.action == ad.action)
+    return {n for n in names if n}
+
+def procBoneTriggerActionNames(arm_ob : bpy.types.Object) -> set:
+    """Names of the actions that drive one of `arm_ob`'s procedural bones."""
+    if arm_ob.type != 'ARMATURE':
+        return set()
+    return {e.action.name for e in arm_ob.data.vs.proc_bones
+            if e.proc_type == 'TRIGGER' and e.action}
+
+def isProcBoneAnimSkipped(arm_ob : bpy.types.Object, action_name : str, slot_name : str = None) -> bool:
+    """True when this animation only exists to drive a procedural bone and the armature
+    is not set to export those."""
+    if getattr(arm_ob, 'type', None) != 'ARMATURE' or arm_ob.data.vs.export_proc_bone_actions:
+        return False
+    if slot_name is not None:
+        return slot_name in procBoneTriggerSlotNames(arm_ob)
+    return action_name in procBoneTriggerActionNames(arm_ob)
 
 def actionSlotExportName(animData : bpy.types.AnimData):
     """For use only when exporting a single action slot"""
@@ -826,7 +905,10 @@ def make_export_list(scene: bpy.types.Scene):
     scene.vs.export_list.clear()
 
     def makeDisplayName(item, name=None):
-        return (name if name else item.name) + getFileExt()
+        base = name if name else item.name
+        # Only armature rows produce animations, and those are DMX even in FBX mode.
+        anim = isinstance(item, bpy.types.Object) and item.type == 'ARMATURE'
+        return sanitize_string(base, allow_unicode=True) + getFileExt(anim=anim)
 
     if not State.exportableObjects:
         return
@@ -847,10 +929,11 @@ def make_export_list(scene: bpy.types.Scene):
             scene_groups.append(group)
 
     for g in scene_groups:
+        san_name = sanitize_string(g.name, allow_unicode=True)
         if g.vs.mute:
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_mute_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_mute_suffix", True)))
         elif is_bypassed_into_parent(g):
-            label = "{} {}".format(g.name, pgettext(get_id("exportables_group_bypass_suffix", True)))
+            label = "{} {}".format(san_name, pgettext(get_id("exportables_group_bypass_suffix", True)))
         else:
             label = makeDisplayName(g)
         pending.append((0, label, "COLLECTION", "GROUP", None, g))
@@ -870,18 +953,45 @@ def make_export_list(scene: bpy.types.Scene):
         i_name = i_type = i_icon = None
         if ob.type == 'ARMATURE':
             ad = ob.animation_data
-            if ad:
+            # No assigned action means nothing to export - keep it off the list.
+            if ad and ad.action:
                 i_icon = i_type = "ACTION_SLOT"
                 if ob.data.vs.action_selection != 'CURRENT':
                     export_slots = ob.data.vs.action_selection == 'FILTERED'
-                    exportables_count = len(actionSlotsForFilter(ob) if export_slots else actionsForFilter(ob.vs.action_filter))
-                    if exportables_count > 0:
-                        if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
-                            i_name = get_id("exportables_arm_filter_result", True).format(ob.vs.action_filter, exportables_count)
-                        else:
-                            i_name = get_id("exportables_arm_no_slot_filter", True).format(exportables_count, ob.name)
+                    if export_slots:
+                        exportables_count = len([s for s in actionSlotsForFilter(ob)
+                                                 if not isProcBoneAnimSkipped(ob, None, s.name_display)])
+                    else:
+                        exportables_count = len([a for a in actionsForFilter(ob.vs.action_filter)
+                                                 if not isProcBoneAnimSkipped(ob, a.name)])
+                    # Keep the row even when the filter matches nothing, otherwise the
+                    # armature vanishes from the list and the filter can't be recovered.
+                    if not export_slots or (ob.vs.action_filter and ob.vs.action_filter != "*"):
+                        i_name = get_id("exportables_arm_filter_result", True).format(ob.name, ob.vs.action_filter, exportables_count)
+                    else:
+                        i_name = get_id("exportables_arm_no_slot_filter", True).format(ob.name, exportables_count)
                 elif ad.action_slot:
                     i_name = makeDisplayName(ob, actionSlotExportName(ad))
+                else:
+                    # CURRENT mode with no active slot: keep the row so its action
+                    # settings stay reachable instead of the row disappearing.
+                    i_name = makeDisplayName(ob)
+            else:
+                # No action of its own, but its bone constraints follow a rig that has them.
+                # Export bakes those out, so label the row the same way a keyframed armature
+                # is labelled - the mode and count - and name where the motion comes from.
+                bake_src = constraintBakeSource(ob) if isConstraintDriven(ob) else None
+                if bake_src:
+                    i_icon = i_type = "ACTION_SLOT"
+                    jobs = constraintBakeAnimations(ob, bake_src)
+                    label = get_id("exportables_arm_bake_source", True).format(ob.name, bake_src.name)
+                    if ob.data.vs.action_selection == 'CURRENT':
+                        i_name = makeDisplayName(ob, jobs[0][2]) if jobs else label
+                    elif ob.data.vs.action_selection == 'FILTERED' and ob.vs.action_filter in ("", "*"):
+                        i_name = get_id("exportables_arm_no_slot_filter", True).format(label, len(jobs))
+                    else:
+                        i_name = get_id("exportables_arm_filter_result", True).format(
+                            label, ob.vs.action_filter, len(jobs))
         else:
             i_name = makeDisplayName(ob)
             i_icon = MakeObjectIcon(ob, prefix="OUTLINER_OB_")
@@ -1055,25 +1165,26 @@ class SmdInfo:
     def __init__(self, jobName : str):
         self.jobName = jobName
         self.upAxis = bpy.context.scene.vs.up_axis
-        self.amod = {} # Armature modifiers
+        self.forwardAxis = bpy.context.scene.vs.forward_axis
+        self.upAxisOffset = bpy.context.scene.vs.up_axis_offset
         self.materials_used = set() # printed to the console for users' benefit
 
         # DMX stuff
         self.attachments = []
         self.meshes = []
-        self.parent_chain = []
-        self.dmxShapes = collections.defaultdict(list)
         self.boneTransformIDs = {}
-
-        self.frameData = []
-        self.bakeInfo = []
 
         # boneIDs contains the ID-to-name mapping of *this* SMD's bones.
         # - Key: integer ID
         # - Value: bone name (storing object itself is not safe)
         self.boneIDs = {}
-        self.boneNameToID = {} # for convenience during export
         self.phantomParentIDs = {} # for bones in animation SMDs but not the ref skeleton
+
+    @property
+    def axisMat(self) -> Matrix:
+        """Axis correction an import applies. A property rather than a cached value:
+        a DMX file's own axisSystem can overwrite upAxis after the reader has started."""
+        return getImportAxisMat(self.upAxis, self.forwardAxis, self.upAxisOffset)
 
 class QcInfo:
     startTime = 0
@@ -1104,6 +1215,10 @@ class QcInfo:
         self.dir_stack = []
         # Every imported mesh with shape keys; global flex data is applied to all of them.
         self.flex_meshes = []
+        # Every imported reference mesh, in import order. A decompiled VTA is indexed
+        # against the whole model, so shape matching has to span all of them, not just
+        # the ref_mesh that happened to be imported last.
+        self.ref_meshes = []
 
     def cd(self):
         return os.path.join(self.root_filedir,*self.dir_stack)
@@ -1213,33 +1328,6 @@ def parse_order_vg_name(name: str) -> int | None:
     return n
 
 #
-#   IMPORT
-#
-
-
-def parse_hitbox_line(line: str):
-    """Parse a $hbox line. Returns dict with group, bone, min, max, rotation (degrees), scale or None."""
-    import re
-    pattern = (r'\$hbox\s+(\d+)\s+"([^"]+)"\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+'
-               r'([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)'
-               r'(?:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+))?'
-               r'(?:\s+([-\d.]+))?')
-    match = re.match(pattern, line.strip())
-    if not match:
-        return None
-    g = match.groups()
-    return {
-        'group':    int(g[0]),
-        'bone':     g[1],
-        'min':      mathutils.Vector((float(g[2]), float(g[3]), float(g[4]))),
-        'max':      mathutils.Vector((float(g[5]), float(g[6]), float(g[7]))),
-        'rotation': (float(g[8] or 0), float(g[9] or 0), float(g[10] or 0)),
-        'scale':    float(g[11]) if g[11] is not None else -1.0,
-    }
-
-
-#
 #   GET
 #
 
@@ -1285,59 +1373,9 @@ def get_attachments(ob : bpy.types.Object | None) -> list[bpy.types.Object | Non
         
     return attchs
 
-# I forgot what I even made this for??? Unused function
-#def get_collision_cloth_bone_uses(arm_ob: bpy.types.Object, weight_threshold: float) -> set[str]:
-#    """Return names of bones that have at least one vertex with weight > weight_threshold
-#    in any COLLISION or CLOTHPROXY mesh associated with arm_ob (via Armature modifier
-#    or direct parenting).  Uses the evaluated (post-modifier) mesh so Mirror and other
-#    modifiers that affect vertex group assignments are respected."""
-#    result: set[str] = set()
-#    bone_names = {b.name for b in arm_ob.data.bones}
-#
-#    try:
-#        depsgraph = bpy.context.evaluated_depsgraph_get()
-#    except Exception:
-#        depsgraph = None
-#
-#    for obj in bpy.data.objects:
-#        if obj.type != 'MESH':
-#            continue
-#        if getattr(getattr(obj, 'vs', None), 'mesh_type', 'DEFAULT') not in ('COLLISION', 'CLOTHPROXY'):
-#            continue
-#        associated = obj.parent is arm_ob
-#        if not associated:
-#            for mod in obj.modifiers:
-#                if mod.type == 'ARMATURE' and mod.object is arm_ob:
-#                    associated = True
-#                    break
-#        if not associated:
-#            continue
-#
-#        eval_obj = obj.evaluated_get(depsgraph) if depsgraph is not None else None
-#        mesh_data = eval_obj.to_mesh() if eval_obj is not None else obj.data
-#        vg_source = eval_obj if eval_obj is not None else obj
-#
-#        try:
-#            vg_to_bone = {
-#                vg.index: vg.name
-#                for vg in vg_source.vertex_groups
-#                if vg.name in bone_names
-#            }
-#            if not vg_to_bone:
-#                continue
-#            for vert in mesh_data.vertices:
-#                for ge in vert.groups:
-#                    if ge.group in vg_to_bone and ge.weight > weight_threshold:
-#                        result.add(vg_to_bone[ge.group])
-#        finally:
-#            if eval_obj is not None:
-#                eval_obj.to_mesh_clear()
-#
-#    return result
-
 
 # Display metadata for each prefab type: (icon, singular label). The default
-# output filename suffix and file extension are resolved in export_smd.py.
+# output filename suffix and file extension are resolved in export/prefab.py.
 prefab_type_info = {
     'JIGGLEBONES':   ('BONE_DATA',        'Jigglebones'),
     'ATTACHMENTS':   ('EMPTY_ARROWS',     'Attachments'),
@@ -1347,18 +1385,25 @@ prefab_type_info = {
 
 
 def prefab_mode_is_dme(scene) -> bool:
-    """True when prefabs should be encoded into the model DMX (DME mode) rather than
-    written to .qci files. DME embedding is a Source 1 concept only - it is always
-    False for ModelDoc / Source 2, which keeps jigglebones and hitboxes in .vmdl."""
-    return (State.compiler != Compiler.MODELDOC
+    """True when prefabs are encoded into the model file rather than written to
+    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseModel) - Source 2
+    models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
+    GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
+    DMX honours the user's prefab_export_mode; FBX always embeds, in the companion
+    DMX it writes alongside the .fbx. SMD has no embedding, so it always uses file mode."""
+    if getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL:
+        return False
+    if State.exportFormat == ExportFormat.FBX:
+        return True
+    return (State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
 def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str, int]]:
     """Prefab types that the given armature currently has content for.
 
-    Returns a list of (prefab_type, count) in display order. PROCEDURAL is only
-    offered for Source 1 (.vrd); Source 2 procedural export is not implemented.
+    Returns a list of (prefab_type, count) in display order. PROCEDURAL needs either
+    Source 1 (.vrd) or DME mode; there is no Source 2 file-mode procedural writer.
     """
     if arm is None or arm.type != 'ARMATURE':
         return []
@@ -1370,21 +1415,19 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     proc_entries = list(getattr(avs, 'proc_bones', [])) if avs else []
 
     result: list[tuple[str, int]] = []
+    dme = prefab_mode_is_dme(scene)
 
     jiggles = get_jigglebones(arm)
     if jiggles:
         result.append(('JIGGLEBONES', len(jiggles)))
 
-    # LOOKAT proc bones can surface as attachments, but only where the exporter
-    # actually writes one: MODELDOC never does; DME mode writes one only for a
-    # non-zero offset (a zero offset aims the bone directly, no attachment);
-    # QCI mode writes one per unique (driver, offset). Match that so a 0,0,0
-    # aim-at doesn't add a phantom attachment row. Mirrors the writer logic in
-    # writeDMX / PrefabExporter._collect_lookat_attachments.
+    # LOOKAT proc bones surface as attachments only where the exporter writes one:
+    # Source 2 file mode never does; DME mode only for a non-zero offset; QCI mode once
+    # per unique (driver, offset). Mirrors DmxWriter._write_procedural_bones /
+    # PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
     lookat_pairs: set[tuple[str, tuple]] = set()
-    if State.compiler != Compiler.MODELDOC:
-        dme = prefab_mode_is_dme(scene)
+    if dme or State.compiler == Compiler.STUDIOMDL:
         for e in proc_entries:
             if getattr(e, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
@@ -1402,7 +1445,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
     if hitboxes:
         result.append(('HITBOXES', len(hitboxes)))
 
-    if State.compiler != Compiler.MODELDOC:
+    if dme or State.compiler == Compiler.STUDIOMDL:
         valid_proc = [e for e in proc_entries if e.helper_bone and arm.data.bones.get(e.helper_bone)]
         if valid_proc:
             result.append(('PROCEDURAL', len(valid_proc)))
@@ -1461,22 +1504,15 @@ def get_armature(ob: bpy.types.Object | bpy.types.Bone | bpy.types.EditBone | bp
             return get_armature(ctx_obj)
         return None
 
-def get_collection_parent(ob, scene) -> bpy.types.Collection | None:
-    for collection in scene.collection.children_recursive:
-        if ob.name in collection.objects:
-            return collection
-    
-    if ob.name in scene.collection.objects:
-        return None
-    
-    return None
-
 def get_valid_vertexanimation_object(ob : bpy.types.Object | None) -> bpy.types.Object | bpy.types.Collection | None:
     if not is_mesh_compatible(ob): return None
-    
-    collection = get_collection_parent(ob, bpy.context.scene)
-    if collection is None or collection.vs.mute: return ob
-    else: return collection
+
+    for group in bpy.data.collections:
+        if group.vs.mute or is_bypassed_into_parent(group):
+            continue
+        if ob in get_collection_export_objects(group):
+            return group
+    return ob
 
 #
 #   DATA
@@ -1524,20 +1560,24 @@ def get_prefix_shortcut_map() -> dict:
                 result[sc] = p if '.' in p else p + "."
     return result
 
-def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_modeldoc: bool = False) -> typing.Union[str, list]:
+def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_source2: bool = False) -> typing.Union[str, list]:
     if isinstance(data, list):
-        return [sanitize_string(item, allow_unicode, force_modeldoc) for item in data]
+        return [sanitize_string(item, allow_unicode, force_source2) for item in data]
 
     _data = data.strip()
 
-    if (State.compiler == Compiler.MODELDOC or force_modeldoc) and not allow_unicode:
-        matched = next((p for p in get_preserved_bone_prefixes() if _data.startswith(p)), None)
-        if matched:
-            _data = matched + re.sub(r'[^a-zA-Z0-9_]+', '_', _data[len(matched):])
-        else:
-            _data = re.sub(r'[^a-zA-Z0-9_]+', '_', _data)
+    # ModelDoc inherited ResourceCompiler's naming rules, so both Source 2 compilers
+    # take the strict ASCII path.
+    strict = (State.compiler > Compiler.STUDIOMDL or force_source2) and not allow_unicode
+    pattern = r'[^a-zA-Z0-9_]+' if strict else r'[^\w.]+'
+
+    # Registered prefixes ("ValveBiped." and friends) pass through verbatim on every
+    # compiler - every one accepts the dot namespace, and ModelDoc strips it itself.
+    matched = next((p for p in get_preserved_bone_prefixes() if _data.startswith(p)), None)
+    if matched:
+        _data = matched + re.sub(pattern, '_', _data[len(matched):])
     else:
-        _data = re.sub(r'[^\w.]+', '_', _data, flags=re.UNICODE)
+        _data = re.sub(pattern, '_', _data)
 
     _data = re.sub(r'_+', '_', _data)
     _data = _data.strip('_')
@@ -1631,7 +1671,7 @@ def resolve_dme_delta_names(shape_name: str, corrective_names, delta_map: dict, 
 
     Returns (primary, extras, split_base). When split_base is set the exporter emits
     '<base>L' (the primary) and '<base>R'. Sole source of truth for DME delta naming:
-    used by writeDMX and by export validation, so the two cannot drift."""
+    used by the DMX writer and by export validation, so the two cannot drift."""
     if shape_name in corrective_names:
         return shape_name, [], None
     if shape_name in split_map:
@@ -1648,7 +1688,7 @@ def get_dme_delta_name_collisions(ob) -> dict:
     """Return {delta_name: [shapekey, ...]} for delta names claimed by more than one shape key.
 
     Sanitization and delta overrides can merge distinct shape keys onto one delta name,
-    which would otherwise surface as an opaque ID collision inside writeDMX."""
+    which would otherwise surface as an opaque ID collision inside the DMX writer."""
     sk = ob.data.shape_keys if ob.data and hasattr(ob.data, 'shape_keys') else None
     if not sk:
         return {}
@@ -1931,16 +1971,17 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
     
     arm_prop = armature.data.vs
     
+    scene = bpy.context.scene
+    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
+
     if arm_prop.ignore_bone_exportnames and not for_write:
-        return bone.name
+        # Still sanitize: the Blender name may contain chars invalid for the compiler.
+        return sanitize_string(data_bone.name, force_source2=force_s2)
 
     def get_bone_side(b: bpy.types.Bone) -> str:
         bone_x = b.matrix_local.to_translation().x
-        return (arm_prop.bone_direction_naming_right if bone_x < 0 
+        return (arm_prop.bone_direction_naming_right if bone_x < 0
                 else arm_prop.bone_direction_naming_left)
-
-    scene = bpy.context.scene
-    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
     prefix_shortcuts = get_prefix_shortcut_map()
 
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
@@ -1962,7 +2003,7 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         else:
             final_name = raw_name
 
-        final_name = sanitize_string(final_name, force_modeldoc=force_s2)
+        final_name = sanitize_string(final_name, force_source2=force_s2)
         export_names[b.name] = final_name
 
     return export_names[data_bone.name]
@@ -2016,6 +2057,61 @@ def get_bone_matrix(data: bpy.types.PoseBone | mathutils.Matrix, bone: bpy.types
     # Apply offsets in bone space
     return matrix @ offset_matrix
 
+
+def retarget_rest_pose(arm, bone_names, mutate, post=None) -> None:
+    """Change an armature's rest pose without moving what its action does.
+
+    ``mutate`` receives ``edit_bones``. A bone's local space moves with its rest, so poses for
+    ``bone_names`` are sampled first and re-keyed after, optionally times ``post[name]``.
+    Pass no names to skip the animation work.
+    """
+    scene = bpy.context.scene
+    names = list(bone_names)
+    action = arm.animation_data.action if arm.animation_data else None
+
+    sampled = {}
+    saved_frame = scene.frame_current
+    if action and names:
+        start, end = (int(round(f)) for f in action.frame_range)
+        for f in range(start, max(end, start) + 1):
+            scene.frame_set(f)
+            sampled[f] = {n: arm.pose.bones[n].matrix.copy() for n in names}
+
+    prev_active = bpy.context.view_layer.objects.active
+    bpy.context.view_layer.objects.active = arm
+    bpy.ops.object.mode_set(mode='EDIT')
+    try:
+        mutate(arm.data.edit_bones)
+    finally:
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    if sampled:
+        # pose_bone.matrix resolves against the parent's current evaluated state, so children
+        # follow parents with a flush between. Bones at one depth can't affect each other, so
+        # flush per depth, not per bone - thousands of updates saved on a big rig.
+        by_depth = collections.defaultdict(list)
+        for pb in arm.pose.bones:
+            if pb.name in names:
+                by_depth[len(pb.parent_recursive)].append(pb)
+        levels = [by_depth[d] for d in sorted(by_depth)]
+        ordered = [pb for level in levels for pb in level]
+        identity = Matrix.Identity(4)
+
+        for f, mats in sorted(sampled.items()):
+            scene.frame_set(f)
+            for level in levels:
+                for pb in level:
+                    pb.matrix = mats[pb.name] @ (post.get(pb.name, identity) if post else identity)
+                bpy.context.view_layer.update()
+            for pb in ordered:
+                pb.keyframe_insert("location", frame=f)
+                pb.keyframe_insert(
+                    "rotation_quaternion" if pb.rotation_mode == 'QUATERNION' else "rotation_euler",
+                    frame=f)
+
+    scene.frame_set(saved_frame)
+    bpy.context.view_layer.objects.active = prev_active
+
 #
 #   BOOL
 #
@@ -2033,7 +2129,7 @@ def is_curve(ob : bpy.types.Object | None) -> bool:
     return ob is not None and ob.type == 'CURVE'
 
 
-KST_ATTACHMENT_COLL = "KST Attachment References"
+PULSE_ATTACHMENT_COLL = "Pulse Attachment References"
 
 
 def _find_layer_collection(layer_coll, name: str):
@@ -2046,13 +2142,13 @@ def _find_layer_collection(layer_coll, name: str):
     return None
 
 
-def ensure_kst_collection_at_top(scene, view_layer):
-    """Get (or create) the hidden KST attachment collection and move it to the
+def ensure_pulse_collection_at_top(scene, view_layer):
+    """Get (or create) the hidden Pulse attachment collection and move it to the
     very top of the outliner, above all other scene children."""
     scene_coll = scene.collection
-    coll = bpy.data.collections.get(KST_ATTACHMENT_COLL)
+    coll = bpy.data.collections.get(PULSE_ATTACHMENT_COLL)
     if coll is None:
-        coll = bpy.data.collections.new(KST_ATTACHMENT_COLL)
+        coll = bpy.data.collections.new(PULSE_ATTACHMENT_COLL)
 
     children = list(scene_coll.children)
     if not (children and children[0] == coll):
@@ -2066,7 +2162,7 @@ def ensure_kst_collection_at_top(scene, view_layer):
             scene_coll.children.link(c)
 
     coll.hide_render = True
-    lc = _find_layer_collection(view_layer.layer_collection, KST_ATTACHMENT_COLL)
+    lc = _find_layer_collection(view_layer.layer_collection, PULSE_ATTACHMENT_COLL)
     if lc:
         lc.exclude = True
 
@@ -2075,7 +2171,7 @@ def ensure_kst_collection_at_top(scene, view_layer):
 
 # Jigglebone / hitbox serialization lives in the prefab_io subpackage (both import
 # and export, co-located per format). Re-exported here so existing
-# `from .utils import *` call sites in import_smd keep working unchanged.
+# `from ..utils import *` call sites in the imports package keep working unchanged.
 from .prefab_io import (
     import_jigglebones_from_dmx_elements,
     import_jigglebones_from_content,

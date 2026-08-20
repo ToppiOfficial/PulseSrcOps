@@ -1,0 +1,95 @@
+name: Bug Report
+description: Something is broken or exports incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the add-on is up to date first: *Edit > Preferences > Add-ons > PulseSrcOps > Preferences > Updates > Check for Updates*.
+
+  - type: checkboxes
+    id: conflicts
+    attributes:
+      label: Checks
+      options:
+        - label: No other Source Tools add-on (Blender Source Tools or another fork) is enabled - they share property names and conflict.
+          required: true
+        - label: I am on the latest build of my channel.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: PulseSrcOps version
+      description: Shown in the Add-ons preferences, e.g. `2.0.0`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Update channel
+      options:
+        - Stable
+        - Development
+    validations:
+      required: true
+
+  - type: input
+    id: blender
+    attributes:
+      label: Blender version
+      placeholder: "4.5.1"
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target game / compiler
+      description: Which game preset, and which compiler (studiomdl, PulseMDL, resourcecompiler, modeldoc).
+      placeholder: "Source 1 / PulseMDL"
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Export format
+      options:
+        - DMX
+        - SMD
+        - FBX
+        - Not an export issue
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Error output
+      description: >
+        Any Python traceback or compiler output. On Windows open *Window > Toggle System Console*
+        before reproducing. Pasted as-is - no need for backticks.
+      render: text
+
+  - type: textarea
+    id: files
+    attributes:
+      label: Files
+      description: A trimmed .blend that reproduces the issue helps enormously. Drag and drop it here (zip it if GitHub rejects the extension).

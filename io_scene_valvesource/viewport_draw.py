@@ -52,8 +52,7 @@ def _draw_lines(coords, color, width=1.0):
 
 def _is_source2(context):
     try:
-        vs = context.scene.vs
-        return vs.export_format == 'DMX' and vs.dmx_format in ('22', '22_modeldoc')
+        return context.scene.vs.jiggle_sim_engine == 'SOURCE2'
     except Exception:
         return False
 

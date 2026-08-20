@@ -10,6 +10,7 @@ __all__ = [
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',
+    'MaterialPathItem',
 ]
 
 import bpy, re, math as _math
@@ -67,6 +68,17 @@ def _update_bone_shortcut(self, context):
     cleaned = re.sub(r'\W', '', self.shortcut.strip().strip('!'))
     if cleaned != self.shortcut:
         self.shortcut = cleaned
+
+
+def _update_material_path(self, context):
+    # mtlName is always written with forward slashes and no leading/trailing slash.
+    cleaned = self.path.strip().replace('\\', '/').strip('/')
+    if cleaned != self.path:
+        self.path = cleaned
+
+
+class MaterialPathItem(bpy.types.PropertyGroup):
+    path : StringProperty(name=get_id("dmx_mat_path"), description=get_id("dmx_mat_path_tip"), default="", update=_update_material_path)
 
 
 class BoneNamePrefixItem(bpy.types.PropertyGroup):
