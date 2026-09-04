@@ -12,13 +12,9 @@ from .operators import (
     SMD_OT_CombineStereoFlexControllers,
     SMD_OT_SortFlexControllers,
     SMD_OT_AutoAssignFlexGroups,
-    SMD_OT_CopyFlexControllers,
-    SMD_OT_ClearFlexControllers,
-    SMD_OT_MigrateQCDeltasToOverrides,
-    SMD_OT_FlexControllerRegexReplace,
-    SMD_OT_DeltaOverrideRegexReplace,
-    SMD_OT_FlexRuleRegexReplace,
-    SMD_OT_ClearFlexRules,
+    SMD_OT_CopyFlexControllers, SMD_OT_CopyFlexFromBlend,
+    SMD_OT_DmeRegexReplace,
+    SMD_OT_DmeDeleteAll,
     SMD_OT_ProcBoneDuplicate,
     SMD_OT_ProcBoneCopyActive,
     SMD_OT_ProcBoneCopyByDriverBone,
@@ -126,34 +122,19 @@ class SMD_MT_ConfigureScene(Menu):
         self.layout.label(text=get_id("exporter_err_unconfigured"))
 
 
-class SMD_MT_FlexControllerSpecials(Menu):
-    bl_label = "Flex Controller Specials"
+class SMD_MT_DmeSpecials(Menu):
+    bl_label = "More Flex Tools"
 
     def draw(self, context):
         layout = self.layout
-        layout.operator(SMD_OT_AddAllFlexControllers.bl_idname, icon='IMPORT',      text=get_id('label_add_all', True))
+        layout.operator(SMD_OT_SortFlexControllers.bl_idname, icon='SORTALPHA', text=get_id('label_sort_by_name', True))
+        layout.operator(SMD_OT_AutoAssignFlexGroups.bl_idname, icon='GROUP')
+        layout.operator(SMD_OT_CombineStereoFlexControllers.bl_idname, icon='MOD_MIRROR', text=get_id('label_combine_stereo', True))
+        layout.separator()
         layout.operator(SMD_OT_ImportFlexControllersFromText.bl_idname, icon='TEXT', text=get_id('label_import_flex_text', True))
         layout.operator(SMD_OT_ExportFlexControllersToText.bl_idname, icon='TEXT', text=get_id('label_export_flex_text', True))
-        layout.operator(SMD_OT_SortFlexControllers.bl_idname,   icon='SORTALPHA',   text=get_id('label_sort_by_name', True))
-        layout.operator(SMD_OT_AutoAssignFlexGroups.bl_idname,  icon='GROUP')
-        layout.operator(SMD_OT_CombineStereoFlexControllers.bl_idname, icon='MOD_MIRROR', text=get_id('label_combine_stereo', True))
-        layout.operator(SMD_OT_CopyFlexControllers.bl_idname,   icon='PASTEDOWN')
-        layout.separator()
-        layout.operator(SMD_OT_FlexControllerRegexReplace.bl_idname, icon='VIEWZOOM')
-        layout.separator()
-        layout.operator(SMD_OT_MigrateQCDeltasToOverrides.bl_idname, icon='FORWARD', text="Migrate QC Deltas to Overrides")
-        layout.separator()
-        layout.operator(SMD_OT_ClearFlexControllers.bl_idname,  icon='TRASH',       text="Delete All")
-
-
-class SMD_MT_FlexRuleSpecials(Menu):
-    bl_label = "Flex Rule Specials"
-
-    def draw(self, context):
-        layout = self.layout
-        layout.operator(SMD_OT_FlexRuleRegexReplace.bl_idname, icon='VIEWZOOM')
-        layout.separator()
-        layout.operator(SMD_OT_ClearFlexRules.bl_idname, icon='TRASH', text="Delete All")
+        layout.operator(SMD_OT_CopyFlexControllers.bl_idname, icon='PASTEDOWN')
+        layout.operator(SMD_OT_CopyFlexFromBlend.bl_idname, icon='BLENDER')
         layout.separator()
         layout.operator("wm.url_open", icon='HELP', text=get_id('label_dme_flex_help', True)
                         ).url = "https://developer.valvesoftware.com/wiki/Flex_animation"

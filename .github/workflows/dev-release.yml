@@ -1,9 +1,7 @@
 name: Dev Release
 
 on:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
 
 jobs:
   dev-release:
@@ -42,7 +40,7 @@ jobs:
         run: |
           COMMIT_MSG=$(git log -1 --pretty=%B)
           COMMIT_URL="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
-          NOTES=$(printf '> [!WARNING]\n> This is an automated dev build generated on every commit. It may be unstable, contain hidden bugs, or introduce breaking changes. Use at your own risk.\n\n**Commit:** %s\n\n%s' "${COMMIT_URL}" "${COMMIT_MSG}")
+          NOTES=$(printf '> [!WARNING]\n> This is a manually triggered dev build. It may be unstable, contain hidden bugs, or introduce breaking changes. Use at your own risk.\n\n**Commit:** %s\n\n%s' "${COMMIT_URL}" "${COMMIT_MSG}")
           gh release create "dev" \
             "${{ steps.meta.outputs.zip }}" \
             --title "dev" \

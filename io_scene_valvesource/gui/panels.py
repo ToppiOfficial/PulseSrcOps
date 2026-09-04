@@ -24,10 +24,14 @@ from .operators import (
     SMD_OT_AddFlexRule,
     SMD_OT_RemoveFlexRule,
     SMD_OT_MoveFlexRule,
+    SMD_OT_AddAllFlexControllers,
+    SMD_OT_SortFlexControllers,
+    SMD_OT_AutoAssignFlexGroups,
+    SMD_OT_CombineStereoFlexControllers,
+    SMD_OT_DmeRegexReplace,
+    SMD_OT_DmeDeleteAll,
     SMD_OT_AddDeltaOverride,
     SMD_OT_RemoveDeltaOverride,
-    SMD_OT_ClearDeltaOverrides,
-    SMD_OT_DeltaOverrideRegexReplace,
     SMD_OT_AddVertexAnimation,
     SMD_OT_RemoveVertexAnimation,
     SMD_OT_GenerateVertexAnimationQCSnippet,
@@ -1006,6 +1010,13 @@ class SMD_PT_Shapekey(Properties_Panel):
                 info_row = box.row()
                 info_row.label(text=get_id("warn_dme_dmx_only_panel"), icon='INFO')
 
+            # Toolbar sits outside the box, above the flex sub-panels it acts on
+            tools = layout.row(align=True)
+            tools.operator(SMD_OT_AddAllFlexControllers.bl_idname, icon='IMPORT', text=get_id('label_add_all', True))
+            tools.operator(SMD_OT_DmeRegexReplace.bl_idname, icon='VIEWZOOM', text="Find/Replace")
+            tools.operator(SMD_OT_DmeDeleteAll.bl_idname, icon='TRASH', text="Delete All")
+            tools.menu('SMD_MT_DmeSpecials', icon='DOWNARROW_HLT', text='')
+
 
 class _DmeFlexPanel(Properties_Panel):
     """Shared gating for the DME flex sub-panels."""
@@ -1041,8 +1052,6 @@ class SMD_PT_DmeFlexControllers(_DmeFlexPanel):
         ctrl_btn_col = ctrl_row.column(align=True)
         ctrl_btn_col.operator(SMD_OT_AddFlexController.bl_idname, icon='ADD', text='')
         ctrl_btn_col.operator(SMD_OT_RemoveFlexController.bl_idname, icon='REMOVE', text='')
-        ctrl_btn_col.separator()
-        ctrl_btn_col.menu('SMD_MT_FlexControllerSpecials', icon='DOWNARROW_HLT', text='')
         ctrl_btn_col.separator()
         up = ctrl_btn_col.operator(SMD_OT_MoveFlexController.bl_idname, icon='TRIA_UP', text='')
         up.direction = 'UP'
@@ -1125,8 +1134,6 @@ class SMD_PT_DmeFlexRules(_DmeFlexPanel):
         rules_btn_col = rules_row.column(align=True)
         rules_btn_col.operator(SMD_OT_AddFlexRule.bl_idname, icon='ADD', text='')
         rules_btn_col.operator(SMD_OT_RemoveFlexRule.bl_idname, icon='REMOVE', text='')
-        rules_btn_col.separator()
-        rules_btn_col.menu('SMD_MT_FlexRuleSpecials', icon='DOWNARROW_HLT', text='')
         rules_btn_col.separator()
         up = rules_btn_col.operator(SMD_OT_MoveFlexRule.bl_idname, icon='TRIA_UP', text='')
         up.direction = 'UP'
@@ -1255,10 +1262,6 @@ class SMD_PT_DmeDeltaMap(_DmeFlexPanel):
         ov_btn_col = ov_row.column(align=True)
         ov_btn_col.operator(SMD_OT_AddDeltaOverride.bl_idname, icon='ADD', text='')
         ov_btn_col.operator(SMD_OT_RemoveDeltaOverride.bl_idname, icon='REMOVE', text='')
-        ov_btn_col.separator()
-        ov_btn_col.operator(SMD_OT_DeltaOverrideRegexReplace.bl_idname, icon='VIEWZOOM', text='')
-        ov_btn_col.separator()
-        ov_btn_col.operator(SMD_OT_ClearDeltaOverrides.bl_idname, icon='TRASH', text='')
 
         ovidx = active_object.vs.dme_delta_overrides_index
         if len(active_object.vs.dme_delta_overrides) > 0 and ovidx != -1:

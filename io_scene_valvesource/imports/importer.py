@@ -479,7 +479,7 @@ class ImportPrefab(ImporterBase):
     bl_label = get_id("importer_prefab_title")
     bl_description = get_id("importer_prefab_tip")
 
-    filter_glob: StringProperty(default="*.qc;*.qci;*.vrd;*.dmx;*.vmdl_prefab", options={'HIDDEN'})
+    filter_glob: StringProperty(default="*.qc;*.qci;*.vrd;*.dmx;*.vmdl;*.vmdl_prefab", options={'HIDDEN'})
 
     prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
 
@@ -605,6 +605,7 @@ _PREFAB_READERS = {
     '.qci': _prefab_read_qc,
     '.vrd': _prefab_read_vrd,
     '.dmx': _prefab_read_dmx,
+    '.vmdl': _prefab_read_kv3,
     '.vmdl_prefab': _prefab_read_kv3,
 }
 

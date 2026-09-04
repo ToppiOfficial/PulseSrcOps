@@ -1,4 +1,4 @@
-import bpy, math, re as _re
+import bpy, math, os, re as _re
 from bpy.types import Operator, MeshLoopColorLayer, LoopColors
 from bpy.props import FloatProperty, BoolProperty, IntProperty, EnumProperty, StringProperty
 from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, vertex_float_maps,
@@ -507,6 +507,51 @@ class SMD_OT_AutoAssignFlexGroups(Operator):
         return {'FINISHED'}
 
 
+def _copy_flex_data(src_vs, tvs, target, controllers=True, rules=True, overrides=True) -> list:
+    """Copy DME flex data between two object property groups. Returns shape keys the target lacks."""
+    missing_keys = []
+
+    if controllers:
+        tvs.dme_flexcontrollers.clear()
+        for src in src_vs.dme_flexcontrollers:
+            dst = tvs.dme_flexcontrollers.add()
+            dst.controller_name = src.controller_name
+            dst.raw_delta_name  = src.raw_delta_name
+            dst.shapekey        = src.shapekey
+            dst.eyelid          = src.eyelid
+            dst.stereo          = src.stereo
+            dst.flexgroup       = src.flexgroup
+            dst.flexgroup_custom = src.flexgroup_custom
+            dst.flex_min        = src.flex_min
+            dst.flex_max        = src.flex_max
+
+            if src.shapekey:
+                keys = getattr(getattr(target.data, "shape_keys", None), "key_blocks", None)
+                if not keys or src.shapekey not in keys:
+                    missing_keys.append(src.shapekey)
+
+    if rules:
+        tvs.dme_flex_rules.clear()
+        for src in src_vs.dme_flex_rules:
+            dst = tvs.dme_flex_rules.add()
+            dst.rule_type       = src.rule_type
+            dst.name            = src.name
+            dst.expression      = src.expression
+            dst.components      = src.components
+            dst.dominator_names = src.dominator_names
+            dst.suppressed_names = src.suppressed_names
+
+    if overrides:
+        tvs.dme_delta_overrides.clear()
+        for src in src_vs.dme_delta_overrides:
+            dst = tvs.dme_delta_overrides.add()
+            dst.shapekey   = src.shapekey
+            dst.delta_name = src.delta_name
+            dst.split_lr   = src.split_lr
+
+    return missing_keys
+
+
 class SMD_OT_CopyFlexControllers(Operator):
     bl_idname = "smd.copy_flexcontrollers"
     bl_label = "Copy Flex Data to Selected"
@@ -524,60 +569,135 @@ class SMD_OT_CopyFlexControllers(Operator):
             return False
         vs = ob.vs
         return bool(vs.dme_flexcontrollers or vs.dme_flex_rules or vs.dme_delta_overrides)
-    
+
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
 
     def execute(self, context) -> set:
         active_ob = context.active_object
         targets = [ob for ob in context.selected_objects if ob != active_ob]
-        src_vs = active_ob.vs
 
         for target in targets:
-            tvs = target.vs
-            missing_keys = []
-
-            if self.copy_flexcontrollers:
-                tvs.dme_flexcontrollers.clear()
-                for src in src_vs.dme_flexcontrollers:
-                    dst = tvs.dme_flexcontrollers.add()
-                    dst.controller_name = src.controller_name
-                    dst.raw_delta_name  = src.raw_delta_name
-                    dst.shapekey        = src.shapekey
-                    dst.eyelid          = src.eyelid
-                    dst.stereo          = src.stereo
-                    dst.flexgroup       = src.flexgroup
-                    dst.flexgroup_custom = src.flexgroup_custom
-                    dst.flex_min        = src.flex_min
-                    dst.flex_max        = src.flex_max
-
-                    if src.shapekey:
-                        if not (hasattr(target.data, "shape_keys") and target.data.shape_keys and src.shapekey in target.data.shape_keys.key_blocks):
-                            missing_keys.append(src.shapekey)
-
-            if self.copy_flex_rules:
-                tvs.dme_flex_rules.clear()
-                for src in src_vs.dme_flex_rules:
-                    dst = tvs.dme_flex_rules.add()
-                    dst.rule_type       = src.rule_type
-                    dst.name            = src.name
-                    dst.expression      = src.expression
-                    dst.components      = src.components
-                    dst.dominator_names = src.dominator_names
-                    dst.suppressed_names = src.suppressed_names
-
-            if self.copy_delta_overrides:
-                tvs.dme_delta_overrides.clear()
-                for src in src_vs.dme_delta_overrides:
-                    dst = tvs.dme_delta_overrides.add()
-                    dst.shapekey   = src.shapekey
-                    dst.delta_name = src.delta_name
-                    dst.split_lr   = src.split_lr
-
+            missing_keys = _copy_flex_data(active_ob.vs, target.vs, target,
+                                           self.copy_flexcontrollers, self.copy_flex_rules,
+                                           self.copy_delta_overrides)
             if missing_keys:
                 self.report({'WARNING'}, f"'{target.name}' is missing shape keys: {', '.join(missing_keys)}")
 
         self.report({'INFO'}, f"Copied data to {len(targets)} object(s)")
+        return {'FINISHED'}
+
+
+def _blend_object_names(blend_path) -> list:
+    try:
+        with bpy.data.libraries.load(blend_path) as (data_from, _):
+            return sorted(data_from.objects)
+    except Exception:
+        return []
+
+
+# ID collections an appended object can pull in as dependencies.
+_APPEND_DEP_COLLS = ('objects', 'meshes', 'armatures', 'curves', 'materials',
+                     'images', 'textures', 'node_groups', 'actions', 'shape_keys',
+                     'libraries')
+
+
+def _snapshot_ids() -> set:
+    ids = set()
+    for name in _APPEND_DEP_COLLS:
+        ids.update(id.as_pointer() for id in getattr(bpy.data, name))
+    return ids
+
+
+def _purge_new_orphans(before: set):
+    # Remove datablocks the append introduced once they drop to zero users.
+    # Loop because removing a user (the object) orphans its data in turn.
+    while True:
+        removed = False
+        for name in _APPEND_DEP_COLLS:
+            coll = getattr(bpy.data, name)
+            for id in list(coll):
+                if id.as_pointer() not in before and id.users == 0:
+                    coll.remove(id)
+                    removed = True
+        if not removed:
+            break
+
+
+class SMD_OT_CopyFlexFromBlend(Operator):
+    bl_idname = "smd.copy_flexcontrollers_from_blend"
+    bl_label = "Copy Flex Data from .blend"
+    bl_description = "Pick an object in another .blend file and copy its flex controllers, rules and delta overrides onto the active object"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    filepath: StringProperty(subtype='FILE_PATH')
+    filter_blender: BoolProperty(default=True, options={'HIDDEN'})
+    filter_folder: BoolProperty(default=True, options={'HIDDEN'})
+    # Set once the .blend is chosen; switches invoke() to the object picker.
+    pick: BoolProperty(default=False, options={'HIDDEN', 'SKIP_SAVE'})
+
+    object_name: StringProperty(name="Object",
+                                search=lambda self, context, edit_text: _blend_object_names(self.filepath))
+    copy_flexcontrollers: BoolProperty(name="Flex Controllers", default=True)
+    copy_flex_rules: BoolProperty(name="Flex Rules", default=True)
+    copy_delta_overrides: BoolProperty(name="Delta Overrides", default=True)
+
+    @classmethod
+    def poll(cls, context) -> bool:
+        return bool(context.active_object and hasattr(context.active_object, "vs"))
+
+    def invoke(self, context, event):
+        if self.pick:
+            return context.window_manager.invoke_props_dialog(self, width=350)
+        context.window_manager.fileselect_add(self)
+        return {'RUNNING_MODAL'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text=os.path.basename(self.filepath))
+        layout.prop(self, "object_name", icon='OBJECT_DATA')
+        layout.prop(self, "copy_flexcontrollers")
+        layout.prop(self, "copy_flex_rules")
+        layout.prop(self, "copy_delta_overrides")
+
+    def execute(self, context) -> set:
+        if not self.filepath.lower().endswith(".blend"):
+            self.report({'ERROR'}, "Select a .blend file")
+            return {'CANCELLED'}
+
+        if not self.pick:
+            bpy.ops.smd.copy_flexcontrollers_from_blend('INVOKE_DEFAULT', filepath=self.filepath, pick=True)
+            return {'FINISHED'}
+
+        if not self.object_name:
+            self.report({'ERROR'}, "No object chosen")
+            return {'CANCELLED'}
+
+        before_ids = _snapshot_ids()
+        try:
+            with bpy.data.libraries.load(self.filepath, link=False) as (data_from, data_to):
+                if self.object_name not in data_from.objects:
+                    self.report({'ERROR'}, f"'{self.object_name}' not found in {os.path.basename(self.filepath)}")
+                    return {'CANCELLED'}
+                data_to.objects = [self.object_name]
+        except Exception as err:
+            self.report({'ERROR'}, str(err))
+            return {'CANCELLED'}
+
+        src_ob = data_to.objects[0]
+        target = context.active_object
+        try:
+            missing_keys = _copy_flex_data(src_ob.vs, target.vs, target,
+                                           self.copy_flexcontrollers, self.copy_flex_rules,
+                                           self.copy_delta_overrides)
+        finally:
+            bpy.data.objects.remove(src_ob)
+            _purge_new_orphans(before_ids)
+
+        if missing_keys:
+            self.report({'WARNING'}, f"'{target.name}' is missing shape keys: {', '.join(missing_keys)}")
+        else:
+            self.report({'INFO'}, f"Copied flex data from '{self.object_name}'")
         return {'FINISHED'}
 
 
@@ -651,70 +771,6 @@ class SMD_OT_PreviewFlexController(Operator):
         return {'FINISHED'}
 
 
-class SMD_OT_ClearFlexControllers(Operator):
-    bl_idname= "dme.clear_flexcontrollers"
-    bl_label= "Clear All Flex Controllers"
-    bl_options: set = {'INTERNAL', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        return bool(len(context.object.vs.dme_flexcontrollers) > 0)
-
-    def invoke(self, context, event) -> set:
-        return context.window_manager.invoke_confirm(self, event)
-
-    def execute(self, context) -> set:
-        context.object.vs.dme_flexcontrollers.clear()
-        context.object.vs.dme_flexcontrollers_index = 0
-        return {'FINISHED'}
-
-
-class SMD_OT_MigrateQCDeltasToOverrides(Operator):
-    bl_idname = "smd.migrate_qc_deltas_to_overrides"
-    bl_label = "Migrate QC Deltas to Overrides"
-    bl_description = "Convert unnamed controller entries that have a delta name set into standalone delta name overrides and remove them from the controllers list"
-    bl_options = {'INTERNAL', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        ob = context.object
-        if not ob:
-            return False
-        return any(
-            not (fc.controller_name and fc.controller_name.strip()) and fc.raw_delta_name and fc.raw_delta_name.strip()
-            for fc in ob.vs.dme_flexcontrollers
-        )
-
-    def execute(self, context) -> set:
-        ob = context.object
-        converted = 0
-        to_remove = []
-        existing_overrides = {ov.shapekey for ov in ob.vs.dme_delta_overrides}
-
-        for i, fc in enumerate(ob.vs.dme_flexcontrollers):
-            if fc.controller_name and fc.controller_name.strip():
-                continue
-            if not (fc.raw_delta_name and fc.raw_delta_name.strip()):
-                continue
-            to_remove.append(i)
-            if fc.shapekey and fc.shapekey not in existing_overrides:
-                ov = ob.vs.dme_delta_overrides.add()
-                ov.shapekey = fc.shapekey
-                ov.delta_name = fc.raw_delta_name.strip()
-                existing_overrides.add(fc.shapekey)
-                converted += 1
-
-        for i in reversed(to_remove):
-            ob.vs.dme_flexcontrollers.remove(i)
-
-        ob.vs.dme_flexcontrollers_index = min(
-            max(0, ob.vs.dme_flexcontrollers_index),
-            len(ob.vs.dme_flexcontrollers) - 1
-        )
-        self.report({'INFO'}, f"Migrated {converted} delta name(s) to overrides, removed {len(to_remove)} controller entries")
-        return {'FINISHED'}
-
-
 class SMD_OT_AddFlexRule(Operator):
     bl_idname = "smd.add_flex_rule"
     bl_label = "Add Flex Rule"
@@ -749,24 +805,6 @@ class SMD_OT_RemoveFlexRule(Operator):
         return {'FINISHED'}
 
 
-class SMD_OT_ClearFlexRules(Operator):
-    bl_idname = "smd.clear_flex_rules"
-    bl_label = "Clear All Flex Rules"
-    bl_options = {'INTERNAL', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        return bool(context.object and len(context.object.vs.dme_flex_rules) > 0)
-
-    def invoke(self, context, event) -> set:
-        return context.window_manager.invoke_confirm(self, event)
-
-    def execute(self, context) -> set:
-        context.object.vs.dme_flex_rules.clear()
-        context.object.vs.dme_flex_rules_index = 0
-        return {'FINISHED'}
-
-
 class SMD_OT_MoveFlexRule(Operator):
     bl_idname = "smd.move_flex_rule"
     bl_label = "Move Flex Rule"
@@ -787,23 +825,51 @@ class SMD_OT_MoveFlexRule(Operator):
         return {'FINISHED'}
 
 
-class SMD_OT_FlexRuleRegexReplace(Operator):
-    bl_idname = "smd.flex_rule_regex_replace"
-    bl_label = "Regex Find/Replace in Flex Rules"
-    bl_description = "Apply a regex find/replace across all flex rule fields on the active object"
+# (collection, index prop, {field enum id: attribute name}) per DME list target
+_DME_TARGETS = {
+    'CONTROLLERS': ('dme_flexcontrollers', 'dme_flexcontrollers_index',
+                    {'NAME': 'controller_name', 'SHAPEKEY': 'shapekey'}),
+    'RULES':       ('dme_flex_rules', 'dme_flex_rules_index',
+                    {'NAME': 'name', 'EXPRESSION': 'expression', 'COMPONENTS': 'components',
+                     'DOMINATORS': 'dominator_names', 'SUPPRESSED': 'suppressed_names'}),
+    'OVERRIDES':   ('dme_delta_overrides', 'dme_delta_overrides_index',
+                    {'SHAPEKEY': 'shapekey', 'DELTA_NAME': 'delta_name'}),
+}
+
+_DME_TARGET_ITEMS = [
+    ('CONTROLLERS', "Flex Controllers", "Flex controller entries"),
+    ('RULES',       "Flex Rules",       "Flex rule entries"),
+    ('OVERRIDES',   "Delta Overrides",  "Delta name override entries"),
+]
+
+_DME_FIELD_ITEMS = [
+    ('NAME',       "Name",                 "Controller / rule name fields"),
+    ('SHAPEKEY',   "Shape Key",            "Shape key fields"),
+    ('EXPRESSION', "Expression",           "Rule expression fields"),
+    ('COMPONENTS', "Corrective Components","Rule corrective component fields"),
+    ('DOMINATORS', "Dominators",           "Rule dominator name fields"),
+    ('SUPPRESSED', "Suppressed",           "Rule suppressed name fields"),
+    ('DELTA_NAME', "Delta Name",           "Delta name override fields"),
+]
+
+
+class SMD_OT_DmeRegexReplace(Operator):
+    bl_idname = "smd.dme_regex_replace"
+    bl_label = "Regex Find/Replace"
+    bl_description = "Apply a regex find/replace across flex controller, flex rule and delta override fields"
     bl_options = {'INTERNAL', 'UNDO'}
 
     pattern     : StringProperty(name="Pattern",     description="Regex pattern to search for")
-    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \\1)")
-    field_name         : BoolProperty(name="Name",           description="Apply to Name / Variable Name / Controller fields", default=True)
-    field_expression   : BoolProperty(name="Expression",     description="Apply to Expression fields", default=True)
-    field_components   : BoolProperty(name="Components",     description="Apply to Corrective Components fields", default=False)
-    field_dominator    : BoolProperty(name="Dominators",     description="Apply to Dominator Names fields", default=False)
-    field_suppressed   : BoolProperty(name="Suppressed",     description="Apply to Suppressed Names fields", default=False)
+    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \1)")
+    targets : EnumProperty(name="Lists",  items=_DME_TARGET_ITEMS, options={'ENUM_FLAG'},
+                           default={'CONTROLLERS'})
+    fields  : EnumProperty(name="Fields", items=_DME_FIELD_ITEMS,  options={'ENUM_FLAG'},
+                           default={'NAME', 'SHAPEKEY'})
 
     @classmethod
     def poll(cls, context) -> bool:
-        return bool(context.object and getattr(context.object, 'vs', None) and len(context.object.vs.dme_flex_rules) > 0)
+        vs = getattr(context.object, 'vs', None)
+        return bool(vs and any(len(getattr(vs, c)) for c, _, _ in _DME_TARGETS.values()))
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self, width=360)
@@ -814,13 +880,17 @@ class SMD_OT_FlexRuleRegexReplace(Operator):
         layout.prop(self, 'pattern')
         layout.prop(self, 'replacement')
         layout.separator(factor=0.5)
+        layout.label(text="Apply to lists:")
+        layout.column(align=True).prop(self, 'targets', expand=True)
+        layout.separator(factor=0.5)
         layout.label(text="Apply to fields:")
+        # only offer fields that exist on at least one selected list
+        usable = set().union(*(_DME_TARGETS[t][2] for t in self.targets)) if self.targets else set()
         col = layout.column(align=True)
-        col.prop(self, 'field_name')
-        col.prop(self, 'field_expression')
-        col.prop(self, 'field_components')
-        col.prop(self, 'field_dominator')
-        col.prop(self, 'field_suppressed')
+        for fid, label, _ in _DME_FIELD_ITEMS:
+            row = col.row(align=True)
+            row.enabled = fid in usable
+            row.prop_enum(self, 'fields', fid, text=label)
 
     def execute(self, context) -> set:
         if not self.pattern:
@@ -831,157 +901,56 @@ class SMD_OT_FlexRuleRegexReplace(Operator):
         except _re.error as e:
             self.report({'ERROR'}, f"Invalid regex: {e}")
             return {'CANCELLED'}
-
-        fields = []
-        if self.field_name:       fields.append('name')
-        if self.field_expression: fields.append('expression')
-        if self.field_components: fields.append('components')
-        if self.field_dominator:  fields.append('dominator_names')
-        if self.field_suppressed: fields.append('suppressed_names')
-
-        if not fields:
-            self.report({'WARNING'}, "No fields selected")
+        if not self.targets or not self.fields:
+            self.report({'WARNING'}, "No lists or fields selected")
             return {'CANCELLED'}
 
+        vs = context.object.vs
         total = 0
-        for rule in context.object.vs.dme_flex_rules:
-            for field in fields:
-                old_val = getattr(rule, field, '')
-                new_val, n = compiled.subn(self.replacement, old_val)
-                if n:
-                    setattr(rule, field, new_val)
-                    total += n
+        for target in self.targets:
+            coll_name, _, field_map = _DME_TARGETS[target]
+            attrs = [field_map[f] for f in self.fields if f in field_map]
+            for item in getattr(vs, coll_name):
+                for attr in attrs:
+                    new_val, n = compiled.subn(self.replacement, getattr(item, attr, ''))
+                    if n:
+                        setattr(item, attr, new_val)
+                        total += n
 
-        if total:
-            self.report({'INFO'}, f"Made {total} substitution(s) across flex rules")
-        else:
-            self.report({'INFO'}, "No matches found")
+        self.report({'INFO'}, f"Made {total} substitution(s)" if total else "No matches found")
         return {'FINISHED'}
 
 
-class SMD_OT_FlexControllerRegexReplace(Operator):
-    bl_idname = "smd.flex_controller_regex_replace"
-    bl_label = "Regex Find/Replace in Flex Controllers"
-    bl_description = "Apply a regex find/replace across flex controller fields on the active object"
+class SMD_OT_DmeDeleteAll(Operator):
+    bl_idname = "smd.dme_delete_all"
+    bl_label = "Delete All"
+    bl_description = "Clear the selected flex controller, flex rule and delta override lists"
     bl_options = {'INTERNAL', 'UNDO'}
 
-    pattern     : StringProperty(name="Pattern",     description="Regex pattern to search for")
-    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \\1)")
-    field_name     : BoolProperty(name="Controller Name", description="Apply to Controller Name fields", default=True)
-    field_shapekey : BoolProperty(name="Shape Key",       description="Apply to ShapeKey fields", default=True)
+    targets : EnumProperty(name="Lists", items=_DME_TARGET_ITEMS, options={'ENUM_FLAG'},
+                           default={'CONTROLLERS'})
 
     @classmethod
     def poll(cls, context) -> bool:
-        return bool(context.object and getattr(context.object, 'vs', None) and len(context.object.vs.dme_flexcontrollers) > 0)
+        vs = getattr(context.object, 'vs', None)
+        return bool(vs and any(len(getattr(vs, c)) for c, _, _ in _DME_TARGETS.values()))
 
     def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width=360)
+        return context.window_manager.invoke_props_dialog(self, width=260)
 
     def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.prop(self, 'pattern')
-        layout.prop(self, 'replacement')
-        layout.separator(factor=0.5)
-        layout.label(text="Apply to fields:")
-        col = layout.column(align=True)
-        col.prop(self, 'field_name')
-        col.prop(self, 'field_shapekey')
+        self.layout.label(text="Delete all entries from:")
+        self.layout.column(align=True).prop(self, 'targets', expand=True)
 
     def execute(self, context) -> set:
-        if not self.pattern:
-            self.report({'WARNING'}, "Pattern is empty")
+        if not self.targets:
+            self.report({'WARNING'}, "No lists selected")
             return {'CANCELLED'}
-        try:
-            compiled = _re.compile(self.pattern)
-        except _re.error as e:
-            self.report({'ERROR'}, f"Invalid regex: {e}")
-            return {'CANCELLED'}
-
-        fields = []
-        if self.field_name:     fields.append('controller_name')
-        if self.field_shapekey: fields.append('shapekey')
-
-        if not fields:
-            self.report({'WARNING'}, "No fields selected")
-            return {'CANCELLED'}
-
-        total = 0
-        for ctrl in context.object.vs.dme_flexcontrollers:
-            for field in fields:
-                old_val = getattr(ctrl, field, '')
-                new_val, n = compiled.subn(self.replacement, old_val)
-                if n:
-                    setattr(ctrl, field, new_val)
-                    total += n
-
-        if total:
-            self.report({'INFO'}, f"Made {total} substitution(s) across flex controllers")
-        else:
-            self.report({'INFO'}, "No matches found")
-        return {'FINISHED'}
-
-
-class SMD_OT_DeltaOverrideRegexReplace(Operator):
-    bl_idname = "smd.delta_override_regex_replace"
-    bl_label = "Regex Find/Replace in Delta Overrides"
-    bl_description = "Apply a regex find/replace across delta name override fields on the active object"
-    bl_options = {'INTERNAL', 'UNDO'}
-
-    pattern     : StringProperty(name="Pattern",     description="Regex pattern to search for")
-    replacement : StringProperty(name="Replacement", description="Replacement string (supports back-references like \\1)")
-    field_shapekey   : BoolProperty(name="Shape Key",  description="Apply to Shape Key fields", default=True)
-    field_delta_name : BoolProperty(name="Delta Name", description="Apply to Delta Name fields", default=True)
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        return bool(context.object and getattr(context.object, 'vs', None) and len(context.object.vs.dme_delta_overrides) > 0)
-
-    def invoke(self, context, event):
-        return context.window_manager.invoke_props_dialog(self, width=360)
-
-    def draw(self, context):
-        layout = self.layout
-        layout.use_property_split = True
-        layout.prop(self, 'pattern')
-        layout.prop(self, 'replacement')
-        layout.separator(factor=0.5)
-        layout.label(text="Apply to fields:")
-        col = layout.column(align=True)
-        col.prop(self, 'field_shapekey')
-        col.prop(self, 'field_delta_name')
-
-    def execute(self, context) -> set:
-        if not self.pattern:
-            self.report({'WARNING'}, "Pattern is empty")
-            return {'CANCELLED'}
-        try:
-            compiled = _re.compile(self.pattern)
-        except _re.error as e:
-            self.report({'ERROR'}, f"Invalid regex: {e}")
-            return {'CANCELLED'}
-
-        fields = []
-        if self.field_shapekey:   fields.append('shapekey')
-        if self.field_delta_name: fields.append('delta_name')
-
-        if not fields:
-            self.report({'WARNING'}, "No fields selected")
-            return {'CANCELLED'}
-
-        total = 0
-        for ov in context.object.vs.dme_delta_overrides:
-            for field in fields:
-                old_val = getattr(ov, field, '')
-                new_val, n = compiled.subn(self.replacement, old_val)
-                if n:
-                    setattr(ov, field, new_val)
-                    total += n
-
-        if total:
-            self.report({'INFO'}, f"Made {total} substitution(s) across delta overrides")
-        else:
-            self.report({'INFO'}, "No matches found")
+        vs = context.object.vs
+        for target in self.targets:
+            coll_name, index_name, _ = _DME_TARGETS[target]
+            getattr(vs, coll_name).clear()
+            setattr(vs, index_name, 0)
         return {'FINISHED'}
 
 
@@ -1015,24 +984,6 @@ class SMD_OT_RemoveDeltaOverride(Operator):
             max(0, ob.vs.dme_delta_overrides_index - 1),
             len(ob.vs.dme_delta_overrides) - 1
         )
-        return {'FINISHED'}
-
-
-class SMD_OT_ClearDeltaOverrides(Operator):
-    bl_idname = "smd.clear_delta_overrides"
-    bl_label = "Clear All Delta Overrides"
-    bl_options = {'INTERNAL', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context) -> bool:
-        return bool(context.object and len(context.object.vs.dme_delta_overrides) > 0)
-
-    def invoke(self, context, event) -> set:
-        return context.window_manager.invoke_confirm(self, event)
-
-    def execute(self, context) -> set:
-        context.object.vs.dme_delta_overrides.clear()
-        context.object.vs.dme_delta_overrides_index = 0
         return {'FINISHED'}
 
 
