@@ -41,6 +41,25 @@ def truncate_id_name(ctx, name: str, id_type) -> str:
     return str(truncated)
 
 
+class ViewLayerError(Exception):
+    """Import target is hidden or excluded from the active View Layer.
+    Caught in the operator's execute() and surfaced as a report({'ERROR'})."""
+
+
+def ensure_in_view_layer(ob) -> None:
+    """Raise if ob is hidden or excluded from the active View Layer. Call this before
+    any scene mutation so a failed import leaves no half-built collection behind."""
+    if ob.name not in bpy.context.view_layer.objects:
+        raise ViewLayerError(get_id("importer_err_arm_not_in_viewlayer", True).format(ob.name))
+
+
+def make_active(ob) -> None:
+    """Set ob as the active object, refusing an object outside the active View Layer.
+    Assigning view_layer.objects.active for such an object throws a bare RuntimeError."""
+    ensure_in_view_layer(ob)
+    bpy.context.view_layer.objects.active = ob
+
+
 def find_armature() -> bpy.types.Object | None:
     if bpy.context.active_object and bpy.context.active_object.type == 'ARMATURE':
         return bpy.context.active_object
@@ -307,7 +326,7 @@ def build_skeleton(ctx, smd, skel, target_arm, model_name: str) -> dict:
     if target_arm:
         smd.a = target_arm
         missing_bones: list[str] = []
-        bpy.context.view_layer.objects.active = smd.a
+        make_active(smd.a)
         smd.a.hide_set(False)
         ops.object.mode_set(mode='EDIT')
 
@@ -427,7 +446,7 @@ def build_smd_skeleton(ctx, smd, nodes) -> None:
         if smd.a:
             append = ctx.append == 'APPEND' and smd.jobType in [REF, ANIM]
             if append:
-                bpy.context.view_layer.objects.active = smd.a
+                make_active(smd.a)
                 smd.a.hide_set(False)
                 ops.object.mode_set(mode='EDIT', toggle=False)
                 ctx.existingBones.extend([b.name for b in smd.a.data.bones])

@@ -116,7 +116,13 @@ class ImporterBase(bpy.types.Operator, Logger):
         for filepath in [os.path.join(self.directory, file.name) for file in self.files] if self.files else [self.filepath]:
             # read_file returns None for an unreadable path, leaving the running
             # count from any earlier file in a multi-file selection untouched
-            count = self.read_file(filepath)
+            try:
+                count = self.read_file(filepath)
+            except _build.ViewLayerError as e:
+                self.append = pre_append
+                context.preferences.edit.use_enter_edit_mode = pre_eem
+                self.report({'ERROR'}, str(e))
+                return {'CANCELLED'}
             if count is not None:
                 self.num_files_imported = count
 
@@ -286,6 +292,12 @@ class ImporterBase(bpy.types.Operator, Logger):
 
         if smd.jobType is None:
             _smd.scan_smd(smd)
+        # build_smd_skeleton only makes the target armature active (the operation that
+        # fails outside the View Layer) in this append case; validate never does.
+        if self.append == 'APPEND' and smd.jobType in (REF, ANIM):
+            existing_arm = smd.a if getattr(smd, "a", None) else _build.find_armature()
+            if existing_arm:
+                _build.ensure_in_view_layer(existing_arm)
         self.createCollection()
 
         # Order is forced by the format: the node block must be built into an armature
@@ -330,6 +342,7 @@ class ImporterBase(bpy.types.Operator, Logger):
 
         target_arm = _build.find_armature() if self.append != 'NEW_ARMATURE' else None
         if target_arm:
+            _build.ensure_in_view_layer(target_arm)
             smd.a = target_arm
 
         smd.atch = None

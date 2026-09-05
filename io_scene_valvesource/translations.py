@@ -705,6 +705,10 @@ _data = {
         'en': "Prefab import needs an active armature to attach to",
         'ja': "プレハブのインポートには、対象となるアクティブなアーマチュアが必要です",
     },
+    'importer_err_arm_not_in_viewlayer': {
+        'en': "Cannot import onto armature \"{0}\": it is hidden or excluded from the active View Layer. Unhide it (or enable its collection in the View Layer) and try again.",
+        'ja': "アーマチュア「{0}」にインポートできません: アクティブなビューレイヤーで非表示または除外されています。表示する（またはコレクションをビューレイヤーで有効にする）してから再試行してください。",
+    },
     'importer_err_prefab_empty': {
         'en': "No jigglebones, hitboxes or procedural bones found in {0}",
         'ja': "{0}にジグルボーン、ヒットボックス、プロシージャルボーンが見つかりません",
