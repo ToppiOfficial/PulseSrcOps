@@ -280,10 +280,7 @@ class DmxWriter:
         return self._write_attach(empty.name, relMat, self.bone_elements[exportable_parent.name])
 
     def _write_attachments(self, bench):
-        # Source 2 (.vmdl) always embeds attachments regardless of the checkbox - there is
-        # no file-based alternative. Source 1 embeds them only in DME mode, where the
-        # checkbox is the only way to opt out.
-        embed_attachments = self.source2 or (self.dme_mode and self._prefab_type_enabled('ATTACHMENTS'))
+        embed_attachments = (self.source2 or (self.dme_mode and self._prefab_type_enabled('ATTACHMENTS'))) and not self.proxy_only
         if embed_attachments and not self.is_anim and self.exportable_empties and self.armature:
             for empty, world_matrix in self.exportable_empties:
                 self._write_attachment(empty, world_matrix)

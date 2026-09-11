@@ -325,6 +325,9 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
     mesh.positions = DmeVertexData[keywords['pos']]
     mesh.position_indices = DmeVertexData[keywords['pos'] + "Indices"]
     mesh.has_weightmap = keywords["weight"] in vertex_format
+    # VRF decompiles write flipVCoordinates=False for engine (top-down) V.
+    # True/absent means Blender-oriented V that reads raw.
+    flip_v = DmeVertexData.get("flipVCoordinates") is False
 
     if last_bone is not None and not mesh.has_weightmap:
         mesh.parent_bone = last_bone.name
@@ -348,6 +351,8 @@ def _read_mesh(parsed: ParsedDmx, DmeMesh, matrix: Matrix, last_bone) -> Importe
             continue  # imported as vertex groups instead
 
         kind = _classify_vertex_map(values)
+        if kind == 'UV' and flip_v:
+            values = [datamodel.Vector2((uv[0], 1.0 - uv[1])) for uv in values]
         if kind is None:
             parsed.warnings.append(
                 f"Could not import vertex data '{vertexMap}'; "
