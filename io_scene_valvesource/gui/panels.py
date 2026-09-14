@@ -1661,6 +1661,8 @@ class SMD_PT_Empty(Properties_Panel):
             btn_col = row.column(align=True)
             btn_col.operator('smd.add_attachment_display_mesh',    icon='ADD',    text='')
             btn_col.operator('smd.remove_attachment_display_mesh', icon='REMOVE', text='')
+            btn_col.separator()
+            btn_col.operator('smd.refresh_attachment_mesh',        icon='FILE_REFRESH', text='')
 
             idx = vs_ob.attachment_display_meshes_index
             if 0 <= idx < len(vs_ob.attachment_display_meshes):

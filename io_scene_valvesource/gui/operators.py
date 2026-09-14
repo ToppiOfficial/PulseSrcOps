@@ -2532,6 +2532,26 @@ class SMD_OT_SetAttachmentMeshRender(Operator):
         return {'FINISHED'}
 
 
+class SMD_OT_RefreshAttachmentMesh(Operator):
+    bl_idname = 'smd.refresh_attachment_mesh'
+    bl_label = "Refresh Preview"
+    bl_description = "Rebuild the attachment display mesh preview after editing the source mesh"
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.object
+        return ob is not None and ob.type == 'EMPTY' and ob.vs.dmx_attachment
+
+    def execute(self, context):
+        from .. import viewport_draw
+        viewport_draw._attachment_mesh_cache.clear()
+        for area in context.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+        return {'FINISHED'}
+
+
 class SMD_OT_MaterialPathAdd(Operator):
     bl_idname = 'smd.material_path_add'
     bl_label = "Add Material Path"

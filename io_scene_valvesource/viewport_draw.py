@@ -1421,16 +1421,14 @@ def _draw_attachment_mesh_preview():
                 tris = _build_attachment_mesh_tris(mesh_ob)
             except Exception:
                 continue
-            _attachment_mesh_cache[data_uid] = (data_uid, tris)
-            local_verts = tris
+            if not tris:
+                continue
+            # Cache the local-space batch; transform is applied via the GPU matrix
+            # stack at draw time, so it survives redraws and empty moves.
+            batch = batch_for_shader(shader, 'TRIS', {'pos': tris})
+            _attachment_mesh_cache[data_uid] = (data_uid, batch)
         else:
-            local_verts = cached[1]
-
-        if not local_verts:
-            continue
-
-        mat = ob.matrix_world
-        world_verts = [mat @ Vector(v) for v in local_verts]
+            batch = cached[1]
 
         color = item.color
         try:
@@ -1444,7 +1442,9 @@ def _draw_attachment_mesh_preview():
             gpu.state.depth_mask_set(False)
             gpu.state.face_culling_set('NONE')
             shader.uniform_float('color', (color[0], color[1], color[2], color[3]))
-            batch_for_shader(shader, 'TRIS', {'pos': world_verts}).draw(shader)
+            with gpu.matrix.push_pop():
+                gpu.matrix.multiply_matrix(ob.matrix_world)
+                batch.draw(shader)
         finally:
             gpu.state.blend_set('NONE')
             gpu.state.depth_mask_set(True)

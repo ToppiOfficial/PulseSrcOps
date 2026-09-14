@@ -25,6 +25,7 @@ import re as _re
 import time
 import math
 import bpy
+from types import SimpleNamespace
 from mathutils import Vector, Matrix, Quaternion
 
 # -- Per-bone simulation state -------------------------------------------------
@@ -85,6 +86,44 @@ _overridden_helpers: set[tuple] = set()
 _helper_saved_mutes: dict[tuple, bool] = {}
 
 
+class _BoneStatic:
+    """Per-bone values that only change when the rig is edited: rest matrices and
+    the export-offset matrix. Invalidated with the other caches on armature updates."""
+    __slots__ = ('bone_in_parent', 'rest_local', 'rest_local_inv',
+                 'offset_mat', 'parent_is_jiggle')
+
+
+# (arm_name, bone_name) -> _BoneStatic
+_bone_static_cache: dict[tuple[str, str], _BoneStatic] = {}
+# (arm_name, bone_name) -> SimpleNamespace of jiggle params (RNA reads cached off
+# the per-tick hot path; a bone reads ~25-35 of these each tick otherwise).
+_jiggle_param_cache: dict[tuple[str, str], SimpleNamespace] = {}
+
+# Jiggle properties read per tick in _sim_bone. Cached verbatim so the sim body
+# can keep reading jvs.<name> unchanged, only off a plain object instead of RNA.
+_JIGGLE_PARAM_ATTRS = (
+    'use_bone_length_for_jigglebone_length', 'jiggle_length',
+    'jiggle_base_type', 'jiggle_flex_type', 'jiggle_allow_length_flex',
+    'jiggle_impact_speed', 'jiggle_impact_angle', 'jiggle_damping_rate',
+    'jiggle_amplitude', 'jiggle_frequency',
+    'jiggle_yaw_stiffness', 'jiggle_yaw_damping',
+    'jiggle_pitch_stiffness', 'jiggle_pitch_damping',
+    'jiggle_along_stiffness', 'jiggle_along_damping', 'jiggle_tip_mass',
+    'jiggle_has_angle_constraint', 'jiggle_angle_constraint',
+    'jiggle_has_yaw_constraint', 'jiggle_yaw_constraint_min',
+    'jiggle_yaw_constraint_max', 'jiggle_yaw_friction',
+    'jiggle_has_pitch_constraint', 'jiggle_pitch_constraint_min',
+    'jiggle_pitch_constraint_max', 'jiggle_pitch_friction',
+    'jiggle_base_mass', 'jiggle_base_stiffness', 'jiggle_base_damping',
+    'jiggle_has_left_constraint', 'jiggle_left_constraint_min',
+    'jiggle_left_constraint_max', 'jiggle_left_friction',
+    'jiggle_has_up_constraint', 'jiggle_up_constraint_min',
+    'jiggle_up_constraint_max', 'jiggle_up_friction',
+    'jiggle_has_forward_constraint', 'jiggle_forward_constraint_min',
+    'jiggle_forward_constraint_max', 'jiggle_forward_friction',
+)
+
+
 # -- Helpers -------------------------------------------------------------------
 
 def _is_source2(scene) -> bool:
@@ -121,10 +160,10 @@ def _bone_depth(pb) -> int:
     return d
 
 
-def _get_length(pb, jvs) -> float:
+def _get_length(jvs) -> float:
     if jvs.use_bone_length_for_jigglebone_length:
-        return pb.bone.length
-    return jvs.jiggle_length if jvs.jiggle_length > 0.0 else pb.bone.length
+        return jvs.bone_length
+    return jvs.jiggle_length if jvs.jiggle_length > 0.0 else jvs.bone_length
 
 
 def _get_cols(is_s2: bool) -> tuple[int, int, int]:
@@ -165,6 +204,49 @@ def _write_basis(pb, mat: Matrix, eps: float = 1e-6) -> None:
             return
 
 
+def _get_static(arm_ob, pb) -> _BoneStatic:
+    """Cached rest matrices + export offset for a bone. Rebuilt only when the
+    armature caches are invalidated (rig edits), not per tick."""
+    key = (arm_ob.name, pb.name)
+    st = _bone_static_cache.get(key)
+    if st is None:
+        st = _BoneStatic()
+        rest_local = pb.bone.matrix_local.copy()
+        st.rest_local = rest_local
+        st.rest_local_inv = rest_local.inverted_safe()
+        if pb.parent:
+            st.bone_in_parent = pb.parent.bone.matrix_local.inverted_safe() @ rest_local
+            st.parent_is_jiggle = pb.parent.bone.vs.bone_is_jigglebone
+        else:
+            st.bone_in_parent = None
+            st.parent_is_jiggle = False
+        st.offset_mat = _get_export_offset_mat(pb)
+        _bone_static_cache[key] = st
+    return st
+
+
+def _get_params(arm_ob, pb) -> SimpleNamespace:
+    """Cached jiggle params for a bone, so the per-tick sim reads plain-object
+    attributes instead of RNA. Invalidated on armature edits."""
+    key = (arm_ob.name, pb.name)
+    p = _jiggle_param_cache.get(key)
+    if p is None:
+        jvs = pb.bone.vs
+        p = SimpleNamespace(**{a: getattr(jvs, a) for a in _JIGGLE_PARAM_ATTRS})
+        p.bone_length = pb.bone.length
+        _jiggle_param_cache[key] = p
+    return p
+
+
+def _pose_to_local(arm_ob, pb, pose_mat: Matrix) -> Matrix:
+    """Direct mathutils equivalent of convert_space(POSE->LOCAL); avoids the
+    C-API call that forces a depsgraph evaluation."""
+    st = _get_static(arm_ob, pb)
+    if pb.parent:
+        return (pb.parent.matrix @ st.bone_in_parent).inverted_safe() @ pose_mat
+    return st.rest_local_inv @ pose_mat
+
+
 def _get_animated_goal(arm_ob, pb, arm_world_inv: Matrix) -> tuple:
     """Compute goal matrices from the parent chain, bypassing this bone's matrix_basis.
 
@@ -176,18 +258,18 @@ def _get_animated_goal(arm_ob, pb, arm_world_inv: Matrix) -> tuple:
     arm_world_inv is pre-computed by simulate_armature and passed in to avoid
     recomputing it per bone.
     """
+    st = _get_static(arm_ob, pb)
     if pb.parent:
         parent_key = (arm_ob.name, pb.parent.name)
-        if pb.parent.bone.vs.bone_is_jigglebone and parent_key in _tick_sim_world:
+        if st.parent_is_jiggle and parent_key in _tick_sim_world:
             parent_arm = arm_world_inv @ _tick_sim_world[parent_key]
         else:
             parent_arm = pb.parent.matrix
-        bone_in_parent = pb.parent.bone.matrix_local.inverted_safe() @ pb.bone.matrix_local
-        arm_mat = parent_arm @ bone_in_parent
+        arm_mat = parent_arm @ st.bone_in_parent
     else:
-        arm_mat = pb.bone.matrix_local.copy()
+        arm_mat = st.rest_local.copy()
     anim_world = arm_ob.matrix_world @ arm_mat
-    goal_world  = anim_world @ _get_export_offset_mat(pb)
+    goal_world  = anim_world @ st.offset_mat
     return anim_world, goal_world
 
 
@@ -212,7 +294,7 @@ def _constrain_axis(state: BoneSimState, axis: Vector,
 # -- Per-bone simulation step --------------------------------------------------
 
 def _sim_bone(arm_ob, pb, dt: float, is_s2: bool, arm_world_inv: Matrix) -> None:
-    jvs  = pb.bone.vs
+    jvs  = _get_params(arm_ob, pb)
     state = _get_state(arm_ob, pb)
 
     now   = time.perf_counter()
@@ -235,7 +317,7 @@ def _sim_bone(arm_ob, pb, dt: float, is_s2: bool, arm_world_inv: Matrix) -> None
     export_perp1 = _yp_vec.normalized()  if yp_scale  > 1e-9 else Vector((1.0, 0.0, 0.0))
     export_perp2 = _pp_vec.normalized()  if pp_scale  > 1e-9 else Vector((0.0, 1.0, 0.0))
     goal_base    = goal_world.to_translation()
-    length       = _get_length(pb, jvs) * fwd_scale
+    length       = _get_length(jvs) * fwd_scale
     goal_tip     = goal_base + export_fwd * length
 
     # Start from animated matrix; may be overwritten below
@@ -483,14 +565,14 @@ def _sim_bone(arm_ob, pb, dt: float, is_s2: bool, arm_world_inv: Matrix) -> None
     # C-API call that forces a depsgraph evaluation per bone (which would re-skin
     # all attached meshes N times per tick instead of once).
     pose_mat = arm_world_inv @ new_world
+    st = _get_static(arm_ob, pb)
     if pb.parent:
         parent_key = (arm_ob.name, pb.parent.name)
         parent_pose = (arm_world_inv @ _tick_sim_world[parent_key]
                        if parent_key in _tick_sim_world else pb.parent.matrix)
-        bone_rest = pb.parent.bone.matrix_local.inverted_safe() @ pb.bone.matrix_local
-        local_mat = (parent_pose @ bone_rest).inverted_safe() @ pose_mat
+        local_mat = (parent_pose @ st.bone_in_parent).inverted_safe() @ pose_mat
     else:
-        local_mat = pb.bone.matrix_local.inverted_safe() @ pose_mat
+        local_mat = st.rest_local_inv @ pose_mat
     if jvs.jiggle_base_type == 'BASESPRING':
         _write_basis(pb, local_mat)
     else:
@@ -923,7 +1005,7 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
     if driver_key in _tick_sim_world:
         driver_mat = _tick_sim_world[driver_key]
     else:
-        driver_mat = arm_ob.matrix_world @ driver_pb.matrix @ _get_export_offset_mat(driver_pb)
+        driver_mat = arm_ob.matrix_world @ driver_pb.matrix @ _get_static(arm_ob, driver_pb).offset_mat
 
     loff = getattr(entry, 'lookat_offset', None)
     if loff is not None:
@@ -965,7 +1047,8 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
 
     # bone_rotation is the Source-frame world orientation; strip the export
     # offset to get back to the Blender bone frame (goal = anim @ offset).
-    off_rot   = _get_export_offset_mat(helper_pb).to_3x3()
+    helper_st = _get_static(arm_ob, helper_pb)
+    off_rot   = helper_st.offset_mat.to_3x3()
     new_rot   = bone_rotation.to_matrix() @ off_rot.inverted()
     new_world = new_rot.to_4x4()
     new_world.translation = aim_world_position
@@ -977,10 +1060,9 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
         parent_key = (arm_ob.name, pb.parent.name)
         parent_pose = (arm_world_inv @ _tick_sim_world[parent_key]
                        if parent_key in _tick_sim_world else pb.parent.matrix)
-        bone_rest = pb.parent.bone.matrix_local.inverted_safe() @ pb.bone.matrix_local
-        local_mat = (parent_pose @ bone_rest).inverted_safe() @ pose_mat
+        local_mat = (parent_pose @ helper_st.bone_in_parent).inverted_safe() @ pose_mat
     else:
-        local_mat = pb.bone.matrix_local.inverted_safe() @ pose_mat
+        local_mat = helper_st.rest_local_inv @ pose_mat
     _write_basis(helper_pb, local_mat.to_3x3().to_4x4())
 
 
@@ -1043,9 +1125,7 @@ def _sim_proc_entries(arm_ob, scene, is_s2: bool, arm_world_inv: Matrix) -> int:
         _overridden_helpers.add(override_key)
 
         driver_pb    = arm_ob.pose.bones[entry.driver_bone]
-        d_local      = arm_ob.convert_space(
-            pose_bone=driver_pb, matrix=driver_pb.matrix,
-            from_space='POSE', to_space='LOCAL')
+        d_local      = _pose_to_local(arm_ob, driver_pb, driver_pb.matrix)
         current_quat = d_local.to_quaternion().normalized()
 
         weights = []
@@ -1118,6 +1198,8 @@ def reset_state(arm_ob=None) -> None:
         _states.clear()
         _proc_trigger_cache.clear()
         _jiggle_bone_cache.clear()
+        _bone_static_cache.clear()
+        _jiggle_param_cache.clear()
         _sim_arm_cache.clear()
         for arm_name, bone_name in list(_overridden_helpers):
             ob = bpy.data.objects.get(arm_name)
@@ -1129,6 +1211,10 @@ def reset_state(arm_ob=None) -> None:
         for k in [k for k in _states if k[0] == arm_ob.name]:
             del _states[k]
         _jiggle_bone_cache.pop(arm_ob.name, None)
+        for k in [k for k in _bone_static_cache if k[0] == arm_ob.name]:
+            del _bone_static_cache[k]
+        for k in [k for k in _jiggle_param_cache if k[0] == arm_ob.name]:
+            del _jiggle_param_cache[k]
         invalidate_proc_cache(arm_ob.name)  # also restores overrides for this arm
 
 
@@ -1277,6 +1363,8 @@ def _depsgraph_update(scene, depsgraph):
     for update in depsgraph.updates:
         if isinstance(update.id, bpy.types.Armature):
             _jiggle_bone_cache.clear()
+            _bone_static_cache.clear()
+            _jiggle_param_cache.clear()
             _sim_arm_cache.pop(scene.name, None)
             break
 
