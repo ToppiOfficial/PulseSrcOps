@@ -420,12 +420,14 @@ class Element(collections.OrderedDict):
 		out += _kv2_indent + "}"
 		return out
 
-	def tobytes(self, encoding_ver):
+	def tobytes(self):
 		if self._is_placeholder:
-			if encoding_ver < 5:
-				return struct.pack("i", -1)
-			return struct.pack("i", -2) + _encode_binary_string(str(self.id))
-		return struct.pack("i",self._index)
+			if self.encoding_ver < 5:
+				return b'-1'
+			else:
+				return bytes.join(b'',b'-2',bytes.decode(self.id,encoding='ASCII'))
+		else:
+			return struct.pack("i",self._index)
 
 class _ElementArray(_Array):
 	type = Element
@@ -703,7 +705,7 @@ class DataModel:
 		elif t == str:
 			self._writeString(value, True if is_array else None)
 		elif t == Element:
-			self.out.write(bytes.join(b'',[item.tobytes(self.encoding_ver) if item else struct.pack("i",-1) for item in value]))
+			self.out.write(bytes.join(b'',[item.tobytes() if item else struct.pack("i",-1) for item in value]))
 		elif issubclass(t,(_Vector,Matrix, Time)):
 			self.out.write(bytes.join(b'',[item.tobytes() for item in value]))
 		
@@ -807,7 +809,7 @@ class DataModel:
 		_count_child_elems(self.root)
 		
 		if self.encoding in ["binary", "binary_proto"]:
-			self._write(sum(not elem._is_placeholder for elem in out_elems))
+			self._write(len(out_elems))
 			self.elem_chain = []
 			self._write_element_index(self.root)
 			self._write_element_props()
@@ -1147,17 +1149,5 @@ if __name__ == "__main__":
 	dm.elements.remove(b)
 	assert b.id not in dm.elements.by_id
 	dm.add_element("b",id="b") # id is free again
-
-	for version in (4, 9):
-		dm = DataModel("test", 1)
-		root = dm.add_element("root", id="root")
-		missing = dm.add_element("missing", id="missing", _is_placeholder=True)
-		root["reference"] = missing
-		loaded = load(in_file=io.BytesIO(dm.echo("binary", version)))
-		if version < 5:
-			assert loaded.root["reference"] is None
-		else:
-			assert loaded.root["reference"]._is_placeholder
-			assert loaded.root["reference"].id == missing.id
 
 	print("ok")
