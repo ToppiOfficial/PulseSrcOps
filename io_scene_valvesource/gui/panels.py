@@ -1287,8 +1287,9 @@ class SMD_PT_DmeDeltaMap(_DmeFlexPanel):
             r.label(text='')
             r.prop(ov_item, 'split_lr', text='Split to L/R', toggle=True)
 
-            if ov_item.split_lr and ov_item.delta_name.strip():
-                base = sanitize_string_for_delta(ov_item.delta_name.strip())
+            if ov_item.split_lr:
+                raw = ov_item.delta_name.strip() if ov_item.delta_name.strip() else ov_item.shapekey
+                base = sanitize_string_for_delta(raw)
                 if base:
                     hint = ov_detail.row()
                     hint.label(text=get_id("label_dme_split_hint", True).format(base), icon='MOD_MIRROR')

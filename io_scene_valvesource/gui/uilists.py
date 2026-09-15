@@ -242,9 +242,11 @@ class SMD_UL_DmeDeltaOverrides(UIList):
         right.alignment = 'RIGHT'
         is_conflict = index in conflicts or index in split_conflicts
         right.alert = is_conflict
-        base = sanitize_string_for_delta(item.delta_name) if item.delta_name else ""
-        # Show the L/R deltas that the split will actually produce.
-        disp = f"{base}L / {base}R" if (base and getattr(item, 'split_lr', False)) else base
+        split = getattr(item, 'split_lr', False)
+        # Empty delta name with split means split on the shape key name itself.
+        src = item.delta_name if item.delta_name else (item.shapekey if split else "")
+        base = sanitize_string_for_delta(src) if src else ""
+        disp = f"{base}L / {base}R" if (base and split) else base
         right.label(text=disp, icon='ERROR' if is_conflict else 'NONE')
 
     def draw_filter(self, context, layout):

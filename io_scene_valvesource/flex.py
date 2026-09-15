@@ -88,10 +88,10 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                 for fc in ob.vs.dme_flexcontrollers:
                     if not fc.controller_name or not fc.controller_name.strip():
                         continue
-                    if fc.controller_name in seen_controller_names:
+                    if fc.controller_name.lower() in seen_controller_names:
                         print(f"- Skipping duplicate flex controller '{fc.controller_name}' on '{ob.name}' (already defined by another mesh)")
                         continue
-                    seen_controller_names.add(fc.controller_name)
+                    seen_controller_names.add(fc.controller_name.lower())
                     shape = ob.data.shape_keys.key_blocks.get(fc.shapekey) if (ob.data.shape_keys and fc.shapekey) else None
                     ctrl = dm.add_element(fc.controller_name, "DmeCombinationInputControl",
                                          id=ob.name + fc.controller_name + "inputcontrol")
@@ -122,7 +122,7 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     s_names = [delta_name_map.get(n.strip(), sanitize_string_for_delta(n.strip())) for n in rule.suppressed_names.split(',') if n.strip()]
                     if not d_names or not s_names:
                         continue
-                    dom_key = (tuple(d_names), tuple(s_names))
+                    dom_key = (tuple(n.lower() for n in d_names), tuple(n.lower() for n in s_names))
                     if dom_key in seen_dom_rules:
                         continue
                     seen_dom_rules.add(dom_key)
@@ -142,7 +142,7 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                         delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
                         # localvars are their own namespace: a localvar declaration and the
                         # expression that assigns it deliberately share a name
-                        rule_key = (rule.rule_type == 'LOCALVAR', delta_name)
+                        rule_key = (rule.rule_type == 'LOCALVAR', delta_name.lower())
                         # split/edgeline copies carry the original's rules verbatim, so an
                         # identical redefinition is expected and silently dropped. Differing
                         # content under one name is a real clash - a rule name is the delta it

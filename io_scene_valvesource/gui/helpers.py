@@ -96,20 +96,20 @@ def build_flex_rule_context(ob) -> FlexRuleContext:
 def flex_rule_name_error(rule, ctx: FlexRuleContext) -> bool:
     """True when the rule's name field does not resolve to a valid target."""
     rt = rule.rule_type
+    name_lc = rule.name.lower() if rule.name else ""
     if rt == 'PASSTHROUGH':
-        return not rule.name or rule.name not in ctx.ctrl_names
+        return not rule.name or name_lc not in {n.lower() for n in ctx.ctrl_names}
     if rt == 'LOCALVAR':
         return not rule.name
     if rt == 'EXPRESSION':
         if not rule.name:
             return True
         in_shapekeys = ctx.sk is not None and (
-            rule.name in ctx.sk.key_blocks or
-            any(rule.name in key.name.split('+') for key in ctx.sk.key_blocks)
+            any(name_lc == key.name.lower() for key in ctx.sk.key_blocks) or
+            any(name_lc in (p.lower() for p in key.name.split('+')) for key in ctx.sk.key_blocks)
         )
-        return (not in_shapekeys and rule.name not in ctx.localvar_names
-                and rule.name not in ctx.stereo_delta_names
-                and rule.name not in ctx.renamed_delta_names)
+        valid_lc = {n.lower() for n in (ctx.localvar_names | ctx.stereo_delta_names | ctx.renamed_delta_names)}
+        return not in_shapekeys and name_lc not in valid_lc
     return False
 
 

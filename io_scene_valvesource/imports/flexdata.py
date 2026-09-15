@@ -86,7 +86,7 @@ def parse_flex_text(text: str) -> dict:
         kw = line[0]
 
         if kw == "flexpair" and len(line) >= 2:
-            stereo_names.add(line[1])
+            stereo_names.add(line[1].strip('"'))
             continue
 
         if kw == "flexcontroller" and len(line) >= 3:
@@ -101,7 +101,7 @@ def parse_flex_text(text: str) -> dict:
             except (ValueError, IndexError):
                 continue
             for name in names:
-                controllers.append((name, fc_type, flex_min, flex_max))
+                controllers.append((name.strip('"'), fc_type, flex_min, flex_max))
             continue
 
         if kw == "localvar" and len(line) >= 2:

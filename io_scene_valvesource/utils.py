@@ -1588,7 +1588,7 @@ def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, 
     return _data
 
 def sanitize_string_for_delta(name: str) -> str:
-    return re.sub(r'[^a-zA-Z0-9]', '', name)
+    return ''.join(c for c in name if c.isalnum())
 
 
 def get_dme_corrective_delta_names(ob) -> set:
@@ -1656,11 +1656,13 @@ def get_dme_split_delta_map(ob) -> dict:
     controller_keys = get_dme_controller_shapekeys(ob)
     result = {}
     for ov in ob.vs.dme_delta_overrides:
-        if not (getattr(ov, "split_lr", False) and ov.shapekey and ov.delta_name and ov.delta_name.strip()):
+        if not (getattr(ov, "split_lr", False) and ov.shapekey):
             continue
         if ov.shapekey in controller_keys:
             continue  # ineligible: controllers can't take split deltas (exporter warns + falls back)
-        base = sanitize_string_for_delta(ov.delta_name.strip())
+        
+        raw = ov.delta_name.strip() if ov.delta_name and ov.delta_name.strip() else ov.shapekey
+        base = sanitize_string_for_delta(raw)
         if base:
             result[ov.shapekey] = base
     return result
@@ -1731,13 +1733,14 @@ def get_dme_renamed_delta_names(ob) -> set:
     '<base>R' variants (the names the split actually produces on export)."""
     split_map = get_dme_split_delta_map(ob)
     names = set()
-    for shapekey, delta in get_dme_delta_name_map(ob).items():
-        if shapekey in split_map:
-            base = split_map[shapekey]
-            names.add(f"{base}L")
-            names.add(f"{base}R")
-        else:
+    delta_map = get_dme_delta_name_map(ob)
+    for shapekey, delta in delta_map.items():
+        if shapekey not in split_map:
             names.add(delta)
+    # Splits (including empty-name splits absent from the delta map) produce L/R variants.
+    for base in split_map.values():
+        names.add(f"{base}L")
+        names.add(f"{base}R")
     return names
 
 
@@ -1758,21 +1761,29 @@ def get_dme_delta_override_conflicts(ob) -> set:
     # Collect (index, source shapekey, sanitized target) for valid override entries.
     entries = []
     target_counts = collections.Counter()
+    shapekey_counts = collections.Counter()
     for i, ov in enumerate(ob.vs.dme_delta_overrides):
         if not (ov.shapekey and ov.delta_name and ov.delta_name.strip()):
             continue
         target = sanitize_string_for_delta(ov.delta_name.strip())
         if not target:
             continue
-        entries.append((i, ov.shapekey, target))
-        target_counts[target] += 1
+        # Engine folds case, so collisions are detected on the lowercased target.
+        entries.append((i, ov.shapekey.lower(), target.lower()))
+        target_counts[target.lower()] += 1
+        shapekey_counts[ov.shapekey.lower()] += 1
 
+    sk_names_lc = {n.lower() for n in sk_names}
     for i, src, target in entries:
         # Renaming onto an existing shape key that isn't this entry's own source.
-        if target in sk_names and target != src:
+        if target in sk_names_lc and target != src:
             conflicts.add(i)
         # Two or more overrides resolving to the same delta name.
         if target_counts[target] > 1:
+            conflicts.add(i)
+        # Two or more overrides on the same shape key - the delta name map keeps only
+        # one, so the others silently vanish from the exported deltas.
+        if shapekey_counts[src] > 1:
             conflicts.add(i)
 
     return conflicts
@@ -1811,7 +1822,8 @@ def validate_corrective_components(components_str: str, sk_names: set) -> list:
     """Return unknown component names from a '+'-separated components string."""
     if not components_str.strip():
         return []
-    return [c for c in (t.strip() for t in components_str.split('+')) if c and c not in sk_names]
+    sk_lc = {n.lower() for n in sk_names}
+    return [c for c in (t.strip() for t in components_str.split('+')) if c and c.lower() not in sk_lc]
 
 
 def validate_flex_expression(expr: str, sk_names: set, ctrl_names: set, localvar_names: set = frozenset(), stereo_delta_names: set = frozenset(), renamed_delta_names: set = frozenset()) -> tuple:
@@ -1821,19 +1833,22 @@ def validate_flex_expression(expr: str, sk_names: set, ctrl_names: set, localvar
               a stereo-generated delta name, or a renamed (override) delta name
     name   -> must match a flex controller, ignoring math keywords
     """
-    expanded_sk = sk_names | {part for name in sk_names for part in name.split('+')} | stereo_delta_names | renamed_delta_names
+    # Engine matches delta/controller names case-insensitively, so compare on lowercase.
+    expanded_sk = {n.lower() for n in (sk_names | {part for name in sk_names for part in name.split('+')} | stereo_delta_names | renamed_delta_names)}
+    localvar_lc = {n.lower() for n in localvar_names}
+    ctrl_lc = {n.lower() for n in ctrl_names}
     delta_errors = []
     controller_errors = []
     # $name$ is a compiler definevariable reference - always valid, strip before parsing
     expr_no_defvar = re.sub(r'\$\w+\$', '', expr)
     for m in re.finditer(r'%(\w+)', expr_no_defvar):
         name = m.group(1)
-        if name not in expanded_sk and name not in localvar_names:
+        if name.lower() not in expanded_sk and name.lower() not in localvar_lc:
             delta_errors.append(name)
     stripped = re.sub(r'%\w+', '', expr_no_defvar)
     for m in re.finditer(r'\b([a-zA-Z_]\w*)\b', stripped):
         name = m.group(1)
-        if name not in _FLEX_MATH_KEYWORDS and name not in ctrl_names:
+        if name.lower() not in _FLEX_MATH_KEYWORDS and name.lower() not in ctrl_lc:
             controller_errors.append(name)
     return delta_errors, controller_errors
 
@@ -1888,17 +1903,21 @@ def validate_dme_flex_for_export(ob) -> list:
     stereo_delta_names = _build_stereo_delta_names(vs)
     renamed_delta_names = get_dme_renamed_delta_names(ob)
 
+    # Engine matches names case-insensitively.
+    ctrl_lc = {n.lower() for n in ctrl_names}
+    expr_target_lc = {n.lower() for n in (sk_names | localvar_names | stereo_delta_names | renamed_delta_names)}
+
     for rule in vs.dme_flex_rules:
         if rule.rule_type == 'PASSTHROUGH':
             if not rule.name:
                 errors.append(get_id('exporter_err_dme_passthrough_no_name', True).format(ob.name))
-            elif rule.name not in ctrl_names:
+            elif rule.name.lower() not in ctrl_lc:
                 errors.append(get_id('exporter_err_dme_passthrough_unknown', True).format(ob.name, rule.name))
 
         elif rule.rule_type == 'EXPRESSION':
             if not rule.name:
                 errors.append(get_id('exporter_err_dme_expression_no_name', True).format(ob.name))
-            elif rule.name not in sk_names and rule.name not in localvar_names and rule.name not in stereo_delta_names and rule.name not in renamed_delta_names:
+            elif rule.name.lower() not in expr_target_lc:
                 errors.append(get_id('exporter_err_dme_expression_unknown_target', True).format(ob.name, rule.name))
             expr = rule.expression.strip()
             if expr:

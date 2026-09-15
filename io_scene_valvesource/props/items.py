@@ -16,7 +16,7 @@ __all__ = [
 import bpy, re, math as _math
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
                        FloatProperty, FloatVectorProperty, PointerProperty)
-from ..utils import get_id, hitbox_group
+from ..utils import get_id, hitbox_group, sanitize_string_for_delta
 from .. import procbones_sim as _procbones_sim
 
 
@@ -24,6 +24,12 @@ def update_sanitize_name(self, context):
     legal_name = re.sub(r'[^a-z0-9]', '_', self.controller_name.lower())
     if self.controller_name != legal_name:
         self.controller_name = legal_name
+
+
+def update_sanitize_delta_name(self, context):
+    legal = sanitize_string_for_delta(self.delta_name)
+    if self.delta_name != legal:
+        self.delta_name = legal
 
 
 def _proc_entry_invalidate_cache(self, context):
@@ -135,7 +141,7 @@ class FlexControllerItem(bpy.types.PropertyGroup):
 
 class DmeDeltaNameOverride(bpy.types.PropertyGroup):
     shapekey   : StringProperty(name='Shape Key', description=get_id("prop_delta_override_shapekey_tip"))
-    delta_name : StringProperty(name='Delta Name', description=get_id("prop_delta_override_name_tip"))
+    delta_name : StringProperty(name='Delta Name', description=get_id("prop_delta_override_name_tip"), update=update_sanitize_delta_name)
     split_lr   : BoolProperty(name='Split to L/R', description=get_id("prop_delta_override_split_tip"), default=False)
 
 
