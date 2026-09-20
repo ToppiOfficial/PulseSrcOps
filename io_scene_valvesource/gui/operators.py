@@ -1631,6 +1631,12 @@ class SMD_OT_ProcBoneAddFromSelected(Operator):
             self.report({'ERROR'}, "Reference armature must be an armature object")
             return {'CANCELLED'}
 
+        if any(pb.name == self.driver_bone for pb in bones):
+            self.report({'WARNING'}, get_id('warn_proc_bone_driver_selected', True).format(self.driver_bone))
+            bones = [pb for pb in bones if pb.name != self.driver_bone]
+            if not bones:
+                return {'CANCELLED'}
+
         for pb in bones:
             entry                  = avs.proc_bones.add()
             entry.helper_bone      = pb.name

@@ -504,8 +504,7 @@ def animationFrameRange(ad : bpy.types.AnimData):
 def getFileExt(flex=False, anim=False):
     fmt = bpy.context.scene.vs.export_format
     if fmt == 'FBX':
-        # Animations have no mesh to justify an FBX - they are written as DMX.
-        return ".dmx" if anim else ".fbx"
+        return ".fbx"
     if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
@@ -906,7 +905,6 @@ def make_export_list(scene: bpy.types.Scene):
 
     def makeDisplayName(item, name=None):
         base = name if name else item.name
-        # Only armature rows produce animations, and those are DMX even in FBX mode.
         anim = isinstance(item, bpy.types.Object) and item.type == 'ARMATURE'
         return sanitize_string(base, allow_unicode=True) + getFileExt(anim=anim)
 
@@ -1389,13 +1387,11 @@ def prefab_mode_is_dme(scene) -> bool:
     .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseModel) - Source 2
     models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
     GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
-    DMX honours the user's prefab_export_mode; FBX always embeds, in the companion
-    DMX it writes alongside the .fbx. SMD has no embedding, so it always uses file mode."""
+    DMX and FBX honour the user's prefab_export_mode (FBX embeds into its companion
+    DMX). SMD has no embedding, so it always uses file mode."""
     if getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL:
         return False
-    if State.exportFormat == ExportFormat.FBX:
-        return True
-    return (State.exportFormat == ExportFormat.DMX
+    return (State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX)
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
@@ -1560,15 +1556,20 @@ def get_prefix_shortcut_map() -> dict:
                 result[sc] = p if '.' in p else p + "."
     return result
 
-def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_source2: bool = False) -> typing.Union[str, list]:
+def sanitize_string(data: typing.Union[str, list], allow_unicode: bool = False, force_source2: bool = False, no_sanitize: bool = False) -> typing.Union[str, list]:
     if isinstance(data, list):
-        return [sanitize_string(item, allow_unicode, force_source2) for item in data]
+        return [sanitize_string(item, allow_unicode, force_source2, no_sanitize) for item in data]
 
     _data = data.strip()
 
     # ModelDoc inherited ResourceCompiler's naming rules, so both Source 2 compilers
     # take the strict ASCII path.
     strict = (State.compiler > Compiler.STUDIOMDL or force_source2) and not allow_unicode
+
+    # no_sanitize keeps the name verbatim, but strict (Source 2) always wins.
+    if no_sanitize and not strict:
+        return _data or 'unnamed'
+
     pattern = r'[^a-zA-Z0-9_]+' if strict else r'[^\w.]+'
 
     # Registered prefixes ("ValveBiped." and friends) pass through verbatim on every
@@ -1747,8 +1748,8 @@ def get_dme_renamed_delta_names(ob) -> set:
 def get_dme_delta_override_conflicts(ob) -> set:
     """Return the set of dme_delta_overrides indices that conflict.
 
-    An override conflicts when its (sanitized) delta_name either:
-      - collides with an existing shape key name that is NOT its own source shapekey, or
+    An override conflicts when its (sanitized) exported name(s) either:
+      - collide with a shape key name still exported as-is (not itself overridden), or
       - is shared as a rename target by another override (two overrides -> same name).
     """
     conflicts = set()
@@ -1769,14 +1770,15 @@ def get_dme_delta_override_conflicts(ob) -> set:
         if not target:
             continue
         # Engine folds case, so collisions are detected on the lowercased target.
-        entries.append((i, ov.shapekey.lower(), target.lower()))
+        entries.append((i, ov.shapekey.lower(), target.lower(), getattr(ov, "split_lr", False)))
         target_counts[target.lower()] += 1
         shapekey_counts[ov.shapekey.lower()] += 1
 
-    sk_names_lc = {n.lower() for n in sk_names}
-    for i, src, target in entries:
-        # Renaming onto an existing shape key that isn't this entry's own source.
-        if target in sk_names_lc and target != src:
+    # Shape keys renamed away by an override no longer occupy their original name.
+    occupied = {n.lower() for n in sk_names} - {src for _, src, _, _ in entries}
+    for i, src, target, split in entries:
+        exported = (target + "l", target + "r") if split else (target,)
+        if any(n in occupied for n in exported):
             conflicts.add(i)
         # Two or more overrides resolving to the same delta name.
         if target_counts[target] > 1:
@@ -1991,11 +1993,12 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
     arm_prop = armature.data.vs
     
     scene = bpy.context.scene
-    force_s2 = bool(scene and scene.vs.force_source2_bone_sanitize)
+    mode = scene.vs.force_source2_bone_sanitize if scene else 'NONE'
+    force_s2 = mode == 'FORCE_S2'  # strict ASCII
+    no_san = mode == 'NONE'        # verbatim; LIGHT keeps CJK via the default \w path
 
     if arm_prop.ignore_bone_exportnames and not for_write:
-        # Still sanitize: the Blender name may contain chars invalid for the compiler.
-        return sanitize_string(data_bone.name, force_source2=force_s2)
+        return sanitize_string(data_bone.name, force_source2=force_s2, no_sanitize=no_san)
 
     def get_bone_side(b: bpy.types.Bone) -> str:
         bone_x = b.matrix_local.to_translation().x
@@ -2022,7 +2025,7 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         else:
             final_name = raw_name
 
-        final_name = sanitize_string(final_name, force_source2=force_s2)
+        final_name = sanitize_string(final_name, force_source2=force_s2, no_sanitize=no_san)
         export_names[b.name] = final_name
 
     return export_names[data_bone.name]

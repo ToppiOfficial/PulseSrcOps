@@ -26,6 +26,24 @@ _data = {
         'en': "Action Selection",
         'ja': "アクション選択",
     },
+    'fbx_anim_layout': {
+        'en': "FBX Animation Layout",
+    },
+    'fbx_anim_layout_tip': {
+        'en': "How exported animations are split across FBX files",
+    },
+    'fbx_anim_layout_per': {
+        'en': "One File Per Animation",
+    },
+    'fbx_anim_layout_per_tip': {
+        'en': "Write a separate FBX for each action slot / action",
+    },
+    'fbx_anim_layout_single': {
+        'en': "Single File",
+    },
+    'fbx_anim_layout_single_tip': {
+        'en': "Write one FBX holding every animation as a separate take",
+    },
     'action_selection_mode_tip': {
         'en': "How actions are selected for export",
         'ja': "アクションのエクスポート選択方法",
@@ -516,8 +534,8 @@ _data = {
         'ja': "エクスポートされるファイルに書き込まれるボーン名を上書き",
     },
     'exportpanel_fbx_companion': {
-        'en': "A .dmx is written beside each .fbx for the flex controllers and prefabs.",
-        'ja': "フレックスコントローラーとプレハブ用に、各 .fbx の隣に .dmx が書き出されます。",
+        'en': "A .dmx is written beside each .fbx for the flex controllers (and prefabs when embedded).",
+        'ja': "フレックスコントローラー（埋め込み時はプレハブも）用に、各 .fbx の隣に .dmx が書き出されます。",
     },
     'exportpanel_dmxver': {
         'en': "DMX Version:",
@@ -1268,6 +1286,10 @@ _data = {
         'en': "Copy all proc bone entries sharing the active entry's driver bone to clipboard",
         'ja': "アクティブエントリと同じドライバーボーンを持つすべてのProcボーンエントリをクリップボードにコピー",
     },
+    'warn_proc_bone_driver_selected': {
+        'en': "Skipped driver bone '{0}' - a bone cannot drive itself",
+        'ja': "ドライバーボーン '{0}' をスキップしました - ボーンは自身を駆動できません",
+    },
     'op_proc_bone_copy_all': {
         'en': "Copy All Entries",
         'ja': "すべてのエントリをコピー",
@@ -1413,10 +1435,6 @@ _data = {
         'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
         'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
     },
-    'prefab_export_mode_fbx': {
-        'en': "EMBEDDED (companion DMX)",
-        'ja': "EMBEDDED (コンパニオン DMX)",
-    },
     'prefab_export_mode_source2_forced': {
         'en': "FILE (Source 2 is hand-authored in ModelDoc/vmdl)",
         'ja': "FILE (Source 2 は ModelDoc/vmdl で手動作成)",
@@ -1436,6 +1454,22 @@ _data = {
     'force_source2_bone_sanitize': {
         'en': "Force Source 2 Bone Names",
         'ja': "Source 2 ボーン名を強制",
+    },
+    'bone_naming_none': {
+        'en': "None",
+        'ja': "なし",
+    },
+    'bone_naming_none_tip': {
+        'en': "Export bone names verbatim with no sanitization (dots, spaces and Unicode kept as-is). Source 2 exports always force strict Source 2 names regardless of this setting",
+        'ja': "ボーン名をサニタイズせずそのままエクスポートします (ドット・スペース・Unicode をそのまま保持)。Source 2 エクスポートはこの設定に関わらず常に厳格な Source 2 名を強制します",
+    },
+    'bone_naming_light': {
+        'en': "Light",
+        'ja': "軽度",
+    },
+    'bone_naming_light_tip': {
+        'en': "Keep CJK (Chinese/Japanese/Korean) characters in bone names; other illegal characters are still sanitized. Source 2 exports always force strict Source 2 names regardless of this setting",
+        'ja': "ボーン名の CJK (中国語/日本語/韓国語) 文字を保持します。その他の不正な文字はサニタイズされます。Source 2 エクスポートはこの設定に関わらず常に厳格な Source 2 名を強制します",
     },
     'force_source2_bone_sanitize_tip': {
         'en': "Apply Source 2 bone name sanitization even when exporting for Source 1. Strips dots and non-ASCII characters (except preserved prefixes below), so e.g. 'Bone.001' becomes 'Bone_001'",

@@ -146,8 +146,8 @@ class SMD_PT_Scene(Panel):
             for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX', 'FBX')):
                 sub.prop_enum(scene.vs, "export_format", _fmt_id)
 
-        # FBX writes a companion DMX holding the skeleton, flex controllers and prefabs,
-        # so it needs a datamodel version too.
+        # FBX writes a companion DMX holding the skeleton, flex controllers and embedded
+        # prefabs, so it needs a datamodel version too.
         if scene.vs.export_format in ('DMX', 'FBX'):
             if scene.vs.game == 'CUSTOM':
                 row = l.split(factor=0.33)
@@ -204,7 +204,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
         dme_active = False
         # The DMX model format decides Source 1 vs 2, not scene.vs.engine.
         is_source1 = State.compiler == Compiler.STUDIOMDL
-        if State.exportFormat == ExportFormat.DMX:
+        if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX):
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
             if is_source1:
@@ -213,21 +213,12 @@ class SMD_PT_SceneEncodingOptions(Panel):
             else:
                 # Source 2 is hand-authored in ModelDoc/vmdl - no embedding target exists.
                 row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
-        elif State.exportFormat == ExportFormat.FBX:
-            row = l.row().split(factor=0.33)
-            row.label(text=get_id("prefab_export_mode", True) + ":")
-            if is_source1:
-                # Forced: FBX has nowhere else to put prefabs, so the companion DMX takes them.
-                row.label(text=get_id("prefab_export_mode_fbx"), icon='CHECKMARK')
-                dme_active = True
-            else:
-                row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
 
         # Both Source 2 compilers sanitize unconditionally, so the toggle is Source 1 only.
         if State.compiler == Compiler.STUDIOMDL:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("bone_naming_label", True) + ":")
-            row.row().prop(scene.vs, "force_source2_bone_sanitize", toggle=True)
+            row.row().prop(scene.vs, "force_source2_bone_sanitize", expand=True)
 
 
 class SMD_PT_SceneTransform(Panel):
@@ -353,6 +344,8 @@ class SMD_PT_Exportables(Panel):
                 is_slot_filter = avs.action_selection == 'FILTERED'
                 col.prop(item.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
                 col.prop(avs, "reset_pose_per_anim")
+                if scene.vs.export_format == 'FBX':
+                    col.prop(avs, "fbx_anim_layout")
 
                 col.separator(factor=0.5)
                 col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),

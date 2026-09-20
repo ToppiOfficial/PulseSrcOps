@@ -536,20 +536,20 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 and source.data.vs.action_selection != "CURRENT"
                 and source.animation_data and source.animation_data.action):
             baked_armature = bake_results[0].object
-            if source.data.vs.action_selection == "FILTERED":
-                for slot in actionSlotsForFilter(baked_armature):
-                    if isProcBoneAnimSkipped(source, None, slot.name_display):
-                        print(f" Skipping proc bone animation \"{slot.name_display}\"")
-                        continue
-                    baked_armature.animation_data.action_slot = slot
-                    self.files_exported += write_func(source, bake_results, self.sanitiseFilename(slot.name_display), path)
+            jobs = self._filtered_anim_jobs(source, baked_armature)
+            if (State.exportFormat == ExportFormat.FBX
+                    and source.data.vs.fbx_anim_layout == "SINGLE_FILE"):
+                if jobs:
+                    # One FBX holding every animation as a take; FbxWriter lays them out on NLA.
+                    self.files_exported += write_func(
+                        source, bake_results, self.sanitiseFilename(task.export_name) + "_multiclip", path, anim_jobs=jobs)
             else:
-                for action in actionsForFilter(baked_armature.vs.action_filter):
-                    if isProcBoneAnimSkipped(source, action.name):
-                        print(f" Skipping proc bone animation \"{action.name}\"")
-                        continue
-                    baked_armature.animation_data.action = action
-                    self.files_exported += write_func(source, bake_results, self.sanitiseFilename(action.name), path)
+                for name, action, slot in jobs:
+                    if slot is not None:
+                        baked_armature.animation_data.action_slot = slot
+                    else:
+                        baked_armature.animation_data.action = action
+                    self.files_exported += write_func(source, bake_results, self.sanitiseFilename(name), path)
         elif (isinstance(source, bpy.types.Object) and source.type == "ARMATURE"
               and source.animation_data and source.animation_data.action_slot
               and isProcBoneAnimSkipped(source, None, source.animation_data.action_slot.name_display)):
@@ -874,8 +874,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             return set()
         try:
             channelbag = ad.action.layers[0].strips[0].channelbag(ad.action_slot)
-        except (IndexError, AttributeError):
-            return set()
+        except (IndexError, AttributeError, RuntimeError):
+            return set()  # no active slot / no channelbag - nothing keyframed to report
         if channelbag is None:
             return set()
         names = set()
@@ -951,6 +951,25 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
 
 
+    def _filtered_anim_jobs(self, source, baked_armature):
+        """(display_name, action, slot) per exportable animation, proc-bone-only ones dropped.
+        slot is None in FILTERED_ACTIONS mode. Shared by the per-file loop and FBX single-file."""
+        jobs = []
+        if source.data.vs.action_selection == "FILTERED":
+            action = baked_armature.animation_data.action
+            for slot in actionSlotsForFilter(baked_armature):
+                if isProcBoneAnimSkipped(source, None, slot.name_display):
+                    print(f" Skipping proc bone animation \"{slot.name_display}\"")
+                    continue
+                jobs.append((slot.name_display, action, slot))
+        else:
+            for action in actionsForFilter(baked_armature.vs.action_filter):
+                if isProcBoneAnimSkipped(source, action.name):
+                    print(f" Skipping proc bone animation \"{action.name}\"")
+                    continue
+                jobs.append((action.name, action, action.slots[0] if action.slots else None))
+        return jobs
+
     def _run_dmx_writer(self, datablock, bake_results, name, dir_path, skeleton_only=False):
         writer = DmxWriter(
             self, datablock, bake_results, name, dir_path,
@@ -965,25 +984,21 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         )
         return writer.write()
 
-    def _run_fbx_writer(self, id, bake_results, name, dir_path):
+    def _run_fbx_writer(self, id, bake_results, name, dir_path, anim_jobs=None):
         # A model export writes two files: the .fbx (mesh + skeleton + blendshapes) and a
         # companion .dmx of the same name holding what FBX cannot carry - flex controllers
         # and rules, jigglebones, hitboxes, procedural bones - over a mesh-less skeleton.
         # DMX runs first: FbxWriter mutates the baked rig (bone renames, offsets, scale).
         #
-        # An animation is DMX only. Its bone channels are the whole file, and DMX writes
-        # them exactly where Blender's FBX baker resamples them - there is no mesh to
-        # justify a second file.
+        # An animation is FBX only - its bone channels are the whole file, baked by
+        # Blender's FBX animation exporter; there is no mesh to justify a companion DMX.
         #
         # A collision/cloth-only export has none of that extra data, so the companion
         # would be a bare skeleton - skip it and write the .fbx alone.
         is_anim = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
         written = 0
-        if not is_proxy_only(bake_results):
-            written = self._run_dmx_writer(id, bake_results, name, dir_path,
-                                           skeleton_only=not is_anim)
-            if is_anim:
-                return written
+        if not is_anim and not is_proxy_only(bake_results):
+            written = self._run_dmx_writer(id, bake_results, name, dir_path, skeleton_only=True)
 
         writer = FbxWriter(
             self, id, bake_results, name, dir_path,
@@ -991,6 +1006,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             exportable_bones=self.exportable_bones,
             exportable_boneNames=self.exportable_boneNames,
             all_bake_results=self.bake_results,
+            anim=is_anim, anim_jobs=anim_jobs,
         )
         return written + writer.write()
 

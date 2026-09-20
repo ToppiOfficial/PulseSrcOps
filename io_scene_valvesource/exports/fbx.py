@@ -9,7 +9,7 @@ from .records import BakeResult
 class FbxWriter:
     def __init__(self, reporter, id, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
-                 all_bake_results):
+                 all_bake_results, anim=False, anim_jobs=None):
         self.r = reporter
         self.id = id
         self.bake_results = bake_results
@@ -20,6 +20,11 @@ class FbxWriter:
         self.exportable_bones = exportable_bones
         self.exportable_boneNames = exportable_boneNames
         self.all_bake_results = all_bake_results
+        # anim: this export is an animation (armature only, no mesh). anim_jobs (single-file
+        # layout) is a list of (name, action, slot) baked as separate NLA takes; None bakes
+        # the currently-assigned action into one take.
+        self.anim = anim
+        self.anim_jobs = anim_jobs
 
     def _warning(self, *a): self.r.warning(*a)
     def _error(self, *a): self.r.error(*a)
@@ -33,6 +38,8 @@ class FbxWriter:
         if not objects:
             return 0
         meshes = [ob for ob in objects if ob.type == 'MESH']
+        is_anim = self.anim or (len(self.bake_results) == 1 and not meshes
+                                and objects[0].type == 'ARMATURE')
 
         if self.bake_results[0].vertex_animations:
             self._warning(get_id("exporter_warn_fbx_vca", True).format(self.name))
@@ -50,7 +57,10 @@ class FbxWriter:
                 objects.append(self.armature)
 
         self._apply_armature_scale()
-        self._apply_bone_offsets()
+        # Model rest gets the offsets here; animation applies them in _setup_anim, where it can
+        # also re-key the (copied) action so the moved rest does not shift the baked motion.
+        if not is_anim:
+            self._apply_bone_offsets()
         renamed = self._claim_export_names()
 
         filepath = os.path.realpath(os.path.join(
@@ -61,11 +71,7 @@ class FbxWriter:
             ob.select_set(True)
         bpy.context.view_layer.objects.active = self.armature or objects[0]
 
-        # Animations are DMX-only, so this is always a model: rest pose, and bake_anim off so
-        # a rig that merely has an action assigned does not drag it in - that spawns a stray
-        # "<name>|Scene" action on every import.
-        if self.armature:
-            self.armature.data.pose_position = "REST"
+        anim_kwargs, restore = self._setup_anim(is_anim)
 
         # Matches how _setup_skeleton built exportable_bones.
         deform_only = bool(self.armature) and \
@@ -93,20 +99,204 @@ class FbxWriter:
                 add_leaf_bones=False,
                 use_armature_deform_only=deform_only,
                 armature_nodetype='NULL',
-                bake_anim=False,
                 path_mode='AUTO',
                 embed_textures=False,
                 batch_mode='OFF',
+                **anim_kwargs,
             )
         except RuntimeError as err:
             self._error(get_id("exporter_err_open", True).format("FBX", err))
             return 0
         finally:
+            restore()
             for datablock, old_name in reversed(renamed):
                 datablock.name = old_name
 
         print("-", filepath)
         return 1
+
+    # Returns (extra export kwargs, restore callable). A model exports at rest with no
+    # animation. An animation poses the rig, bakes bone export offsets into rest + action, and
+    # exports either the assigned action (one take) or one NLA strip per animation (a take each).
+    def _setup_anim(self, is_anim) -> tuple:
+        if not is_anim:
+            # bake_anim off so a rig that merely has an action assigned does not drag it in.
+            if self.armature:
+                self.armature.data.pose_position = "REST"
+            return {"bake_anim": False}, lambda: None
+
+        arm = self.armature
+        arm.data.pose_position = "POSE"
+        ad = arm.animation_data or arm.animation_data_create()
+        saved_action, saved_slot = ad.action, ad.action_slot
+        restores = []
+
+        if arm.data.vs.reset_pose_per_anim:
+            # The unkeyframed-pose diagnostic reads the active slot; single-file has none yet
+            # (its slots are bound per NLA take below), so skip it there.
+            if ad.action and ad.action_slot:
+                self.r.warnUnkeyframedPose(self.name)
+            for pb in arm.pose.bones:
+                pb.matrix_basis.identity()
+        else:
+            self.r.applyUnkeyframedSourcePose()
+        bpy.context.view_layer.update()
+
+        def restore():
+            for undo in reversed(restores):
+                undo()
+            ad.action = saved_action
+            if saved_slot is not None:
+                try:
+                    ad.action_slot = saved_slot
+                except (AttributeError, TypeError):
+                    pass
+
+        common = dict(bake_anim=True, bake_anim_use_all_actions=False,
+                      bake_anim_simplify_factor=0.0)
+
+        if self.anim_jobs is None:
+            action, slot = self._apply_anim_offsets([(saved_action, saved_slot)], restores)[0]
+            ad.action = action
+            if slot is not None:
+                try:
+                    ad.action_slot = slot
+                except (AttributeError, TypeError):
+                    pass
+            scene = bpy.context.scene
+            first, span = animationFrameRange(ad)
+            saved_range = (scene.frame_start, scene.frame_end, scene.frame_current)
+            scene.frame_start, scene.frame_end = first, first + span
+            restores.append(lambda: (
+                setattr(scene, "frame_start", saved_range[0]),
+                setattr(scene, "frame_end", saved_range[1]),
+                scene.frame_set(saved_range[2])))
+            return dict(common, bake_anim_use_nla_strips=False), restore
+
+        exports = self._apply_anim_offsets([(a, s) for _, a, s in self.anim_jobs], restores)
+        resolved = [(name, exp[0], exp[1]) for (name, _, _), exp in zip(self.anim_jobs, exports)]
+        self._build_nla_takes(resolved, restores)
+        return dict(common, bake_anim_use_nla_strips=True), restore
+
+    # Lays each animation out as its own NLA strip on its own track, so the FBX baker emits one
+    # take per strip named after it. `resolved` is (name, action, slot) already mapped to the
+    # export action. Appends the track teardown to `restores`.
+    def _build_nla_takes(self, resolved, restores) -> None:
+        arm = self.armature
+        ad = arm.animation_data
+
+        ranges = []
+        for name, action, slot in resolved:
+            ad.action = action
+            if slot is not None:
+                ad.action_slot = slot
+            first, span = animationFrameRange(ad)
+            ranges.append((name, action, slot, first, span))
+        ad.action = None  # an active action would export as an extra take
+
+        tracks = []
+        for name, action, slot, first, span in ranges:
+            track = ad.nla_tracks.new()
+            track.name = name
+            strip = track.strips.new(name, int(first), action)
+            strip.name = name
+            strip.frame_start, strip.frame_end = first, first + max(span, 1)
+            strip.action_frame_start, strip.action_frame_end = first, first + span
+            if slot is not None:
+                try:
+                    strip.action_slot = slot
+                except (AttributeError, TypeError):
+                    pass  # ponytail: pre-slot Blenders fall back to the action's first slot
+            tracks.append(track)
+        bpy.context.view_layer.update()
+
+        restores.append(lambda: [ad.nla_tracks.remove(t) for t in tracks])
+
+    # Bakes per-bone export offsets into rest + animation. The offset re-orients a bone's frame
+    # everywhere (rest and every keyed frame), so a copy of each action is re-keyed - never the
+    # user's real datablock. `assignments` is (action, slot) per animation; in slot-filter mode
+    # many share one action, so the copy is per-action but every slot on it is re-keyed. Returns
+    # the export (action, slot) per assignment in order, and leaves the rig's rest offset; the
+    # appended restore reverts it and drops the copies.
+    def _apply_anim_offsets(self, assignments, restores) -> list:
+        arm = self.armature
+        offsets = self._bone_offsets()
+        if not offsets:
+            return list(assignments)
+
+        ad = arm.animation_data
+        names = list(offsets)
+        mutate = self._offset_mutate(offsets)
+        unmutate = self._offset_mutate(offsets, invert=True)
+
+        action_copies = {}
+        result = []
+        for i, (action, slot) in enumerate(assignments):
+            if i:  # the prior slot left the rest offset - author-rest it before sampling
+                retarget_rest_pose(arm, (), unmutate)
+            copy = action_copies.get(action) or action_copies.setdefault(action, action.copy())
+            copy_slot = self._bind_copy_slot(ad, copy, slot)
+            retarget_rest_pose(arm, names, mutate, post=offsets)  # re-keys the bound slot
+            result.append((copy, copy_slot))
+
+        src_name = (self.armature_src or arm).name
+        print(f"- Baked export offsets into {len(names)} bones of \"{src_name}\" "
+              f"across {len(assignments)} animation(s)")
+
+        def undo():
+            retarget_rest_pose(arm, (), unmutate)  # rest is offset after the last slot
+            for copy in action_copies.values():
+                try:
+                    bpy.data.actions.remove(copy)
+                except (ReferenceError, RuntimeError):
+                    pass
+        restores.append(undo)
+        return result
+
+    # Assigns `copy` and binds the slot matching `orig_slot` (by identifier, then display name).
+    def _bind_copy_slot(self, ad, copy, orig_slot):
+        ad.action = copy
+        if orig_slot is None:
+            return copy.slots[0] if copy.slots else None
+        match = next((s for s in copy.slots if s.identifier == orig_slot.identifier), None) \
+            or next((s for s in copy.slots if s.name_display == orig_slot.name_display), None) \
+            or (copy.slots[0] if copy.slots else None)
+        if match is not None:
+            try:
+                ad.action_slot = match
+            except (AttributeError, TypeError):
+                pass
+        return match
+
+    # {bone_name: local-space export-offset matrix} for bones carrying a rotation/location offset.
+    def _bone_offsets(self) -> dict:
+        arm = self.armature
+        offsets = {}
+        if not arm:
+            return offsets
+        for pb in arm.pose.bones:
+            bvs = pb.bone.vs
+            # Gate on the properties, not on comparing matrices: mathutils is single
+            # precision, so far from the origin every bone reads as offset.
+            has_rot = not bvs.ignore_rotation_offset and any(
+                (bvs.export_rotation_offset_x, bvs.export_rotation_offset_y, bvs.export_rotation_offset_z))
+            has_loc = not bvs.ignore_location_offset and any(
+                (bvs.export_location_offset_x, bvs.export_location_offset_y, bvs.export_location_offset_z))
+            if not (has_rot or has_loc):
+                continue
+            offsets[pb.name] = pb.bone.matrix_local.inverted() @ get_bone_matrix(pb, rest_space=True)
+        return offsets
+
+    @staticmethod
+    def _offset_mutate(offsets, invert=False):
+        def mutate(edit_bones):
+            # Connected children track their parent's tail, which the offset moves.
+            for eb in edit_bones:
+                eb.use_connect = False
+            for name, off in offsets.items():
+                eb = edit_bones[name]
+                eb.matrix = eb.matrix @ (off.inverted() if invert else off)
+        return mutate
 
     # -----------------------------------------------------------------------
     def _ensure_addon(self) -> bool:
@@ -216,38 +406,18 @@ class FbxWriter:
 
     # DMX/SMD apply bone.vs export offsets via get_bone_matrix(). The FBX is written from the
     # armature itself, so they go into its rest pose. The mesh stays put - the same rest backs
-    # the skin clusters. No action to re-key: animations are DMX-only.
+    # the skin clusters. Animation re-keys its (copied) action instead, in _apply_anim_offsets.
     def _apply_bone_offsets(self) -> None:
         arm = self.armature
         if not arm:
             return
-
-        offsets = {}
-        for pb in arm.pose.bones:
-            bvs = pb.bone.vs
-            # Gate on the properties, not on comparing matrices: mathutils is single
-            # precision, so far from the origin every bone reads as offset.
-            has_rot = not bvs.ignore_rotation_offset and any(
-                (bvs.export_rotation_offset_x, bvs.export_rotation_offset_y, bvs.export_rotation_offset_z))
-            has_loc = not bvs.ignore_location_offset and any(
-                (bvs.export_location_offset_x, bvs.export_location_offset_y, bvs.export_location_offset_z))
-            if not (has_rot or has_loc):
-                continue
-            offsets[pb.name] = pb.bone.matrix_local.inverted() @ get_bone_matrix(pb, rest_space=True)
+        offsets = self._bone_offsets()
         src_name = (self.armature_src or arm).name
         if not offsets:
             print(f"- No bone export offsets on \"{src_name}\" ({len(arm.pose.bones)} bones)")
             return
 
-        def mutate(edit_bones):
-            # Connected children track their parent's tail, which the offset moves.
-            for eb in edit_bones:
-                eb.use_connect = False
-            for name, off in offsets.items():
-                eb = edit_bones[name]
-                eb.matrix = eb.matrix @ off
-
-        retarget_rest_pose(arm, (), mutate, post=offsets)
+        retarget_rest_pose(arm, (), self._offset_mutate(offsets), post=offsets)
         sample = ", ".join(sorted(offsets)[:5])
         print(f"- Baked export offsets into {len(offsets)}/{len(arm.pose.bones)} bones "
               f"of \"{src_name}\" ({sample}{', ...' if len(offsets) > 5 else ''})")

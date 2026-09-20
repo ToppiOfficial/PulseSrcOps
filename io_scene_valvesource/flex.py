@@ -140,9 +140,11 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     flex_rules_elem = None
                     for rule in non_dom:
                         delta_name = delta_name_map.get(rule.name, sanitize_string_for_delta(rule.name))
+                        
                         # localvars are their own namespace: a localvar declaration and the
                         # expression that assigns it deliberately share a name
                         rule_key = (rule.rule_type == 'LOCALVAR', delta_name.lower())
+
                         # split/edgeline copies carry the original's rules verbatim, so an
                         # identical redefinition is expected and silently dropped. Differing
                         # content under one name is a real clash - a rule name is the delta it
