@@ -315,16 +315,21 @@ class ImporterBase(bpy.types.Operator, Logger):
 
         # Order is forced by the format: the node block must be built into an armature
         # before triangle weights can resolve, so this stays a single pass over the file.
+        bench = BenchMarker(1, "SMD")
         for line in file:
             if line == "nodes\n":
                 _build.build_smd_skeleton(self, smd, _smd.read_nodes(smd, self.qc))
+                bench.report("nodes")
             if line == "skeleton\n":
                 _anim.build_smd_anim(self, smd, _smd.read_frames(self, smd, self.qc))
+                bench.report("skeleton")
             if line == "triangles\n":
                 group_names = [b.name for b in smd.a.data.bones] if smd.a else []
                 imesh = _smd.read_polys(self, smd, group_names, self.qc)
+                bench.report("parse triangles")
                 if imesh:
                     ob = _build.build_mesh(self, smd, imesh)
+                    bench.report("build mesh")
                     if smd.jobType == REF and self.qc:
                         self.qc.ref_mesh = ob
                         self.qc.ref_meshes.append(ob)
@@ -338,6 +343,7 @@ class ImporterBase(bpy.types.Operator, Logger):
                         poly.select = True
             if line == "vertexanimation\n":
                 _smd.read_shapes(self, smd)
+                bench.report("vertex animation")
 
         file.close()
         printTimeMessage(smd.startTime, smd.jobName, "import")
