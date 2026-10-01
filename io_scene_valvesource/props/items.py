@@ -14,6 +14,7 @@ __all__ = [
 ]
 
 import bpy, re, math as _math
+from mathutils import Matrix, Vector
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
                        FloatProperty, FloatVectorProperty, PointerProperty)
 from ..utils import get_id, hitbox_group, sanitize_string_for_delta
@@ -392,3 +393,83 @@ class ProcBoneEntry(bpy.types.PropertyGroup):
         size=3, default=(0.0, 0.0, 0.0),
         subtype='XYZ',
     )
+    lookat_target_type : EnumProperty(
+        name=get_id('prop_proc_bone_lookat_target_type'),
+        description=get_id('prop_proc_bone_lookat_target_type_tip'),
+        items=[
+            ('BONE',  "Bone",  "Aim at a target bone",                            'BONE_DATA',          0),
+            ('ATTACHMENT', "Attachment", "Aim at an Empty parented to a bone, following it when moved", 'EMPTY_ARROWS', 2),
+            ('POINT', "Point", "Aim at an XYZ point relative to a bone, exported as an attachment", 'ORIENTATION_GLOBAL', 1),
+        ],
+        default='BONE',
+    )
+    lookat_point_bone : StringProperty(
+        name=get_id('prop_proc_bone_lookat_relative_bone'),
+        description=get_id('prop_proc_bone_lookat_relative_bone_tip'),
+    )
+    lookat_point : FloatVectorProperty(
+        name=get_id('prop_proc_bone_lookat_point'),
+        description=get_id('prop_proc_bone_lookat_point_tip'),
+        size=3, default=(0.0, 0.0, 0.0),
+        subtype='XYZ',
+    )
+    lookat_point_from_helper : BoolProperty(
+        name=get_id('prop_proc_bone_lookat_point_from_helper'),
+        description=get_id('prop_proc_bone_lookat_point_from_helper_tip'),
+        default=False,
+    )
+
+    lookat_attachment : PointerProperty(
+        name=get_id('prop_proc_bone_lookat_target_attachment'),
+        description=get_id('prop_proc_bone_lookat_target_attachment_tip'),
+        type=bpy.types.Object,
+        poll=lambda self, ob: (ob.type == 'EMPTY' and ob.parent_type == 'BONE'
+                               and ob.parent is not None and ob.parent.data == self.id_data),
+    )
+
+    # LOOKAT aim target, resolved from whichever target type is active.
+    @property
+    def aim_bone(self) -> str:
+        t = self.lookat_target_type
+        if t == 'POINT':
+            return self.lookat_point_bone
+        if t == 'ATTACHMENT':
+            return self.lookat_attachment.parent_bone if self.lookat_attachment else ''
+        return self.driver_bone
+
+    @property
+    def aim_offset(self) -> tuple:
+        t = self.lookat_target_type
+        if t == 'POINT':
+            if self.lookat_point_from_helper:
+                bones = self.id_data.bones
+                helper = bones.get(self.helper_bone)
+                target = bones.get(self.lookat_point_bone)
+                if helper and target:
+                    def export_rest_matrix(bone):
+                        vs = bone.vs
+                        loc = Matrix.Identity(4) if vs.ignore_location_offset else Matrix.Translation((
+                            vs.export_location_offset_x, vs.export_location_offset_y, vs.export_location_offset_z))
+                        rot = Matrix.Identity(4) if vs.ignore_rotation_offset else (
+                            Matrix.Rotation(vs.export_rotation_offset_z, 4, 'Z') @
+                            Matrix.Rotation(vs.export_rotation_offset_y, 4, 'Y') @
+                            Matrix.Rotation(vs.export_rotation_offset_x, 4, 'X'))
+                        return bone.matrix_local @ loc @ rot
+
+                    point = export_rest_matrix(target).inverted_safe() @ (
+                        export_rest_matrix(helper) @ Vector(self.lookat_point))
+                    return tuple(point)
+            return tuple(self.lookat_point)
+        if t == 'ATTACHMENT':
+            # Empty position in its parent bone's export-space frame, read live
+            ob = self.lookat_attachment
+            pb = ob.parent.pose.bones.get(ob.parent_bone) if ob and ob.parent and ob.parent.pose else None
+            if not pb:
+                return (0.0, 0.0, 0.0)
+            mat = ob.parent.matrix_world @ pb.matrix @ _procbones_sim._get_export_offset_mat(pb)
+            return tuple(mat.inverted_safe() @ ob.matrix_world.translation)
+        return tuple(self.lookat_offset)
+
+    @property
+    def aim_needs_attachment(self) -> bool:
+        return self.lookat_target_type != 'BONE' or self.aim_offset != (0.0, 0.0, 0.0)

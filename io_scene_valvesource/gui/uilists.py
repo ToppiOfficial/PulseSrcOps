@@ -330,7 +330,8 @@ class SMD_UL_ProcBones(UIList):
         proc_type = getattr(item, 'proc_type', 'TRIGGER')
         row.label(text='', icon='ACTION' if proc_type == 'TRIGGER' else 'CON_TRACKTO')
         row.label(text=item.helper_bone if item.helper_bone else "", icon='BONE_DATA')
-        row.label(text=item.driver_bone if item.driver_bone else "", icon='DRIVER')
+        driver_name = item.aim_bone if proc_type == 'LOOKAT' else item.driver_bone
+        row.label(text=driver_name, icon='DRIVER')
         if proc_type == 'TRIGGER':
             action_label = item.action.name if item.action else ""
             if action_label and item.action_slot_name:

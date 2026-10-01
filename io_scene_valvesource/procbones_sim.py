@@ -983,7 +983,7 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
     ignored, exactly like the engine.
     """
     helper_pb = arm_ob.pose.bones.get(entry.helper_bone)
-    driver_pb = arm_ob.pose.bones.get(entry.driver_bone)
+    driver_pb = arm_ob.pose.bones.get(entry.aim_bone)
     if not helper_pb or not driver_pb:
         return
 
@@ -998,20 +998,17 @@ def _sim_lookat_entry(arm_ob, entry, is_s2: bool, arm_world_inv: Matrix) -> None
     user_up  = _axis_to_vec(getattr(entry, 'lookat_up_axis',  '+Z'))
 
     # Aim target (engine: aimAtSpace) - the attachment sits on the driver bone
-    # with lookat_offset as its local translation.
+    # with aim_offset as its local translation.
     # NOTE: _get_animated_goal must NOT be used here it rebuilds from bone.matrix_local
     # (rest pose), giving wrong positions whenever the driver bone is animated/posed. too bad!
-    driver_key = (arm_ob.name, entry.driver_bone)
+    driver_key = (arm_ob.name, entry.aim_bone)
     if driver_key in _tick_sim_world:
         driver_mat = _tick_sim_world[driver_key]
     else:
         driver_mat = arm_ob.matrix_world @ driver_pb.matrix @ _get_static(arm_ob, driver_pb).offset_mat
 
-    loff = getattr(entry, 'lookat_offset', None)
-    if loff is not None:
-        target_pos = (driver_mat @ Vector((loff[0], loff[1], loff[2], 1.0))).to_3d()
-    else:
-        target_pos = driver_mat.to_translation()
+    loff = entry.aim_offset
+    target_pos = (driver_mat @ Vector((loff[0], loff[1], loff[2], 1.0))).to_3d()
 
     aim_vector = target_pos - aim_world_position
     if aim_vector.length > 1e-6:
@@ -1074,13 +1071,14 @@ def _sim_proc_entries(arm_ob, scene, is_s2: bool, arm_world_inv: Matrix) -> int:
 
     for entry_idx, entry in enumerate(arm_ob.data.vs.proc_bones):
         is_lookat = getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT'
-        if not entry.helper_bone or not entry.driver_bone:
+        driver_name = entry.aim_bone if is_lookat else entry.driver_bone
+        if not entry.helper_bone or not driver_name:
             continue
         if not is_lookat and not entry.action:
             continue
         if entry.helper_bone not in arm_ob.pose.bones:
             continue
-        if entry.driver_bone not in arm_ob.pose.bones:
+        if driver_name not in arm_ob.pose.bones:
             continue
         if entry.helper_bone in jiggle_helpers:
             continue

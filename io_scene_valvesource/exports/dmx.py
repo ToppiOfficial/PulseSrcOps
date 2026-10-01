@@ -295,19 +295,17 @@ class DmxWriter:
         proc_bones_list = list(getattr(avs, 'proc_bones', [])) if avs else []
         bone_elements = self.bone_elements
 
-        # LOOKAT aim targets: non-zero offsets get a {base}_lookat[idx] DmeAttachment in the
-        # driver bone's local space; a zero offset aims the DmeAimAtBone at the driver joint
-        # directly. Naming/dedup mirror PrefabExporter so QCI and DME produce the same names.
+        # LOOKAT aim targets: Point targets and non-zero offsets get a {base}_lookat[idx]
+        # DmeAttachment in the aim bone's local space; otherwise the DmeAimAtBone aims at
+        # the joint directly. Naming/dedup mirror PrefabExporter so QCI and DME produce the same names.
         lookat_by_driver: dict[str, list[tuple]] = {}
         for entry in proc_bones_list:
             if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
-            dn = entry.driver_bone
-            if not dn or dn not in bone_elements:
+            dn = entry.aim_bone
+            if not dn or dn not in bone_elements or not entry.aim_needs_attachment:
                 continue
-            off = tuple(entry.lookat_offset)
-            if off == (0.0, 0.0, 0.0):
-                continue
+            off = entry.aim_offset
             lookat_by_driver.setdefault(dn, [])
             if off not in lookat_by_driver[dn]:
                 lookat_by_driver[dn].append(off)
@@ -346,7 +344,8 @@ class DmxWriter:
             parent_db = helper_db.parent if helper_db else None
             while parent_db and parent_db.name not in self.exportable_boneNames:
                 parent_db = parent_db.parent
-            parent_bname = parent_db.name if parent_db else entry.driver_bone
+            is_lookat = getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT'
+            parent_bname = parent_db.name if parent_db else (entry.aim_bone if is_lookat else entry.driver_bone)
 
             bone_elem = bone_elements[helper_name]
             proc_type = getattr(entry, 'proc_type', 'TRIGGER')
@@ -358,10 +357,10 @@ class DmxWriter:
                         parent_bname):
                     bone_elem.type = "DmeQuatInterpBone"
             else:
-                off = tuple(entry.lookat_offset)
-                aim_target = lookat_name_map.get((entry.driver_bone, off))
+                ab = entry.aim_bone
+                aim_target = lookat_name_map.get((ab, entry.aim_offset))
                 if aim_target is None:
-                    aim_target = self.exportable_boneNames.get(entry.driver_bone, entry.driver_bone) if entry.driver_bone else None
+                    aim_target = self.exportable_boneNames.get(ab, ab) if ab else None
                 parent_control = self.exportable_boneNames.get(parent_bname, "")
                 if _proceduralbone.write_dme_aimat_attrs(
                         bone_elem, self.armature_src, entry, aim_target,
@@ -681,12 +680,13 @@ class DmxWriter:
 
             deform_layer = bm.verts.layers.deform.active
             if deform_layer:
-                for cloth_enable in (g for g in ob.vertex_groups if re.match(r"cloth_enable\$[0-9]+", g.name)):
-                    fmt.append(cloth_enable.name)
-                    values = [v[deform_layer].get(cloth_enable.index, 0) for v in bm.verts]
+                # Any group named "<name>$<N>" is written as a per-vertex float stream
+                for vgroup in (g for g in ob.vertex_groups if re.fullmatch(r".+\$[0-9]+", g.name)):
+                    fmt.append(vgroup.name)
+                    values = [v[deform_layer].get(vgroup.index, 0) for v in bm.verts]
                     value_set = ordered_set.OrderedSet(values)
-                    vertex_data[cloth_enable.name] = datamodel.make_array(value_set, float)
-                    vertex_data[cloth_enable.name + "Indices"] = datamodel.make_array(
+                    vertex_data[vgroup.name] = datamodel.make_array(value_set, float)
+                    vertex_data[vgroup.name + "Indices"] = datamodel.make_array(
                         (value_set.index(values[i]) for i in Indices), int
                     )
 

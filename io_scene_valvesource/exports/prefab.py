@@ -267,10 +267,10 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         for entry in getattr(avs, 'proc_bones', []):
             if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
-            driver_name = entry.driver_bone
+            driver_name = entry.aim_bone
             if not driver_name or not arm.data.bones.get(driver_name):
                 continue
-            off = tuple(entry.lookat_offset)
+            off = entry.aim_offset
             lookat_by_driver.setdefault(driver_name, [])
             if off not in lookat_by_driver[driver_name]:
                 lookat_by_driver[driver_name].append(off)
@@ -501,10 +501,10 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         for entry in entries:
             if getattr(entry, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
-            dn = entry.driver_bone
+            dn = entry.aim_bone
             if not dn or not arm.data.bones.get(dn):
                 continue
-            off = tuple(entry.lookat_offset)
+            off = entry.aim_offset
             lookat_by_driver.setdefault(dn, [])
             if off not in lookat_by_driver[dn]:
                 lookat_by_driver[dn].append(off)
@@ -523,7 +523,8 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         preserved = tuple(p.lower() for p in get_preserved_bone_prefixes())
         warned_dotnames: set[str] = set()
         for entry in entries:
-            for bname in (entry.helper_bone, entry.driver_bone):
+            is_lookat = getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT'
+            for bname in (entry.helper_bone, entry.aim_bone if is_lookat else entry.driver_bone):
                 bone = arm.data.bones.get(bname) if bname else None
                 if not bone:
                     continue
@@ -543,7 +544,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         for entry_idx, entry in enumerate(entries):
             proc_type   = getattr(entry, 'proc_type', 'TRIGGER')
             helper_name = entry.helper_bone
-            driver_name = entry.driver_bone
+            driver_name = entry.aim_bone if proc_type == 'LOOKAT' else entry.driver_bone
 
             if not driver_name or not arm.data.bones.get(driver_name):
                 continue
@@ -623,8 +624,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 lines.append('')
 
             elif proc_type == 'LOOKAT':
-                off           = tuple(entry.lookat_offset)
-                target_attach = lookat_name_map.get((driver_name, off))
+                target_attach = lookat_name_map.get((driver_name, entry.aim_offset))
                 if not target_attach:
                     continue
 

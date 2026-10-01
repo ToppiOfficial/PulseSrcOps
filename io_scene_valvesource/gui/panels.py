@@ -568,8 +568,26 @@ class SMD_PT_ProcBones(Properties_Panel):
                     nav.enabled = valid
                     box.prop(entry, 'trigger_preview_tol')
             elif entry.proc_type == 'LOOKAT':
-                box.prop_search(entry, 'driver_bone', arm_data, 'bones',
-                                text=get_id('prop_proc_bone_lookat_target'))
+                box.row().prop(entry, 'lookat_target_type', expand=True)
+                target_type = entry.lookat_target_type
+                if target_type == 'ATTACHMENT':
+                    box.prop(entry, 'lookat_attachment', text=get_id('prop_proc_bone_lookat_target_attachment'))
+                    if not entry.lookat_attachment:
+                        box.label(text=get_id('warn_lookat_attachment_invalid'), icon='ERROR')
+                elif target_type == 'POINT':
+                    point_bone_label = get_id('prop_proc_bone_lookat_target' if entry.lookat_point_from_helper
+                                              else 'prop_proc_bone_lookat_relative_bone')
+                    box.prop_search(entry, 'lookat_point_bone', arm_data, 'bones',
+                                    text=point_bone_label)
+                    if not entry.lookat_point_bone:
+                        box.label(text=get_id('warn_lookat_point_bone_required'), icon='ERROR')
+                    box.prop(entry, 'lookat_point_from_helper')
+                    split = box.split(factor=0.30)
+                    split.label(text=get_id('prop_proc_bone_lookat_point'))
+                    split.prop(entry, 'lookat_point', text='')
+                else:
+                    box.prop_search(entry, 'driver_bone', arm_data, 'bones',
+                                    text=get_id('prop_proc_bone_lookat_target'))
                 col = box.column(align=True)
 
                 split = col.split(factor=0.22)
@@ -580,11 +598,11 @@ class SMD_PT_ProcBones(Properties_Panel):
                 split.label(text=get_id('prop_proc_bone_lookat_up_axis'))
                 split.row().prop(entry, 'lookat_up_axis', expand=True)
 
-                col.separator()
-
-                split = col.split(factor=0.30)
-                split.label(text=get_id('prop_proc_bone_lookat_offset'))
-                split.prop(entry, 'lookat_offset', text='')
+                if target_type == 'BONE':
+                    col.separator()
+                    split = col.split(factor=0.30)
+                    split.label(text=get_id('prop_proc_bone_lookat_offset'))
+                    split.prop(entry, 'lookat_offset', text='')
 
 
 class SMD_PT_Bone(Properties_Panel):

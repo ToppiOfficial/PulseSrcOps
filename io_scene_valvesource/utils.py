@@ -1418,7 +1418,7 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
         result.append(('JIGGLEBONES', len(jiggles)))
 
     # LOOKAT proc bones surface as attachments only where the exporter writes one:
-    # Source 2 file mode never does; DME mode only for a non-zero offset; QCI mode once
+    # Source 2 file mode never does; DME mode only for a Point or non-zero offset; QCI mode once
     # per unique (driver, offset). Mirrors DmxWriter._write_procedural_bones /
     # PrefabExporter._collect_lookat_attachments.
     attachments = get_attachments(arm)
@@ -1427,13 +1427,12 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
         for e in proc_entries:
             if getattr(e, 'proc_type', 'TRIGGER') != 'LOOKAT':
                 continue
-            dn = e.driver_bone
+            dn = e.aim_bone
             if not dn or not arm.data.bones.get(dn):
                 continue
-            off = tuple(e.lookat_offset)
-            if dme and off == (0.0, 0.0, 0.0):
+            if dme and not e.aim_needs_attachment:
                 continue
-            lookat_pairs.add((dn, off))
+            lookat_pairs.add((dn, e.aim_offset))
     if attachments or lookat_pairs:
         result.append(('ATTACHMENTS', len(attachments) + len(lookat_pairs)))
 

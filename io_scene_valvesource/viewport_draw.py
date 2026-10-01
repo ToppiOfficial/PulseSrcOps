@@ -737,18 +737,20 @@ def _draw_active_proc_bone_preview(context, ob):
         return
 
     entry = avs.proc_bones[idx]
-    if not entry.helper_bone or not entry.driver_bone:
+    is_lookat = getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT'
+    driver_name = entry.aim_bone if is_lookat else entry.driver_bone
+    if not entry.helper_bone or not driver_name:
         return
 
     helper_pb = ob.pose.bones.get(entry.helper_bone)
-    driver_pb = ob.pose.bones.get(entry.driver_bone)
+    driver_pb = ob.pose.bones.get(driver_name)
     if not driver_pb:
         return
 
     if helper_pb is not None and not _bone_visible(helper_pb.bone):
         return
 
-    if getattr(entry, 'proc_type', 'TRIGGER') == 'LOOKAT':
+    if is_lookat:
         _draw_proc_lookat_preview(context, ob, entry, helper_pb, driver_pb)
     else:
         _draw_proc_trigger_preview(context, ob, entry, helper_pb, driver_pb)
@@ -769,8 +771,8 @@ def _draw_proc_lookat_preview(context, ob, entry, helper_pb, driver_pb):
     else:
         driver_mat = ob.matrix_world @ driver_pb.matrix
     arm_scale  = Vector((driver_mat[0][0], driver_mat[1][0], driver_mat[2][0])).length
-    off        = getattr(entry, 'lookat_offset', None)
-    has_offset = off is not None and not (abs(off[0]) < 1e-9 and abs(off[1]) < 1e-9 and abs(off[2]) < 1e-9)
+    off        = entry.aim_offset
+    has_offset = not (abs(off[0]) < 1e-9 and abs(off[1]) < 1e-9 and abs(off[2]) < 1e-9)
 
     if has_offset:
         aim_target  = (driver_mat @ Vector((off[0], off[1], off[2], 1.0))).to_3d()
@@ -808,7 +810,7 @@ def _draw_proc_lookat_preview(context, ob, entry, helper_pb, driver_pb):
 
     pos_2d = view3d_utils.location_3d_to_region_2d(region, rv3d, aim_target)
     if pos_2d:
-        label = entry.driver_bone + (" + offset" if has_offset else "")
+        label = entry.aim_bone + (" + offset" if has_offset else "")
         _proc_label_queue.append((pos_2d.x + 6, pos_2d.y + 6, tr, tg, tb, label))
 
 

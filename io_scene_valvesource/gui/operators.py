@@ -1,6 +1,6 @@
 import bpy, math, os, re as _re
 from bpy.types import Operator, MeshLoopColorLayer, LoopColors
-from bpy.props import FloatProperty, BoolProperty, IntProperty, EnumProperty, StringProperty
+from bpy.props import FloatProperty, BoolProperty, IntProperty, EnumProperty, StringProperty, FloatVectorProperty
 from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, vertex_float_maps,
                      get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta,
                      get_addon_prefs)
@@ -599,7 +599,7 @@ def _blend_object_names(blend_path) -> list:
 # ID collections an appended object can pull in as dependencies.
 _APPEND_DEP_COLLS = ('objects', 'meshes', 'armatures', 'curves', 'materials',
                      'images', 'textures', 'node_groups', 'actions', 'shape_keys',
-                     'libraries')
+                     'brushes', 'palettes', 'collections', 'libraries')
 
 
 def _snapshot_ids() -> set:
@@ -617,7 +617,14 @@ def _purge_new_orphans(before: set):
         for name in _APPEND_DEP_COLLS:
             coll = getattr(bpy.data, name)
             for id in list(coll):
-                if id.as_pointer() not in before and id.users == 0:
+                if id.as_pointer() in before:
+                    continue
+                # Asset marking and fake users each hold a reference that would
+                # otherwise keep the datablock (and its Asset Browser entry) alive.
+                if id.asset_data:
+                    id.asset_clear()
+                id.use_fake_user = False
+                if id.users == 0:
                     coll.remove(id)
                     removed = True
         if not removed:
@@ -1675,12 +1682,18 @@ class SMD_OT_ProcBoneAddLookAt(Operator):
         items=[
             ('BONE',       "Bone",       "Aim at another bone",          'BONE_DATA',    0),
             ('ATTACHMENT', "Attachment", "Aim at an attachment (Empty)", 'EMPTY_ARROWS', 1),
+            ('POINT',      "Point",      "Aim at an XYZ point relative to a bone, exported as an attachment", 'ORIENTATION_GLOBAL', 2),
         ],
         default='BONE',
     )
     target_bone       : StringProperty(name=get_id('prop_proc_bone_lookat_target'))
     target_attachment : StringProperty(name=get_id('prop_proc_bone_lookat_target_attachment'),
                                        description=get_id('prop_proc_bone_lookat_target_attachment_tip'))
+    target_point : FloatVectorProperty(name=get_id('prop_proc_bone_lookat_point'),
+                                       description=get_id('prop_proc_bone_lookat_point_tip'),
+                                       size=3, subtype='XYZ')
+    point_from_helper : BoolProperty(name=get_id('prop_proc_bone_lookat_point_from_helper'),
+                                     description=get_id('prop_proc_bone_lookat_point_from_helper_tip'))
     aim_axis : EnumProperty(
         name=get_id('prop_proc_bone_lookat_aim_axis'),
         description=get_id('prop_proc_bone_lookat_aim_axis_tip'),
@@ -1722,12 +1735,16 @@ class SMD_OT_ProcBoneAddLookAt(Operator):
         col = layout.column(align=True)
         col.prop(self, 'target_type', expand=True)
 
-        if self.target_type == 'BONE':
+        if self.target_type in {'BONE', 'POINT'}:
+            label = get_id('prop_proc_bone_lookat_target' if self.target_type != 'POINT' or self.point_from_helper
+                           else 'prop_proc_bone_lookat_relative_bone')
             if arm_data:
-                col.prop_search(self, 'target_bone', arm_data, 'bones',
-                                text=get_id('prop_proc_bone_lookat_target'))
+                col.prop_search(self, 'target_bone', arm_data, 'bones', text=label)
             else:
-                col.prop(self, 'target_bone')
+                col.prop(self, 'target_bone', text=label)
+            if self.target_type == 'POINT':
+                col.prop(self, 'point_from_helper')
+                col.prop(self, 'target_point', text='')
         else:
             col.prop_search(self, 'target_attachment', bpy.data, 'objects',
                             text=get_id('prop_proc_bone_lookat_target_attachment'))
@@ -1753,8 +1770,8 @@ class SMD_OT_ProcBoneAddLookAt(Operator):
             return {'CANCELLED'}
         avs = arm_ob.data.vs
 
-        offset = None
-        if self.target_type == 'BONE':
+        att_ob = None
+        if self.target_type in {'BONE', 'POINT'}:
             target_bone_name = self.target_bone
             if not target_bone_name or target_bone_name not in arm_ob.data.bones:
                 self.report({'ERROR'}, "Pick a valid target bone")
@@ -1765,14 +1782,6 @@ class SMD_OT_ProcBoneAddLookAt(Operator):
                 self.report({'ERROR'}, get_id('warn_lookat_attachment_invalid'))
                 return {'CANCELLED'}
             target_bone_name = att_ob.parent_bone
-            driver_pb  = arm_ob.pose.bones[target_bone_name]
-            driver_mat = (arm_ob.matrix_world @ driver_pb.matrix
-                         @ _procbones_sim._get_export_offset_mat(driver_pb))
-            from mathutils import Vector
-            world_t = att_ob.matrix_world.translation
-            local   = (driver_mat.inverted_safe()
-                      @ Vector((world_t.x, world_t.y, world_t.z, 1.0))).to_3d()
-            offset  = (local.x, local.y, local.z)
 
         added = 0
         for pb in bones:
@@ -1781,11 +1790,18 @@ class SMD_OT_ProcBoneAddLookAt(Operator):
             entry             = avs.proc_bones.add()
             entry.proc_type   = 'LOOKAT'
             entry.helper_bone = pb.name
-            entry.driver_bone = target_bone_name
             entry.lookat_aim_axis = self.aim_axis
             entry.lookat_up_axis  = self.up_axis
-            if offset is not None:
-                entry.lookat_offset = offset
+            if self.target_type == 'POINT':
+                entry.lookat_target_type = 'POINT'
+                entry.lookat_point_bone  = target_bone_name
+                entry.lookat_point       = self.target_point
+                entry.lookat_point_from_helper = self.point_from_helper
+            elif att_ob:
+                entry.lookat_target_type = 'ATTACHMENT'
+                entry.lookat_attachment  = att_ob
+            else:
+                entry.driver_bone = target_bone_name
             added += 1
 
         if added == 0:
@@ -1822,6 +1838,11 @@ class SMD_OT_ProcBoneDuplicate(Operator):
         dst.lookat_aim_axis  = src.lookat_aim_axis
         dst.lookat_up_axis   = src.lookat_up_axis
         dst.lookat_offset[:] = src.lookat_offset[:]
+        dst.lookat_target_type = src.lookat_target_type
+        dst.lookat_point_bone  = src.lookat_point_bone
+        dst.lookat_point[:]    = src.lookat_point[:]
+        dst.lookat_point_from_helper = src.lookat_point_from_helper
+        dst.lookat_attachment  = src.lookat_attachment
         avs.proc_bones_index = len(avs.proc_bones) - 1
         return {'FINISHED'}
 
@@ -2024,6 +2045,11 @@ def _proc_entry_to_dict(entry) -> dict:
         'lookat_aim_axis':  set(entry.lookat_aim_axis),
         'lookat_up_axis':   set(entry.lookat_up_axis),
         'lookat_offset':    tuple(entry.lookat_offset),
+        'lookat_target_type': entry.lookat_target_type,
+        'lookat_point_bone':  entry.lookat_point_bone,
+        'lookat_point':       tuple(entry.lookat_point),
+        'lookat_point_from_helper': entry.lookat_point_from_helper,
+        'lookat_attachment':  entry.lookat_attachment.name if entry.lookat_attachment else '',
     }
 
 
@@ -2041,6 +2067,11 @@ def _proc_entry_from_dict(entry, d: dict):
     entry.lookat_aim_axis  = d['lookat_aim_axis']
     entry.lookat_up_axis   = d['lookat_up_axis']
     entry.lookat_offset[:] = d['lookat_offset']
+    entry.lookat_target_type = d['lookat_target_type']
+    entry.lookat_point_bone  = d['lookat_point_bone']
+    entry.lookat_point[:]    = d['lookat_point']
+    entry.lookat_point_from_helper = d.get('lookat_point_from_helper', False)
+    entry.lookat_attachment  = bpy.data.objects.get(d['lookat_attachment'])
 
 
 class SMD_OT_ProcBoneCopyActive(Operator):

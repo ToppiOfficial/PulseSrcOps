@@ -2568,8 +2568,36 @@ _data = {
         'ja': "ターゲットタイプ",
     },
     'prop_proc_bone_lookat_target_type_tip': {
-        'en': "Whether the LookAt target is a bone or an attachment (Empty parented to a bone)",
-        'ja': "LookAtターゲットがボーンか、アタッチメント（ボーンに親付けされたEmpty）かを指定します。",
+        'en': "What the LookAt aims at: a bone, an attachment (Empty parented to a bone), or an XYZ point relative to a bone",
+        'ja': "LookAtの対象：ボーン、アタッチメント（ボーンに親付けされたEmpty）、またはボーン基準のXYZポイント",
+    },
+    'prop_proc_bone_lookat_point': {
+        'en': "Target Point",
+        'ja': "ターゲットポイント",
+    },
+    'prop_proc_bone_lookat_point_tip': {
+        'en': "XYZ position measured from the helper or target bone. Exported as an attachment on the target bone",
+        'ja': "ヘルパーまたはターゲットボーンを基準にしたXYZ位置。ターゲットボーンのアタッチメントとしてエクスポートされます。",
+    },
+    'prop_proc_bone_lookat_point_from_helper': {
+        'en': "Point Relative to Helper",
+        'ja': "ポイントをヘルパーボーン基準にする",
+    },
+    'prop_proc_bone_lookat_point_from_helper_tip': {
+        'en': "Measure the target point from the helper bone in its rest pose. Export converts it to an offset on the target bone",
+        'ja': "レストポーズのヘルパーボーンを基準にターゲットポイントを指定し、エクスポート時にターゲットボーンのオフセットへ変換します",
+    },
+    'prop_proc_bone_lookat_relative_bone': {
+        'en': "Relative Bone",
+        'ja': "相対ボーン",
+    },
+    'prop_proc_bone_lookat_relative_bone_tip': {
+        'en': "Bone that receives the exported target attachment. Required",
+        'ja': "エクスポートしたターゲットアタッチメントを配置するボーン（必須）",
+    },
+    'warn_lookat_point_bone_required': {
+        'en': "Pick a relative bone for the target point",
+        'ja': "ターゲットポイントの相対ボーンを選択してください",
     },
     'prop_proc_bone_lookat_target_attachment': {
         'en': "Target Attachment",
