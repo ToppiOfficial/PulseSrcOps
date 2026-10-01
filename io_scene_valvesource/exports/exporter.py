@@ -1,4 +1,4 @@
-import bpy, bmesh, collections, dataclasses, re, typing, os
+import bpy, bmesh, collections, dataclasses, gc, re, typing, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from mathutils import Vector, Matrix, Euler
@@ -83,6 +83,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         ops.ed.undo_push(message=self.bl_label)
 
+        # The export allocates millions of short-lived objects; cyclic GC passes over them
+        # cost noticeable pauses and reclaim nothing until the export ends anyway.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
         try:
             context.tool_settings.use_keyframe_insert_auto = False
             context.tool_settings.use_keyframe_insert_keyingset = False
@@ -121,6 +125,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.errorReport(get_id("exporter_report_aborted", True).format(self.files_exported, self.elapsed_time()))
 
         finally:
+            if gc_was_enabled:
+                gc.enable()
             end_bone_exportname_cache()
             ops.ed.undo_push(message=self.bl_label)
             if bpy.app.debug_value <= 1:

@@ -20,7 +20,7 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 #  THE SOFTWARE.
 
-import struct, array, io, binascii, collections, uuid
+import struct, array, io, binascii, collections, uuid, itertools
 from struct import unpack,calcsize
 
 header_format = "<!-- dmx encoding {:s} {:d} format {:s} {:d} -->"
@@ -277,6 +277,19 @@ def make_array(l,t):
 		raise TypeError("{} is not a valid datamodel attribute type".format(t))
 	at = _get_array_type(t)
 	return at(l)
+
+def make_vector_array(rows,t):
+	'''make_array for vector types without per-item validation; rows must already hold the right number of floats.'''
+	if not issubclass(t,_Vector):
+		raise TypeError("{} is not a vector type".format(t))
+	out = _get_array_type(t)()
+	new, extend = list.__new__, list.extend
+	def build(row):
+		v = new(t)
+		extend(v,row)
+		return v
+	extend(out,map(build,rows))
+	return out
 		
 class AttributeError(KeyError):
 	'''Raised when an attribute is not found on an element. Essentially a KeyError, but subclassed because it's normally an unrecoverable data issue.'''
@@ -706,7 +719,9 @@ class DataModel:
 			self._writeString(value, True if is_array else None)
 		elif t == Element:
 			self.out.write(bytes.join(b'',[item.tobytes() if item else struct.pack("i",-1) for item in value]))
-		elif issubclass(t,(_Vector,Matrix, Time)):
+		elif issubclass(t,_Vector):
+			self.out.write(array.array(t.type_str[0], itertools.chain.from_iterable(value)).tobytes())
+		elif issubclass(t,(Matrix, Time)):
 			self.out.write(bytes.join(b'',[item.tobytes() for item in value]))
 		
 		elif t == bool:

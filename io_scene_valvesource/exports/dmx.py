@@ -20,6 +20,9 @@ def _read_ints(collection, attr):
     collection.foreach_get(attr, buf)
     return buf
 
+def _rows(buf, width):
+    return np.frombuffer(buf, dtype=np.float32).reshape(-1, width).tolist()
+
 def _dedup_pairs(flat):
     # Same first-seen order and indices OrderedSet.add would give, without a Vector2 per loop.
     seen = {}
@@ -684,7 +687,7 @@ class DmxWriter:
                 nrm = _read_floats(mesh.corner_normals, "vector", 3)
             else:
                 nrm = _read_floats(mesh.loops, "normal", 3)
-            norms = list(zip(nrm[0::3], nrm[1::3], nrm[2::3]))
+            norms = _rows(nrm, 3)
             texco, texcoIndices = _dedup_pairs(_read_floats(uv_layer, "uv", 2))
             positions = _read_floats(mesh.vertices, "co", 3)
             uv_flat = {uv.name: _read_floats(uv.data, "uv", 2) for uv in mesh.uv_layers}
@@ -703,8 +706,7 @@ class DmxWriter:
                     bm.verts.ensure_lookup_table()
                 return bm
 
-            vertex_data[keywords["pos"]] = datamodel.make_array(
-                zip(positions[0::3], positions[1::3], positions[2::3]), datamodel.Vector3)
+            vertex_data[keywords["pos"]] = datamodel.make_vector_array(_rows(positions, 3), datamodel.Vector3)
             vertex_data[keywords["pos"] + "Indices"] = datamodel.make_array(Indices, int)
 
             if source2 and src_mt != 'COLLISION':
@@ -712,7 +714,7 @@ class DmxWriter:
                 bench.report("Source 2 vertex data")
             else:
                 fmt.append("textureCoordinates")
-                vertex_data["textureCoordinates"] = datamodel.make_array(texco, datamodel.Vector2)
+                vertex_data["textureCoordinates"] = datamodel.make_vector_array(texco, datamodel.Vector2)
                 vertex_data["textureCoordinatesIndices"] = datamodel.make_array(texcoIndices, int)
 
             if have_weightmap:
@@ -742,7 +744,7 @@ class DmxWriter:
                 for vgroup in cloth_groups:
                     fmt.append(vgroup.name + "$0")
 
-            vertex_data[keywords["norm"]] = datamodel.make_array(norms, datamodel.Vector3)
+            vertex_data[keywords["norm"]] = datamodel.make_vector_array(norms, datamodel.Vector3)
             vertex_data[keywords["norm"] + "Indices"] = datamodel.make_array(range(len(norms)), int)
 
             if cloth_groups:
@@ -788,12 +790,13 @@ class DmxWriter:
 
         for blender_name, dmx_name in uv_layers_to_export:
             uv_set, uv_indices = _dedup_pairs(uv_flat[blender_name])
-            vertex_data[dmx_name] = datamodel.make_array(uv_set, datamodel.Vector2)
+            vertex_data[dmx_name] = datamodel.make_vector_array(uv_set, datamodel.Vector2)
             vertex_data[dmx_name + "Indices"] = datamodel.make_array(uv_indices, int)
             fmt.append(dmx_name)
 
         def make_vertex_layer(name, values, array_type):
-            vertex_data[name] = datamodel.make_array(values, array_type)
+            make = datamodel.make_vector_array if array_type is datamodel.Vector4 else datamodel.make_array
+            vertex_data[name] = make(values, array_type)
             vertex_data[name + "Indices"] = loop_indices
             fmt.append(name)
 
