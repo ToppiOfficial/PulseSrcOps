@@ -7,6 +7,7 @@ and `properties`.
 
 import os
 import random
+from itertools import chain
 
 import bpy
 import bmesh
@@ -526,16 +527,33 @@ _BM_LAYER_FOR_KIND = {
 
 
 class _LayerBinding:
-    __slots__ = ('layer', 'indices', 'values', 'is_uv')
+    __slots__ = ('layer', 'name', 'kind', 'indices', 'values')
 
-    def __init__(self, layer, indices, values, is_uv):
+    def __init__(self, layer, kind, indices, values):
         self.layer = layer
+        self.name = layer.name
+        self.kind = kind
         self.indices = indices
         self.values = values
-        self.is_uv = is_uv
 
     def get_loop_value(self, loop_index):
         return self.values[self.indices[loop_index]]
+
+
+def _loop_values(layer, loops) -> list:
+    values, indices = layer.values, layer.indices
+    return [values[indices[loop]] for loop in loops]
+
+
+def _set_corner_layer(mesh, binding, loops) -> None:
+    values = _loop_values(binding, loops)
+    if binding.kind == 'UV':
+        mesh.uv_layers[binding.name].data.foreach_set("uv", list(chain.from_iterable(values)))
+    elif binding.kind == 'COLOR':
+        # BMesh colour layers are byte colours written without colour management
+        mesh.attributes[binding.name].data.foreach_set("color_srgb", list(chain.from_iterable(values)))
+    else:
+        mesh.attributes[binding.name].data.foreach_set("value", values)
 
 
 def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
@@ -567,21 +585,20 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     bm.verts.ensure_lookup_table()
     bench.report("verts")
 
-    bindings: list[_LayerBinding] = []
-    normals_layer_name = None
+    # Layers are created here so the attribute set matches BMesh's, but their values are
+    # written in bulk after to_mesh, from the DMX loop index of every face that was built.
+    bulk_bindings: list[_LayerBinding] = []
+    string_bindings: list[_LayerBinding] = []
+    normals_layer = None
     for ilayer in imesh.loop_layers:
         if ilayer.kind == 'NORMAL':
-            # Held as a float_vector attribute, applied via normals_split_custom_set
-            # once the bmesh has been converted.
-            layer = bm.loops.layers.float_vector.new(ilayer.name)
-            normals_layer_name = layer.name
-            bindings.append(_LayerBinding(layer, ilayer.indices, ilayer.values, False))
+            normals_layer = ilayer
             continue
         if ilayer.uneditable:
             ctx.warning(f"Vertex data '{ilayer.name}' was imported but cannot be edited in Blender")
         layer = _BM_LAYER_FOR_KIND[ilayer.kind](bm).new(ilayer.name)
-        bindings.append(_LayerBinding(layer, ilayer.indices, ilayer.values,
-                                      ilayer.kind == 'UV'))
+        binding = _LayerBinding(layer, ilayer.kind, ilayer.indices, ilayer.values)
+        (string_bindings if ilayer.kind == 'STRING' else bulk_bindings).append(binding)
 
     deform_group_names = ordered_set.OrderedSet()
     if imesh.has_weightmap:
@@ -610,6 +627,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     bench.report("materials")
 
     deform_layer = bm.verts.layers.deform.active
+    built_loops: list[int] = []
     for iface in imesh.faces:
         verts = [bm.verts[imesh.position_indices[loop]] for loop in iface.loops]
         try:
@@ -632,14 +650,11 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
                 continue
         face.smooth = True
         face.material_index = slot_for_face_set[iface.face_set]
-        for binding in bindings:
+        built_loops.extend(iface.loops)
+        for binding in string_bindings:
             for i, loop in enumerate(face.loops):
-                value = binding.get_loop_value(iface.loops[i])
-                if binding.is_uv:
-                    loop[binding.layer].uv = value
-                else:
-                    loop[binding.layer] = value
-    bench.report(f"faces + loop layers ({len(bindings)})")
+                loop[binding.layer] = binding.get_loop_value(iface.loops[i]).encode()
+    bench.report("faces")
 
     if imesh.cloth_groups:
         deformLayer = bm.verts.layers.deform.verify()
@@ -689,8 +704,10 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
 
     bm.to_mesh(ob.data)
     del bm
+    for binding in bulk_bindings:
+        _set_corner_layer(ob.data, binding, built_loops)
     ob.data.update()
-    bench.report("to_mesh")
+    bench.report(f"to_mesh + loop layers ({len(bulk_bindings)})")
     if ob.parent_bone:
         # A bone parent is deliberate structure, so the placement stays on the object and
         # the data stays raw - the bone's rest matrix already carries the up-axis correction.
@@ -714,13 +731,13 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
         ob.data.update()
     bench.report("transform")
 
-    if normals_layer_name:
-        # Set after the data transform, so rotate the stored normals to match it
-        normalsAttr = ob.data.attributes[normals_layer_name]
-        rot = data_transform.to_3x3() if data_transform is not None else None
-        ob.data.normals_split_custom_set(
-            [(rot @ v.vector if rot else v.vector) for v in normalsAttr.data])
-        ob.data.attributes.remove(ob.data.attributes[normals_layer_name])
+    if normals_layer:
+        # Set after the data transform, so rotate the DMX normals to match it
+        normals = _loop_values(normals_layer, built_loops)
+        if data_transform is not None:
+            rot = data_transform.to_3x3()
+            normals = [rot @ Vector(n) for n in normals]
+        ob.data.normals_split_custom_set(normals)
     bench.report("custom normals")
 
     if imesh.balance:
