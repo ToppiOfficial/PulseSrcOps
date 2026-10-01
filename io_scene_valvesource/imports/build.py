@@ -15,7 +15,7 @@ from bpy.app.translations import pgettext
 from mathutils import Matrix, Vector
 
 from .. import flex, ordered_set
-from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id,
+from ..utils import (REF, ANIM, PHYS, KeyFrame, get_id, BenchMarker,
                      channelBagForNewActionSlot, find_or_add_material_path)
 from .prefab import wants_prefab
 
@@ -384,6 +384,10 @@ def build_skeleton(ctx, smd, skel, target_arm, model_name: str) -> dict:
             smd.boneIDs[ibone.source_id] = bone.name
             smd.boneTransformIDs[ibone.transform_id] = bone.name
 
+        if skel.attachments and wants_prefab(ctx, 'ATTACHMENTS'):
+            # Edit bones only become real bones on leaving edit mode; parenting to them
+            # earlier makes the next depsgraph rebuild fail to find the parent bone.
+            ops.object.mode_set(mode='OBJECT')
         build_attachments(ctx, smd, skel, bone_names)
 
     elif skel.attachments and wants_prefab(ctx, 'ATTACHMENTS'):
@@ -553,6 +557,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
             amod.use_bone_envelopes = False
 
     print(f"Importing mesh \"{imesh.name}\"")
+    bench = BenchMarker(2)
 
     bm = bmesh.new()
     bm.from_mesh(ob.data)
@@ -560,6 +565,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     for pos in imesh.positions:
         bm.verts.new(Vector(pos))
     bm.verts.ensure_lookup_table()
+    bench.report("verts")
 
     bindings: list[_LayerBinding] = []
     normals_layer_name = None
@@ -585,6 +591,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
                 vert[deformLayer][vg_index] = weight
         for name in imesh.group_names:
             deform_group_names.add(name)
+    bench.report("weights")
 
     # Face sets resolve to material slots by name, so two sets sharing a material
     # land in one slot.
@@ -600,6 +607,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
         if path_index is not None:
             mat.vs.material_path_index = str(path_index)
         slot_for_face_set.append(mat_ind)
+    bench.report("materials")
 
     deform_layer = bm.verts.layers.deform.active
     for iface in imesh.faces:
@@ -631,6 +639,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
                     loop[binding.layer].uv = value
                 else:
                     loop[binding.layer] = value
+    bench.report(f"faces + loop layers ({len(bindings)})")
 
     if imesh.cloth_groups:
         deformLayer = bm.verts.layers.deform.verify()
@@ -672,6 +681,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
 
     for groupName in deform_group_names:
         ob.vertex_groups.new(name=groupName)
+    bench.report("cloth + vertex groups")
 
     if imesh.parent_bone:
         ob.parent_type = 'BONE'
@@ -680,6 +690,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     bm.to_mesh(ob.data)
     del bm
     ob.data.update()
+    bench.report("to_mesh")
     if ob.parent_bone:
         # A bone parent is deliberate structure, so the placement stays on the object and
         # the data stays raw - the bone's rest matrix already carries the up-axis correction.
@@ -701,6 +712,7 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
     if data_transform is not None:
         ob.data.transform(data_transform)
         ob.data.update()
+    bench.report("transform")
 
     if normals_layer_name:
         # Set after the data transform, so rotate the stored normals to match it
@@ -709,12 +721,15 @@ def build_mesh(ctx, smd, imesh, corrective_separator: str = '_'):
         ob.data.normals_split_custom_set(
             [(rot @ v.vector if rot else v.vector) for v in normalsAttr.data])
         ob.data.attributes.remove(ob.data.attributes[normals_layer_name])
+    bench.report("custom normals")
 
     if imesh.balance:
         _build_balance_group(ob, *imesh.balance)
+        bench.report("balance group")
 
     if imesh.shapes:
         build_shape_keys(ob, imesh, corrective_separator, data_transform)
+        bench.report(f"shape keys ({len(imesh.shapes)})")
 
     return ob
 

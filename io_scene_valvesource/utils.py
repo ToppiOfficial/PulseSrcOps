@@ -18,7 +18,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
+import bpy, struct, time, collections, contextlib, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
 from typing import Optional
 # NB: `math` and `Optional` above are re-exported to every `from .utils import *`
 # consumer in exports/ - they are used there without a local import.
@@ -261,13 +261,13 @@ class State(metaclass=_StateMeta):
 
     @classmethod
     def hook_events(cls):
-        if not cls.update_scene in depsgraph_update_post:
+        if cls._onDepsgraphUpdate not in depsgraph_update_post:
             depsgraph_update_post.append(cls._onDepsgraphUpdate)
             load_post.append(cls._onLoad)
 
     @classmethod
     def unhook_events(cls):
-        if cls.update_scene in depsgraph_update_post:
+        if cls._onDepsgraphUpdate in depsgraph_update_post:
             depsgraph_update_post.remove(cls._onDepsgraphUpdate)
             load_post.remove(cls._onLoad)
 
@@ -2039,8 +2039,8 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         _bone_exportname_cache[cache_key] = export_names
     return export_names[data_bone.name]
 
-# Set only while an export runs; bone props can't change mid-export, so the per-armature
-# name map is safe to reuse there but not in the UI.
+# Set only while an export or a prefab import runs; bone props can't change during
+# either, so the per-armature name map is safe to reuse there but not in the UI.
 _bone_exportname_cache: dict | None = None
 
 def begin_bone_exportname_cache() -> None:
@@ -2050,6 +2050,17 @@ def begin_bone_exportname_cache() -> None:
 def end_bone_exportname_cache() -> None:
     global _bone_exportname_cache
     _bone_exportname_cache = None
+
+@contextlib.contextmanager
+def bone_exportname_cache_scope():
+    if _bone_exportname_cache is not None:
+        yield
+        return
+    begin_bone_exportname_cache()
+    try:
+        yield
+    finally:
+        end_bone_exportname_cache()
 
 def get_bone_matrix(data: bpy.types.PoseBone | mathutils.Matrix, bone: bpy.types.PoseBone | None = None,
                     rest_space : bool = False) -> mathutils.Matrix:

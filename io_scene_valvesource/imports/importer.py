@@ -18,7 +18,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, os
+import bpy, gc, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from bpy.props import StringProperty, CollectionProperty, BoolProperty, EnumProperty, FloatProperty
@@ -101,6 +101,19 @@ class ImporterBase(bpy.types.Operator, Logger):
         Logger.__init__(self)
 
     def execute(self, context):
+        # Imports allocate millions of short-lived objects; cyclic GC passes over them only
+        # add pauses, as on export.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            return self._execute(context)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+    def _execute(self, context):
+        # The instance is created when the file browser opens; time the import, not the browsing.
+        self.startTime = time.time()
         pre_obs = set(bpy.context.scene.objects)
         pre_eem = context.preferences.edit.use_enter_edit_mode
         pre_append = self.append
@@ -371,6 +384,7 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.ensureAnimationBonesValidated()
 
             ifile = _dmx.read_file(parsed)
+            bench.report("Parse")
             for version in parsed.version_bumps:
                 self._ensureSceneDmxVersion(version)
             for message in parsed.warnings:
@@ -380,14 +394,16 @@ class ImporterBase(bpy.types.Operator, Logger):
                 self, smd, ifile.skeleton, target_arm,
                 parsed.DmeModel.name or smd.jobName)
             _build.apply_rest_pose(self, smd, bone_matrices)
+            bench.report("Skeleton")
 
             if smd.a and smd.jobType != ANIM:
                 _prefab.apply_dmx_prefab_data(self, smd, parsed, ifile.skeleton)
+                bench.report("Prefab data")
 
-            imported_meshes = [
-                _build.build_mesh(self, smd, imesh, parsed.corrective_separator)
-                for imesh in ifile.meshes
-            ]
+            imported_meshes = []
+            for imesh in ifile.meshes:
+                imported_meshes.append(_build.build_mesh(self, smd, imesh, parsed.corrective_separator))
+                bench.report(f"Mesh {imesh.name}")
 
             # Flex controllers are global model data: apply them to every imported mesh
             # with shape keys, not just the last one parsed. When called from readQC,
@@ -408,15 +424,18 @@ class ImporterBase(bpy.types.Operator, Logger):
                 elif _combo_op:
                     for m in (flex_meshes or [smd.m]):
                         self._populate_dme_flex_from_dmx(m, _combo_op)
+                bench.report("Flex setup")
 
             if smd.jobType == ANIM:
                 _anim.build_anim(self, smd, ifile.anim)
+                bench.report("Animation")
 
         except datamodel.AttributeError as e:
             e.args = [f"Invalid DMX file: {e.args[0] if e.args else 'Unknown error'}"]
             raise
 
-        bench.report("DMX imported in")
+        if not bench.quiet:
+            print(f"- DMX import took {bench.total():.4f}s")
         return 1
 
     @classmethod

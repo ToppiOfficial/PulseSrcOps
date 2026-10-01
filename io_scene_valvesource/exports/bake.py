@@ -11,6 +11,16 @@ from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _
 from .geometry import EdgelineBuilder
 
 
+def _select_only_quiet(ob):
+    # select_only without operators: every operator call re-evaluates the whole scene.
+    if bpy.context.mode != "OBJECT":
+        ops.object.mode_set(mode="OBJECT")
+    for other in bpy.context.selected_objects:
+        other.select_set(False)
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
+
+
 class Baker:
     def __init__(self, exporter: "SmdExporter"):
         self._exporter = exporter
@@ -72,9 +82,11 @@ class Baker:
         if ob.data:
             ob.data = ob.data.copy()
 
-        if bpy.context.active_object:
-            ops.object.mode_set(mode="OBJECT")
-        select_only(ob)
+        # The copy's first evaluation is deferred to the mesh bake unless it is animated.
+        _select_only_quiet(ob)
+        driven = bool(ob.animation_data) or any(not c.mute for c in ob.constraints)
+        if driven:
+            bpy.context.view_layer.update()
 
         if hasShapes(ob):
             ob.active_shape_key_index = 0
@@ -98,7 +110,18 @@ class Baker:
                     con.mute = True
 
         # -- coordinate transform ---------------------------------------------
-        ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+        if driven:
+            ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+            world = ob.matrix_world
+        elif ob.parent:
+            # Same result as parent_clear plus its re-evaluation, which drops any shear.
+            world = ob.matrix_world.copy()
+            ob.parent = None
+            ob.matrix_parent_inverse.identity()
+            ob.matrix_world = world
+            world = ob.matrix_basis
+        else:
+            world = ob.matrix_world
         # Subtract the top parent's origin in Blender space, right of the scale/axis
         # conversion, so it gets scaled and rotated like everything else.
         ob.matrix_world = (
@@ -107,7 +130,7 @@ class Baker:
             @ getUpAxisOffsetMat(bpy.context.scene.vs.up_axis, bpy.context.scene.vs.up_axis_offset)
             @ Matrix.Scale(bpy.context.scene.vs.world_scale, 4)
             @ Matrix.Translation(top_parent.location).inverted()
-            @ ob.matrix_world
+            @ world
         )
 
         bench.report("transform")
@@ -137,7 +160,7 @@ class Baker:
                 else:
                     result.armature = self.bake(mod.object)
                     result.envelope = mod
-                    select_only(ob)
+                    _select_only_quiet(ob)
                 mod.show_viewport = False
             elif mod.type == "SOLIDIFY" and solidify_fill_rim is None:
                 solidify_fill_rim = mod.use_rim
@@ -145,7 +168,8 @@ class Baker:
                 self._exporter.error(get_id("exporter_err_shapes_decimate", True).format(ob.name, mod.decimate_type))
                 shapes_invalid = True
 
-        ops.object.mode_set(mode="OBJECT")
+        if bpy.context.mode != "OBJECT":
+            ops.object.mode_set(mode="OBJECT")
         bench.report("modifier scan")
 
         # -- bake mesh --------------------------------------------------------
