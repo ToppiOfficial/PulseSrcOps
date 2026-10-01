@@ -1,4 +1,5 @@
 import bpy, bmesh, collections, dataclasses, re, typing, os
+import numpy as np
 from bpy import ops
 from mathutils import Vector, Matrix, Euler
 from math import *  # pyright: ignore
@@ -42,6 +43,7 @@ class Baker:
             return None
 
         should_tri = State.exportFormat == ExportFormat.SMD or ob.vs.triangulate
+        bench = BenchMarker(2)
 
         # -- realize instances ------------------------------------------------
         duplis = None
@@ -77,12 +79,15 @@ class Baker:
         if hasShapes(ob):
             ob.active_shape_key_index = 0
 
+        bench.report("copy")
+
         # -- envelope / armature detection ------------------------------------
         self._setup_envelope(ob, result, top_parent)
+        bench.report("envelope")
 
         # -- per-type pre-bake mesh ops ---------------------------------------
         if ob.type == "MESH":
-            self._pre_bake_mesh_ops(ob)
+            self._pre_bake_mesh_ops(ob, bench)
 
         # A constraint-driven rig's motion is already baked into its actions by now, so its
         # bone constraints are redundant - and harmful: they resolve their targets in world
@@ -104,6 +109,8 @@ class Baker:
             @ Matrix.Translation(top_parent.location).inverted()
             @ ob.matrix_world
         )
+
+        bench.report("transform")
 
         if ob.type == "ARMATURE":
             for pb in ob.pose.bones:
@@ -139,6 +146,7 @@ class Baker:
                 shapes_invalid = True
 
         ops.object.mode_set(mode="OBJECT")
+        bench.report("modifier scan")
 
         # -- bake mesh --------------------------------------------------------
         if ob.type in exportable_types:
@@ -154,6 +162,7 @@ class Baker:
                 self._triangulate()
         else:
             baked = None
+        bench.report("evaluate mesh")
 
         # Zero-state basis normal capture: when the user has shape keys at non-zero
         # default values, normals from the regular bake are shape-deformed.
@@ -187,6 +196,8 @@ class Baker:
                 for sk, v in saved_values:
                     sk.value = v
 
+        bench.report("zero-state normals")
+
         if duplis:
             if not ob.type in exportable_types:
                 ob.select_set(False)
@@ -216,6 +227,7 @@ class Baker:
         # -- shape key baking -------------------------------------------------
         if not shapes_invalid and hasShapes(ob) and getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'DEFAULT':
             self._bake_shapes(ob, result, solidify_fill_rim)
+            bench.report(f"shape keys ({len(result.shapes)})")
 
         for mod in ob.modifiers:
             mod.show_viewport = False
@@ -225,6 +237,7 @@ class Baker:
 
         self._generate_uvs_if_needed(baked, result)
         self._check_vertex_limit(baked, result)
+        bench.report("uv + vertex count")
 
         return result
 
@@ -261,7 +274,7 @@ class Baker:
                 break
             cur = cur.parent
 
-    def _pre_bake_mesh_ops(self, ob: bpy.types.Object) -> None:
+    def _pre_bake_mesh_ops(self, ob: bpy.types.Object, bench: BenchMarker) -> None:
         scene_vs = bpy.context.scene.vs
         mt = getattr(ob.vs, 'mesh_type', 'DEFAULT')
         limit_mode = getattr(scene_vs, 'vertex_influence_limit_mode', 'AUTO')
@@ -278,13 +291,9 @@ class Baker:
 
         if not hasShapes(ob):
             VertexGroupNormalizer(ob, vgroup_limit=vgroup_limit, clean_tolerance=scene_vs.weightlink_threshold).run()
-            ops.object.mode_set(mode="EDIT")
-            ops.mesh.reveal()
-            if ob.matrix_world.is_negative:
-                ops.mesh.select_all(action="SELECT")
-                ops.mesh.flip_normals()
-            ops.mesh.select_all(action="DESELECT")
-            ops.object.mode_set(mode="OBJECT")
+            bench.report("weight normalize")
+            self._reveal_and_deselect(ob)
+            bench.report("reveal / flip")
             return
 
         # Shape key normalization
@@ -296,38 +305,59 @@ class Baker:
             # Normalization is evaluation-preserving, so it only matters for the deltas
             # that get exported - collision/cloth proxies discard theirs.
             self._normalize_shapekeys(ob)
+        bench.report("shape key normalize")
 
         VertexGroupNormalizer(ob, vgroup_limit=vgroup_limit, clean_tolerance=scene_vs.weightlink_threshold).run()
+        bench.report("weight normalize")
 
-        ops.object.mode_set(mode="EDIT")
-        ops.mesh.reveal()
+        self._reveal_and_deselect(ob)
+        bench.report("reveal / flip")
+
+    def _reveal_and_deselect(self, ob: bpy.types.Object) -> None:
         if ob.matrix_world.is_negative:
+            # flip_normals also flips custom split normals, so it keeps the operator path.
+            ops.object.mode_set(mode="EDIT")
+            ops.mesh.reveal()
             ops.mesh.select_all(action="SELECT")
             ops.mesh.flip_normals()
-        ops.mesh.select_all(action="DESELECT")
-        ops.object.mode_set(mode="OBJECT")
+            ops.mesh.select_all(action="DESELECT")
+            ops.object.mode_set(mode="OBJECT")
+            return
+        me = ob.data
+        for elems in (me.vertices, me.edges, me.polygons):
+            off = [False] * len(elems)
+            elems.foreach_set("hide", off)
+            elems.foreach_set("select", off)
+        me.update()
 
     def _normalize_shapekeys(self, ob: bpy.types.Object) -> None:
         print("- Normalizing Basis and Keys (Reference-Based)")
         blocks = ob.data.shape_keys.key_blocks
         base_key = blocks[0]
-        orig_coords = [v.co.copy() for v in base_key.data]
+        count = len(base_key.data) * 3
+
+        # float32 throughout, one op at a time, to match the mathutils arithmetic exactly.
+        def read(key):
+            buf = np.empty(count, dtype=np.float32)
+            key.data.foreach_get("co", buf)
+            return buf
+
+        orig_coords = read(base_key)
+        new_basis = orig_coords.copy()
+        key_coords = {key.name: read(key) for key in blocks[1:]}
 
         for key in blocks[1:]:
             if key.slider_min == 0.0:
                 continue
-            for i, b_v in enumerate(base_key.data):
-                b_v.co += (key.data[i].co - orig_coords[i]) * key.slider_min
-
-        new_basis = [v.co.copy() for v in base_key.data]
+            new_basis += (key_coords[key.name] - orig_coords) * np.float32(key.slider_min)
+        base_key.data.foreach_set("co", new_basis)
 
         for key in blocks[1:]:
             s_min, s_max = key.slider_min, key.slider_max
             old_val = key.value
             rng = s_max - s_min
-            for i, k_v in enumerate(key.data):
-                delta = k_v.co - orig_coords[i]
-                k_v.co = new_basis[i] + (delta * s_max - delta * s_min)
+            delta = key_coords[key.name] - orig_coords
+            key.data.foreach_set("co", new_basis + (delta * np.float32(s_max) - delta * np.float32(s_min)))
             key.slider_min = 0.0
             key.slider_max = 1.0
             key.value = (old_val - s_min) / rng if rng != 0 else 0.0

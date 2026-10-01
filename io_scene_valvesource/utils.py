@@ -334,31 +334,34 @@ def find_or_add_material_path(scene, path: str) -> int:
     return len(scene.vs.material_paths) - 1
 
 
+def export_timings_enabled() -> bool:
+    prefs = get_addon_prefs()
+    return bpy.app.debug_value > 0 or bool(prefs and getattr(prefs, "print_export_timings", False))
+
 class BenchMarker:
     def __init__(self,indent = 0, prefix = None):
         self._indent = indent * 4
         self._prefix = "{}{}".format(" " * self._indent,prefix if prefix else "")
-        self.quiet = bpy.app.debug_value <= 0
+        self.quiet = not export_timings_enabled()
         self.reset()
 
     def reset(self):
-        self._last = self._start = time.time()
-        
+        self._last = self._start = time.perf_counter()
+
     def report(self,label = None, threshold = 0.0):
-        now = time.time()
+        now = time.perf_counter()
         elapsed = now - self._last
         if threshold and elapsed < threshold: return
 
         if not self.quiet:
             prefix = "{} {}:".format(self._prefix, label if label else "")
-            pad = max(0, 10 - len(prefix) + self._indent)
-            print("{}{}{:.4f}".format(prefix," " * pad, now - self._last))
+            print("{}{:.4f}s".format(prefix.ljust(32 + self._indent), elapsed))
         self._last = now
 
     def current(self):
-        return time.time() - self._last
+        return time.perf_counter() - self._last
     def total(self):
-        return time.time() - self._start
+        return time.perf_counter() - self._start
 
 def smdBreak(line):
     line = line.rstrip('\n')
@@ -1268,50 +1271,47 @@ class VertexGroupNormalizer:
     def run(self):
         if not self.arm:
             return
+        self.deform_idx = {i for i, vg in enumerate(self.ob.vertex_groups) if vg.name in self.bone_names}
+        if not self.deform_idx:
+            return
         self._clean_weights()
         self._limit_influence()
         self._normalize_weights()
 
+    def _remove(self, to_remove: dict[int, list[int]]):
+        # One C-API call per group instead of one per vertex.
+        for group_idx, vert_indices in to_remove.items():
+            self.ob.vertex_groups[group_idx].remove(vert_indices)
+
     def _clean_weights(self):
-        # Collect all vertices to remove per group, then batch-remove in one call per group
-        # instead of one Blender C-API call per vertex.
+        deform_idx, tol = self.deform_idx, self.clean_tolerance
         to_remove: dict[int, list[int]] = collections.defaultdict(list)
         for v in self.ob.data.vertices:
             for g in v.groups:
-                if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names:
-                    if g.weight < self.clean_tolerance:
-                        to_remove[g.group].append(v.index)
-
-        for group_idx, vert_indices in to_remove.items():
-            if group_idx < len(self.ob.vertex_groups):
-                self.ob.vertex_groups[group_idx].remove(vert_indices)
+                if g.group in deform_idx and g.weight < tol:
+                    to_remove[g.group].append(v.index)
+        self._remove(to_remove)
 
     def _limit_influence(self):
+        deform_idx, limit = self.deform_idx, self.vgroup_limit
         to_remove: dict[int, list[int]] = collections.defaultdict(list)
-
         for v in self.ob.data.vertices:
-            groups = sorted(
-                (g for g in v.groups if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names),
-                key=lambda g: -g.weight
-            )
-            for g in groups[self.vgroup_limit:]:
-                to_remove[g.group].append(v.index)
-
-        for group_idx, vert_indices in to_remove.items():
-            if group_idx < len(self.ob.vertex_groups):
-                self.ob.vertex_groups[group_idx].remove(vert_indices)
+            groups = [(g.group, g.weight) for g in v.groups if g.group in deform_idx]
+            if len(groups) <= limit:
+                continue
+            groups.sort(key=lambda gw: -gw[1])
+            for group_idx, _ in groups[limit:]:
+                to_remove[group_idx].append(v.index)
+        self._remove(to_remove)
 
     def _normalize_weights(self):
+        deform_idx = self.deform_idx
         for v in self.ob.data.vertices:
-            groups = [
-                (self.ob.vertex_groups[g.group], g.weight)
-                for g in v.groups
-                if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names
-            ]
-            total = sum(w for _, w in groups)
-            if total > 0:
-                for vg, w in groups:
-                    vg.add([v.index], w / total, 'REPLACE')
+            groups = [g for g in v.groups if g.group in deform_idx]
+            total = sum(g.weight for g in groups)
+            if total > 0 and total != 1.0:
+                for g in groups:
+                    g.weight = g.weight / total
 
 _ORDER_VG_RE = re.compile(r"^mesh split (\d+)$", re.IGNORECASE)
  
@@ -2003,6 +2003,14 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         bone_x = b.matrix_local.to_translation().x
         return (arm_prop.bone_direction_naming_right if bone_x < 0
                 else arm_prop.bone_direction_naming_left)
+    cache_key = None
+    if _bone_exportname_cache is not None:
+        # Bone names are in the key because the FBX writer renames baked bones mid-export.
+        cache_key = (armature.data.as_pointer(), mode, tuple(armature.data.bones.keys()))
+        cached = _bone_exportname_cache.get(cache_key)
+        if cached is not None:
+            return cached[data_bone.name]
+
     prefix_shortcuts = get_prefix_shortcut_map()
 
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
@@ -2027,7 +2035,21 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         final_name = sanitize_string(final_name, force_source2=force_s2, no_sanitize=no_san)
         export_names[b.name] = final_name
 
+    if cache_key is not None:
+        _bone_exportname_cache[cache_key] = export_names
     return export_names[data_bone.name]
+
+# Set only while an export runs; bone props can't change mid-export, so the per-armature
+# name map is safe to reuse there but not in the UI.
+_bone_exportname_cache: dict | None = None
+
+def begin_bone_exportname_cache() -> None:
+    global _bone_exportname_cache
+    _bone_exportname_cache = {}
+
+def end_bone_exportname_cache() -> None:
+    global _bone_exportname_cache
+    _bone_exportname_cache = None
 
 def get_bone_matrix(data: bpy.types.PoseBone | mathutils.Matrix, bone: bpy.types.PoseBone | None = None,
                     rest_space : bool = False) -> mathutils.Matrix:

@@ -1,4 +1,6 @@
 import bpy, bmesh, collections, re, os
+import numpy as np
+from array import array
 from mathutils import Vector, Matrix
 
 from ..utils import *
@@ -6,6 +8,23 @@ from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 from .records import BakeResult, ExportTask, is_proxy_only
+
+
+def _read_floats(collection, attr, width):
+    buf = array('f', bytes(4 * width * len(collection)))
+    collection.foreach_get(attr, buf)
+    return buf
+
+def _read_ints(collection, attr):
+    buf = array('i', bytes(4 * len(collection)))
+    collection.foreach_get(attr, buf)
+    return buf
+
+def _dedup_pairs(flat):
+    # Same first-seen order and indices OrderedSet.add would give, without a Vector2 per loop.
+    seen = {}
+    indices = [seen.setdefault(k, len(seen)) for k in zip(flat[0::2], flat[1::2])]
+    return list(seen), indices
 
 
 class DmxWriter:
@@ -109,6 +128,7 @@ class DmxWriter:
         self._build_skeleton(bench)
         self._write_attachments(bench)
         self._write_procedural_bones()
+        bench.report("Procedural bones")
         self._write_hitboxes(bench)
         if not self.skeleton_only:
             self._write_vca_bones()
@@ -322,9 +342,21 @@ class DmxWriter:
                 lookat_name_map[(dn, off)] = attach_name
                 self._write_attach(attach_name, Matrix.Translation(Vector(off)), bone_elements[dn])
 
+        from .. import procbones_sim as _pbsim
+        _pbsim.prefetch_proc_triggers(
+            self.armature_src,
+            [(i, e) for i, e in enumerate(proc_bones_list) if e.helper_bone in bone_elements],
+            bpy.context.scene)
+        try:
+            self._promote_procedural_joints(proc_bones_list, lookat_name_map)
+        finally:
+            _pbsim.clear_proc_trigger_prefetch()
+
+    def _promote_procedural_joints(self, proc_bones_list, lookat_name_map):
         # Promote each helper's joint to DmeQuatInterpBone (TRIGGER) or DmeAimAtBone (LOOKAT).
         # On failure the element stays a plain DmeJoint. armature_src is used so the real
         # drivers/constraints/action are live, matching the VRD path.
+        bone_elements = self.bone_elements
         seen_helpers: set[str] = set()
         for entry_idx, entry in enumerate(proc_bones_list):
             helper_name = entry.helper_bone
@@ -466,20 +498,30 @@ class DmxWriter:
         exportable_bones_list = [pb for pb in amod_ob.pose.bones if pb in self.exportable_bones] \
             if amod.use_bone_envelopes else []
 
+        use_groups = amod.use_vertex_groups
+        use_envelopes = amod.use_bone_envelopes
+        amod_vg_index = amod_vg.index if amod_vg else -1
+        wm = bpy.context.window_manager
+
         for v in ob.data.vertices:
             weights = []
             total_weight = 0
+            amod_vg_weight = 0
             if len(out) % progress_step == 0:
-                bpy.context.window_manager.progress_update(len(out) / num_verts)
+                wm.progress_update(len(out) / num_verts)
 
-            if amod.use_vertex_groups:
+            if use_groups or amod_vg_index >= 0:
                 for v_group in v.groups:
-                    bone_id = vg_to_bone_id.get(v_group.group)
-                    if bone_id is not None:
-                        weights.append([bone_id, v_group.weight])
-                        total_weight += v_group.weight
+                    group, weight = v_group.group, v_group.weight
+                    if use_groups:
+                        bone_id = vg_to_bone_id.get(group)
+                        if bone_id is not None:
+                            weights.append([bone_id, weight])
+                            total_weight += weight
+                    if group == amod_vg_index:
+                        amod_vg_weight = weight
 
-            if amod.use_bone_envelopes and total_weight == 0:
+            if use_envelopes and total_weight == 0:
                 for pb in exportable_bones_list:
                     weight = pb.bone.envelope_weight * pb.evaluate_envelope(model_mat @ v.co)
                     if weight:
@@ -491,11 +533,6 @@ class DmxWriter:
                     link[1] *= 1 / total_weight
 
             if amod_vg and total_weight > 0:
-                amod_vg_weight = 0
-                for v_group in v.groups:
-                    if v_group.group == amod_vg.index:
-                        amod_vg_weight = v_group.weight
-                        break
                 if amod.invert_vertex_group:
                     amod_vg_weight = 1 - amod_vg_weight
                 for link in weights:
@@ -592,16 +629,12 @@ class DmxWriter:
             vertex_data["jointCount"] = jointCount
 
             num_verts = len(ob.data.vertices)
-            num_loops = len(ob.data.loops)
-            norms = [None] * num_loops
-            texco = ordered_set.OrderedSet()
+
             face_sets = collections.OrderedDict()
-            texcoIndices = [None] * num_loops
             jointWeights = []
             jointIndices = []
             balance = bake.stereo_balance(ob, self._warning)
             cloth_weights = {}
-            Indices = [-1] * num_loops
 
             if cloth_groups:
                 for vgroup in cloth_groups:
@@ -614,28 +647,26 @@ class DmxWriter:
 
             bench.report("object setup")
 
-            for v in ob.data.vertices:
-                v.select = False
-                if cloth_groups:
-                    for vgroup in cloth_groups:
+            if cloth_groups:
+                for vgroup in cloth_groups:
+                    remap_entry = next((r for r in ob.vs.vertex_map_remaps if r.group == vgroup.name), None)
+                    weights = cloth_weights[vgroup.name]
+                    for vi in range(num_verts):
                         try:
-                            w = vgroup.weight(v.index)
-                            for r in ob.vs.vertex_map_remaps:
-                                if r.group == vgroup.name:
-                                    w = remap(w, 0.0, 1.0, r.min, r.max)
-                                    break
-                            cloth_weights[vgroup.name][v.index] = w
+                            w = vgroup.weight(vi)
+                            if remap_entry:
+                                w = remap(w, 0.0, 1.0, remap_entry.min, remap_entry.max)
+                            weights[vi] = w
                         except RuntimeError:
-                            for r in ob.vs.vertex_map_remaps:
-                                if r.group == vgroup.name:
-                                    cloth_weights[vgroup.name][v.index] = r.min
-                                    break
+                            if remap_entry:
+                                weights[vi] = remap_entry.min
 
-                if have_weightmap:
+            if have_weightmap:
+                for links in ob_weights:
                     weights_row = [0.0] * jointCount
                     indices_row = [0] * jointCount
                     total = 0
-                    for i, link in enumerate(ob_weights[v.index]):
+                    for i, link in enumerate(links):
                         indices_row[i] = link[0]
                         weights_row[i] = link[1]
                         total += link[1]
@@ -644,29 +675,40 @@ class DmxWriter:
                     jointWeights.extend(weights_row)
                     jointIndices.extend(indices_row)
 
-                if v.index % 50 == 0:
-                    bpy.context.window_manager.progress_update(v.index / num_verts)
-
             bench.report("verts")
 
-            for loop in [ob.data.loops[i] for poly in ob.data.polygons for i in poly.loop_indices]:
-                texcoIndices[loop.index] = texco.add(datamodel.Vector2(uv_layer[loop.index].uv))  # pyright: ignore
-                norms[loop.index] = datamodel.Vector3(loop.normal)
-                Indices[loop.index] = loop.vertex_index
+            # Mesh loops are stored polygon by polygon, so loop index order is face order.
+            mesh = ob.data
+            Indices = _read_ints(mesh.loops, "vertex_index").tolist()
+            if hasattr(mesh, "corner_normals"):
+                nrm = _read_floats(mesh.corner_normals, "vector", 3)
+            else:
+                nrm = _read_floats(mesh.loops, "normal", 3)
+            norms = list(zip(nrm[0::3], nrm[1::3], nrm[2::3]))
+            texco, texcoIndices = _dedup_pairs(_read_floats(uv_layer, "uv", 2))
+            positions = _read_floats(mesh.vertices, "co", 3)
+            uv_flat = {uv.name: _read_floats(uv.data, "uv", 2) for uv in mesh.uv_layers}
+            poly_data = (_read_ints(mesh.polygons, "loop_start"), _read_ints(mesh.polygons, "loop_total"),
+                         _read_ints(mesh.polygons, "material_index"))
 
             bench.report("loops")
 
-            bpy.context.view_layer.objects.active = ob
-            bpy.ops.object.mode_set(mode="EDIT")
-            bm = bmesh.from_edit_mesh(ob.data)
-            bm.verts.ensure_lookup_table()
-            bm.faces.ensure_lookup_table()
+            # Only $N vertex groups and string layers still need BMesh; built on demand.
+            bm = None
+            def get_bm():
+                nonlocal bm
+                if bm is None:
+                    bm = bmesh.new()
+                    bm.from_mesh(ob.data)
+                    bm.verts.ensure_lookup_table()
+                return bm
 
-            vertex_data[keywords["pos"]] = datamodel.make_array((v.co for v in bm.verts), datamodel.Vector3)
-            vertex_data[keywords["pos"] + "Indices"] = datamodel.make_array((l.vert.index for f in bm.faces for l in f.loops), int)
+            vertex_data[keywords["pos"]] = datamodel.make_array(
+                zip(positions[0::3], positions[1::3], positions[2::3]), datamodel.Vector3)
+            vertex_data[keywords["pos"] + "Indices"] = datamodel.make_array(Indices, int)
 
             if source2 and src_mt != 'COLLISION':
-                self._write_source2_layers(vertex_data, fmt, bm, ob, bake)
+                self._write_source2_layers(vertex_data, fmt, get_bm, ob, bake, uv_flat)
                 bench.report("Source 2 vertex data")
             else:
                 fmt.append("textureCoordinates")
@@ -678,10 +720,11 @@ class DmxWriter:
                 vertex_data[keywords["weight_indices"]] = datamodel.make_array(jointIndices, int)
                 fmt.extend([keywords["weight"], keywords["weight_indices"]])
 
-            deform_layer = bm.verts.layers.deform.active
+            # Any group named "<name>$<N>" is written as a per-vertex float stream
+            stream_groups = [g for g in ob.vertex_groups if re.fullmatch(r".+\$[0-9]+", g.name)]
+            deform_layer = get_bm().verts.layers.deform.active if stream_groups else None
             if deform_layer:
-                # Any group named "<name>$<N>" is written as a per-vertex float stream
-                for vgroup in (g for g in ob.vertex_groups if re.fullmatch(r".+\$[0-9]+", g.name)):
+                for vgroup in stream_groups:
                     fmt.append(vgroup.name)
                     values = [v[deform_layer].get(vgroup.index, 0) for v in bm.verts]
                     value_set = ordered_set.OrderedSet(values)
@@ -709,72 +752,61 @@ class DmxWriter:
 
             bench.report("insert")
 
-            self._write_facesets(DmeMesh, bm, ob, bake, src_mt, face_sets, bench)
+            self._write_facesets(DmeMesh, poly_data, ob, bake, src_mt, face_sets, bench)
 
-            bpy.ops.object.mode_set(mode="OBJECT")
-            del bm
+            if bm is not None:
+                bm.free()
 
             self._write_shapes(DmeMesh, ob, bake, balance, texcoIndices, num_verts, combination_operator, bench)
 
-    def _write_source2_layers(self, vertex_data, fmt, bm, ob, bake):
-        dm = self.dm
-        loops = [loop for face in bm.faces for loop in face.loops]
-        loop_indices = datamodel.make_array([loop.index for loop in loops], int)
-        layerGroups = bm.loops.layers
+    def _write_source2_layers(self, vertex_data, fmt, get_bm, ob, bake, uv_flat):
+        mesh = ob.data
+        loop_indices = datamodel.make_array(range(len(mesh.loops)), int)
+        export_suffix = re.compile(r".*\$[0-9]+")
 
-        class exportLayer:
-            def __init__(self, layer, exportName=None):
-                self._layer = layer
-                self.name = exportName or layer.name
-            def data_for(self, loop):
-                return loop[self._layer]
-
-        def get_bmesh_layers(group):
-            return [exportLayer(l) for l in group if re.match(r".*\$[0-9]+", l.name)]
-
+        # (blender name, dmx name)
         defaultUvLayer = "texcoord$0"
-        uv_layers_to_export = list(get_bmesh_layers(layerGroups.uv))
-        if defaultUvLayer not in [l.name for l in uv_layers_to_export]:
-            uv_render = next((l.name for l in ob.data.uv_layers if l.active_render and l not in uv_layers_to_export), None)
+        uv_layers_to_export = [(uv.name, uv.name) for uv in mesh.uv_layers if export_suffix.match(uv.name)]
+        if defaultUvLayer not in [d for _, d in uv_layers_to_export]:
+            uv_render = next((l.name for l in mesh.uv_layers if l.active_render), None)
             if uv_render:
-                uv_layers_to_export.append(exportLayer(layerGroups.uv[uv_render], defaultUvLayer))
+                uv_layers_to_export.append((uv_render, defaultUvLayer))
                 print(f"- Exporting '{uv_render}' as {defaultUvLayer}")
             else:
                 self._warning(f"'{bake.name}' has no UV map named {defaultUvLayer} and no fallback was found.")
 
         _second_uv_dmx = "texcoord$1"
-        if _second_uv_dmx not in [l.name for l in uv_layers_to_export]:
-            _exported_uv_blender_names = {l._layer.name for l in uv_layers_to_export}
+        if _second_uv_dmx not in [d for _, d in uv_layers_to_export]:
+            _exported_uv_blender_names = {b for b, _ in uv_layers_to_export}
             _second_uv = next(
-                (uv for uv in ob.data.uv_layers if uv.name not in _exported_uv_blender_names),
+                (uv for uv in mesh.uv_layers if uv.name not in _exported_uv_blender_names),
                 None
             )
             if _second_uv is not None:
-                uv_layers_to_export.append(exportLayer(layerGroups.uv[_second_uv.name], _second_uv_dmx))
+                uv_layers_to_export.append((_second_uv.name, _second_uv_dmx))
                 print(f"- Exporting '{_second_uv.name}' as {_second_uv_dmx}")
 
-        for layer in uv_layers_to_export:
-            uv_set = ordered_set.OrderedSet()
-            uv_indices = []
-            for uv in (layer.data_for(loop).uv for loop in loops):
-                uv_indices.append(uv_set.add(datamodel.Vector2(uv)))
-            vertex_data[layer.name] = datamodel.make_array(uv_set, datamodel.Vector2)
-            vertex_data[layer.name + "Indices"] = datamodel.make_array(uv_indices, int)
-            fmt.append(layer.name)
+        for blender_name, dmx_name in uv_layers_to_export:
+            uv_set, uv_indices = _dedup_pairs(uv_flat[blender_name])
+            vertex_data[dmx_name] = datamodel.make_array(uv_set, datamodel.Vector2)
+            vertex_data[dmx_name + "Indices"] = datamodel.make_array(uv_indices, int)
+            fmt.append(dmx_name)
 
-        def make_vertex_layer(layer, array_type):
-            vertex_data[layer.name] = datamodel.make_array([layer.data_for(l) for l in loops], array_type)
-            vertex_data[layer.name + "Indices"] = loop_indices
-            fmt.append(layer.name)
+        def make_vertex_layer(name, values, array_type):
+            vertex_data[name] = datamodel.make_array(values, array_type)
+            vertex_data[name + "Indices"] = loop_indices
+            fmt.append(name)
 
-        _color_groups = [layerGroups.color]
-        if hasattr(layerGroups, "float_color"):
-            _color_groups.append(layerGroups.float_color)
+        def corner_attrs(data_type):
+            return [a for a in mesh.attributes if a.domain == 'CORNER' and a.data_type == data_type]
 
+        # color_srgb gives byte colors as c / 255; BMesh gives c * (1 / 255) in float32,
+        # which can differ by an ulp, so the byte is recovered and re-scaled the BMesh way.
+        _byte_scale = np.float32(1.0) / np.float32(255.0)
         _seen_color_dmx = set()
-        for _color_group in _color_groups:
-            for _color_layer in _color_group:
-                _blender_name = _color_layer.name
+        for data_type, prop in (('BYTE_COLOR', "color_srgb"), ('FLOAT_COLOR', "color")):
+            for attr in corner_attrs(data_type):
+                _blender_name = attr.name
                 if _blender_name in vertex_maps:
                     _export_name = vertex_maps[_blender_name].lower()
                 elif _blender_name.lower() == "color":
@@ -784,35 +816,47 @@ class DmxWriter:
                 if _export_name in _seen_color_dmx:
                     continue
                 _seen_color_dmx.add(_export_name)
-                make_vertex_layer(exportLayer(_color_layer, _export_name), datamodel.Vector4)
+                rgba = np.frombuffer(_read_floats(attr.data, prop, 4), dtype=np.float32)
+                if data_type == 'BYTE_COLOR':
+                    rgba = np.rint(rgba * 255.0).astype(np.float32) * _byte_scale
+                make_vertex_layer(_export_name, rgba.reshape(-1, 4).tolist(), datamodel.Vector4)
 
-        for layer in get_bmesh_layers(layerGroups.float):
-            make_vertex_layer(layer, float)
-        for layer in get_bmesh_layers(layerGroups.int):
-            make_vertex_layer(layer, int)
-        for layer in get_bmesh_layers(layerGroups.string):
-            make_vertex_layer(layer, str)
+        for attr in corner_attrs('FLOAT'):
+            if export_suffix.match(attr.name):
+                make_vertex_layer(attr.name, _read_floats(attr.data, "value", 1).tolist(), float)
+        for attr in corner_attrs('INT'):
+            if export_suffix.match(attr.name):
+                make_vertex_layer(attr.name, _read_ints(attr.data, "value").tolist(), int)
+        string_layers = [a.name for a in corner_attrs('STRING') if export_suffix.match(a.name)]
+        if string_layers:
+            bm = get_bm()
+            loops = [loop for face in bm.faces for loop in face.loops]
+            for name in string_layers:
+                layer = bm.loops.layers.string[name]
+                make_vertex_layer(name, [loop[layer] for loop in loops], str)
 
-    def _write_facesets(self, DmeMesh, bm, ob, bake, src_mt, face_sets, bench):
+    def _write_facesets(self, DmeMesh, poly_data, ob, bake, src_mt, face_sets, bench):
         dm = self.dm
         materials = self.materials
         bad_face_mats = 0
-        num_polys = len(bm.faces)
-        two_percent = int(num_polys / 50)
-        print("Polygons: ", debug_only=True, newline=False)
+        loop_starts, loop_totals, mat_indices = poly_data
 
+        resolved = {}
         bm_face_sets = collections.defaultdict(list)
-        for p, face in enumerate(bm.faces):
-            if src_mt in ('COLLISION', 'CLOTHPROXY'):
-                mat_name, mat_ok = "no_material", True
-            else:
-                mat_name, mat_ok = self.resolve_material(ob, face.material_index)
+        for start, total, mat_index in zip(loop_starts, loop_totals, mat_indices):
+            res = resolved.get(mat_index)
+            if res is None:
+                if src_mt in ('COLLISION', 'CLOTHPROXY'):
+                    res = ("no_material", True)
+                else:
+                    res = self.resolve_material(ob, mat_index)
+                resolved[mat_index] = res
+            mat_name, mat_ok = res
             if not mat_ok:
                 bad_face_mats += 1
-            bm_face_sets[mat_name].extend((*(l.index for l in face.loops), -1))
-            if two_percent and p % two_percent == 0:
-                print(".", debug_only=True, newline=False)
-                bpy.context.window_manager.progress_update(p / num_polys)
+            face_list = bm_face_sets[mat_name]
+            face_list.extend(range(start, start + total))
+            face_list.append(-1)
 
         for mat_name, indices in bm_face_sets.items():
             material_elem = materials.get(mat_name)
@@ -827,7 +871,6 @@ class DmxWriter:
             face_set["material"] = material_elem
             face_set["faces"] = datamodel.make_array(indices, int)
 
-        print(debug_only=True)
         DmeMesh["faceSets"] = datamodel.make_array(list(face_sets.values()), datamodel.Element)
 
         if bad_face_mats:
@@ -835,6 +878,17 @@ class DmxWriter:
         bench.report("polys")
 
     # -- shapes --------------------------------------------------------------
+    @staticmethod
+    def _shape_candidates(shape, base_co, base_nrm, short_nrm, preserve_basis_normals):
+        s_co = np.frombuffer(_read_floats(shape.vertices, "co", 3), dtype=np.float32).reshape(-1, 3)
+        v_cand = np.flatnonzero(np.any(s_co != base_co, axis=1))
+        if preserve_basis_normals:
+            l_cand = short_nrm
+        else:
+            s_nrm = np.frombuffer(_read_floats(shape.loops, "normal", 3), dtype=np.float32).reshape(-1, 3)
+            l_cand = np.union1d(np.flatnonzero(np.any(s_nrm != base_nrm, axis=1)), short_nrm)
+        return v_cand.tolist(), l_cand.tolist()
+
     def _write_shapes(self, DmeMesh, ob, bake, balance, texcoIndices, num_verts, combination_operator, bench):
         dm = self.dm
         keywords = self.keywords
@@ -857,6 +911,12 @@ class DmxWriter:
             for _idx in get_dme_split_delta_conflicts(bake.src) if bake_flex_mode == 'DME' else ():
                 _ov = bake.src.vs.dme_delta_overrides[_idx]
                 self._warning(get_id("exporter_warn_dme_split_on_controller", True).format(bake.name, _ov.shapekey))
+
+            base_co = np.frombuffer(_read_floats(ob.data.vertices, "co", 3), dtype=np.float32).reshape(-1, 3)
+            base_nrm = np.frombuffer(_read_floats(ob.data.loops, "normal", 3), dtype=np.float32).reshape(-1, 3)
+            # An unchanged normal still fails the dot test below when shorter than 0.999,
+            # so those loops are always candidates.
+            short_nrm = np.flatnonzero(np.einsum('ij,ij->i', base_nrm, base_nrm) < 0.9981)
 
             for shape_name, shape in bake.shapes.items():
                 wrinkle_scale = 0
@@ -928,7 +988,18 @@ class DmxWriter:
                         else:
                             self._warning(get_id("exporter_err_missing_corrective_target", format_string=True).format(shape_name, ct_name))
 
-                for ob_vert in ob.data.vertices:
+                # Only elements that differ at all can pass the checks below, so the
+                # per-element mathutils code runs on those alone.
+                fast = not corrective and not wrinkle_scale
+                if fast:
+                    v_cand, l_cand = self._shape_candidates(shape, base_co, base_nrm, short_nrm,
+                                                            bake.src.data.vs.bake_shapekey_as_basis_normals)
+                    verts_iter = (ob.data.vertices[i] for i in v_cand)
+                    loops_iter = (ob.data.loops[i] for i in l_cand)
+                else:
+                    verts_iter, loops_iter = ob.data.vertices, ob.data.loops
+
+                for ob_vert in verts_iter:
                     sv = shape.vertices[ob_vert.index]
                     if ob_vert.co != sv.co:
                         delta = sv.co - ob_vert.co
@@ -940,7 +1011,7 @@ class DmxWriter:
                             shape_posIdx.append(ob_vert.index)
 
                 preserve_basis_normals = bake.src.data.vs.bake_shapekey_as_basis_normals
-                for ob_loop in ob.data.loops:
+                for ob_loop in loops_iter:
                     sl = shape.loops[ob_loop.index]
                     norm = ob_loop.normal if preserve_basis_normals else sl.normal
                     if corrective:
