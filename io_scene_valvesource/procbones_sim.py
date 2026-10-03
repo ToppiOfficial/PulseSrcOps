@@ -785,22 +785,21 @@ def _force_evaluatable(obj):
     return restore
 
 
-def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = False) -> list:
-    """Sample trigger-target pairs from the action by evaluating the scene at each
-    driver bone keyframe frame. Returns list of (driver_quat, helper_quat)."""
-    global _building_proc_cache
-    if _building_proc_cache:
-        return []
+# (arm_name, entry_idx) -> triggers, filled by prefetch_proc_triggers for one export pass.
+_export_trigger_prefetch: dict[tuple, list] = {}
 
+
+def _resolve_trigger_job(arm_ob, entry, entry_idx: int):
+    """Validate a TRIGGER entry and return (sample_arm, target_slot, frames), or None."""
     action = entry.action
     if not action:
-        return []
+        return None
 
     # Slotted actions must name a slot that resolves - see _find_action_slot.
     if not getattr(action, 'is_action_legacy', True) and _find_action_slot(action, entry.action_slot_name) is None:
         print(f"[ProcBones] Entry {entry_idx} ('{entry.helper_bone}'): action '{action.name}' "
               f"has no slot named '{entry.action_slot_name}' - assign one in the Procedural Bones list")
-        return []
+        return None
 
     # A reference armature lets near-identical rigs (e.g. the same character with a
     # different outfit / IK setup) reuse a base rig's computed triggers. When set,
@@ -816,28 +815,83 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
             print(f"[ProcBones] Reference armature '{ref.name}' is missing bone "
                   f"'{entry.driver_bone}' or '{entry.helper_bone}' - sampling '{arm_ob.name}' instead")
 
-    anim = sample_arm.animation_data
-    if anim is None:
-        anim = sample_arm.animation_data_create()
-
     # Determine frame range via shared helper (respects manual vs auto mode). Auto
     # mode scans for keyframes on bones that exist in the sampled armature.
     fs, fe, valid = _get_proc_trigger_frame_range(entry, sample_arm)
     if not valid:
         print(f"[ProcBones] No valid frame range for '{entry.helper_bone}' "
               f"in action '{action.name}' : check action has bone keyframes")
+        return None
+
+    is_legacy = getattr(action, 'is_action_legacy', True)
+    target_slot = None if is_legacy else _find_action_slot(action, entry.action_slot_name)
+    return sample_arm, target_slot, list(range(fs, fe + 1))
+
+
+def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = False) -> list:
+    """Sample trigger-target pairs from the action by evaluating the scene at each
+    driver bone keyframe frame. Returns list of (driver_quat, helper_quat)."""
+    prefetched = _export_trigger_prefetch.pop((arm_ob.name, entry_idx), None)
+    if prefetched is not None:
+        return prefetched
+    if _building_proc_cache:
         return []
-    frames = list(range(fs, fe + 1))
+    job = _resolve_trigger_job(arm_ob, entry, entry_idx)
+    if job is None:
+        return []
+    sample_arm, target_slot, frames = job
+    return _sample_trigger_group(arm_ob, sample_arm, entry.action, target_slot, frames,
+                                 [(entry, entry_idx)], scene, export_print)[0]
 
-    # Find per-trigger tolerance fcurve once (keyed on driver bone).
-    fcurves = _get_action_fcurves(action, entry.action_slot_name)
-    _tol_dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-    _tol_fc = next((fc for fc in fcurves
-                    if fc.data_path == _tol_dp and fc.array_index == 0), None)
 
-    # Resolve target slot for assignment
-    is_legacy     = getattr(action, 'is_action_legacy', True)
-    target_slot   = None if is_legacy else _find_action_slot(action, entry.action_slot_name)
+def prefetch_proc_triggers(arm_ob, entries, scene) -> None:
+    """Sample every TRIGGER entry sharing an action, slot and frame range in one frame
+    sweep, since each frame_set re-evaluates the whole scene. _build_proc_triggers
+    consumes the results; call clear_proc_trigger_prefetch() when the export is done."""
+    _export_trigger_prefetch.clear()
+    groups: dict[tuple, list] = {}
+    jobs: dict[tuple, tuple] = {}
+    for entry_idx, entry in entries:
+        if getattr(entry, 'proc_type', 'TRIGGER') != 'TRIGGER' or not entry.helper_bone:
+            continue
+        job = _resolve_trigger_job(arm_ob, entry, entry_idx)
+        if job is None:
+            continue
+        sample_arm, target_slot, frames = job
+        key = (sample_arm.name, entry.action.name,
+               target_slot.handle if target_slot is not None else None, frames[0], frames[-1])
+        jobs[key] = (sample_arm, entry.action, target_slot, frames)
+        groups.setdefault(key, []).append((entry, entry_idx))
+
+    for key, items in groups.items():
+        sample_arm, action, target_slot, frames = jobs[key]
+        results = _sample_trigger_group(arm_ob, sample_arm, action, target_slot, frames,
+                                        items, scene, export_print=True)
+        for (entry, entry_idx), triggers in zip(items, results):
+            _export_trigger_prefetch[(arm_ob.name, entry_idx)] = triggers
+
+
+def clear_proc_trigger_prefetch() -> None:
+    _export_trigger_prefetch.clear()
+
+
+def _sample_trigger_group(arm_ob, sample_arm, action, target_slot, frames, items, scene,
+                          export_print) -> list:
+    """Sweep frames once and read every (entry, entry_idx) in items per frame.
+    Returns one trigger list per item, in order."""
+    global _building_proc_cache
+
+    anim = sample_arm.animation_data
+    if anim is None:
+        anim = sample_arm.animation_data_create()
+
+    # Per-trigger tolerance fcurve, keyed on each entry's driver bone.
+    fcurves = _get_action_fcurves(action, items[0][0].action_slot_name)
+    tol_fcs = []
+    for entry, _ in items:
+        tol_dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
+        tol_fcs.append(next((fc for fc in fcurves
+                             if fc.data_path == tol_dp and fc.array_index == 0), None))
 
     # Save state
     orig_frame   = scene.frame_current
@@ -845,27 +899,26 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
     orig_use_nla = anim.use_nla
     orig_slot_handle = getattr(anim, 'action_slot_handle', None)
 
-    was_overridden = (sample_arm.name, entry.helper_bone) in _overridden_helpers
+    was_overridden = [(sample_arm.name, e.helper_bone) in _overridden_helpers for e, _ in items]
     # Snapshot the current pose so it can be restored exactly after cache build.
-    # The identity-then-frame_set approach in the finally block only restores
-    # keyframed bones; this snapshot preserves manually posed (non-keyframed) bones.
     # frame_set re-evaluates the whole scene, so when sampling from a reference
     # armature the exported armature (arm_ob) must be snapshot/restored too.
     restore_arms = [sample_arm] if sample_arm is arm_ob else [sample_arm, arm_ob]
     saved_pose = {a.name: {pb.name: pb.matrix_basis.copy() for pb in a.pose.bones}
                   for a in restore_arms}
 
-    # When sampling a reference armature it may be hidden/excluded from the view
-    # layer; force it evaluatable so frame_set actually drives its pose, else every
-    # trigger would collapse to the rest pose. Restored in the finally block.
+    # A reference armature is often hidden/excluded; force it evaluatable so frame_set
+    # actually drives its pose, else every trigger would collapse to the rest pose.
     restore_visibility = _force_evaluatable(sample_arm) if sample_arm is not arm_ob else None
 
+    results = [[] for _ in items]
     _building_proc_cache = True
     try:
-        # Unmute constraints/drivers on the helper so frame_set captures their
+        # Unmute constraints/drivers on the helpers so frame_set captures their
         # effect. If sim was already running (was_overridden), saved states are
         # preserved in _helper_saved_mutes - _temp_unmute_helper doesn't touch them.
-        _temp_unmute_helper(sample_arm, entry.helper_bone)
+        for entry, _ in items:
+            _temp_unmute_helper(sample_arm, entry.helper_bone)
 
         anim.use_nla = False
         anim.action  = action
@@ -878,23 +931,19 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
                 except Exception:
                     pass
 
-        # Sample from REST pose + the action, not the user's current pose. Zero
-        # every bone's local transform so non-keyframed bones sit at rest during
-        # sampling; frame_set re-applies the action on top each frame, overriding
-        # only the keyframed channels. Without this, any bone the user has posed
-        # (but the action doesn't key) leaks into the constraint/driver evaluation
-        # that produces the helper pose, silently distorting the exported triggers.
-        # The pre-build pose is restored from saved_pose in the finally block.
+        # Sample from REST pose + the action, not the user's current pose: bones the
+        # action doesn't key would otherwise leak into the constraint/driver evaluation.
         for a in restore_arms:
             for pb in a.pose.bones:
                 pb.matrix_basis = Matrix.Identity(4)
 
-        triggers = []
+        bones = [(sample_arm.pose.bones.get(e.driver_bone), sample_arm.pose.bones.get(e.helper_bone))
+                 for e, _ in items]
         for frame in frames:
             scene.frame_set(int(frame), subframe=frame - int(frame))
-            d_pb = sample_arm.pose.bones.get(entry.driver_bone)
-            h_pb = sample_arm.pose.bones.get(entry.helper_bone)
-            if d_pb and h_pb:
+            for i, (d_pb, h_pb) in enumerate(bones):
+                if not (d_pb and h_pb):
+                    continue
                 d_local = sample_arm.convert_space(
                     pose_bone=d_pb, matrix=d_pb.matrix,
                     from_space='POSE', to_space='LOCAL')
@@ -906,9 +955,9 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
                     from_space='POSE', to_space='LOCAL')
                 hloc = h_local.to_translation()
                 hq   = h_local.to_quaternion().normalized()
-                tol = (_tol_fc.evaluate(frame) if _tol_fc is not None
+                tol = (tol_fcs[i].evaluate(frame) if tol_fcs[i] is not None
                        else d_pb.bone.vs.proc_tolerance)
-                triggers.append((dq, dloc, hloc, hq, tol))
+                results[i].append((dq, dloc, hloc, hq, tol))
     finally:
         anim.action  = orig_action
         anim.use_nla = orig_use_nla
@@ -917,17 +966,15 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
                 anim.action_slot_handle = orig_slot_handle
             except Exception:
                 pass
-        # Restore the pre-build pose. frame_set re-evaluates the original action
-        # and updates scene.frame_current; the snapshot then restores ALL bones
-        # (including non-keyframed ones that frame_set would leave at identity).
+        # frame_set only restores keyframed bones; the snapshot restores the rest.
         scene.frame_set(orig_frame)
         for a in restore_arms:
             for pb in a.pose.bones:
                 if pb.name in saved_pose[a.name]:
                     pb.matrix_basis = saved_pose[a.name][pb.name]
-        # Re-mute the helper if it was already overridden before this build.
-        if was_overridden:
-            _set_helper_mute(sample_arm, entry.helper_bone, True)
+        for (entry, _), overridden in zip(items, was_overridden):
+            if overridden:
+                _set_helper_mute(sample_arm, entry.helper_bone, True)
         if restore_visibility is not None:
             restore_visibility()
         _building_proc_cache = False
@@ -937,13 +984,11 @@ def _build_proc_triggers(arm_ob, entry, entry_idx: int, scene, export_print = Fa
         slot_name = getattr(target_slot, 'name_display', '') or getattr(target_slot, 'name', '')
         if slot_name:
             slot_label = f" [slot '{slot_name}']"
-    if not export_print:
-        print(f"[ProcBones] Cached {len(triggers)} triggers for '{entry.helper_bone}' "
-            f"driven by '{entry.driver_bone}' via '{action.name}'{slot_label}")
-    else:
-        print(f"  - Cached {len(triggers)} triggers for '{entry.helper_bone}' "
-            f"driven by '{entry.driver_bone}' via '{action.name}'{slot_label}")
-    return triggers
+    lead = "  - Cached" if export_print else "[ProcBones] Cached"
+    for (entry, _), triggers in zip(items, results):
+        print(f"{lead} {len(triggers)} triggers for '{entry.helper_bone}' "
+              f"driven by '{entry.driver_bone}' via '{action.name}'{slot_label}")
+    return results
 
 
 def invalidate_proc_cache(arm_name: str) -> None:

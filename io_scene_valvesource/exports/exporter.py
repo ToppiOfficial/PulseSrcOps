@@ -1,4 +1,4 @@
-import bpy, bmesh, collections, dataclasses, re, typing, os
+import bpy, bmesh, collections, dataclasses, gc, re, typing, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from mathutils import Vector, Matrix, Euler
@@ -83,6 +83,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         ops.ed.undo_push(message=self.bl_label)
 
+        # The export allocates millions of short-lived objects; cyclic GC passes over them
+        # cost noticeable pauses and reclaim nothing until the export ends anyway.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
         try:
             context.tool_settings.use_keyframe_insert_auto = False
             context.tool_settings.use_keyframe_insert_keyingset = False
@@ -103,6 +107,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 unhide_all(view_layer.layer_collection)
 
             self.files_exported = self.attemptedExports = 0
+            begin_bone_exportname_cache()
             self._bake_constraint_poses(context)
 
             export_ids = self._collect_export_ids(context)
@@ -120,6 +125,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.errorReport(get_id("exporter_report_aborted", True).format(self.files_exported, self.elapsed_time()))
 
         finally:
+            if gc_was_enabled:
+                gc.enable()
+            end_bone_exportname_cache()
             ops.ed.undo_push(message=self.bl_label)
             if bpy.app.debug_value <= 1:
                 ops.ed.undo()
@@ -378,6 +386,8 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             planner.cleanup()
 
         self._warn_unicode(id)
+        if not bench.quiet:
+            print(f"- {id.name} total: {bench.total():.4f}s")
         return True
 
     def _execute_task(self, context, original_id, task: ExportTask, path: str,
@@ -404,6 +414,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         baker = Baker(self)
         bake_results = []
+        ob_bench = BenchMarker(1, "bake")
 
         if isinstance(source, Collection):
             group_vmaps = valvesource_vertex_maps(source)
@@ -417,6 +428,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     baked_metaballs.append(ob)
 
                 bake = baker.bake(ob)
+                ob_bench.report(ob.name)
                 if bake:
                     if planner:
                         orig = planner.original_name(ob.session_uid)
@@ -444,13 +456,14 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 if comp_bake:
                     bake_results.append(comp_bake)
 
-        bench.report("bake", len(bake_results))
+        bench.report(f"bake ({len(bake_results)} objects)")
 
         if not any(bake_results):
             return True
 
         # -- vertex animations ------------------------------------------------
         self._process_vertex_animations(source, bake_results, bench)
+        bench.report("vertex animations")
 
         # -- DMX automerge ----------------------------------------------------
         if isinstance(source, Collection) and State.exportFormat == ExportFormat.DMX:
@@ -489,6 +502,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if not self._setup_skeleton(source, bake_results, baker):
                 return False
 
+        bench.report("skeleton setup")
         self.bake_results = list(baker._cache.values())
         self._last_bake_results.extend(bake_results)
 
@@ -558,7 +572,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         else:
             self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
 
-        bench.report(write_func.__name__)
+        bench.report("write")
 
         if State.compiler > Compiler.STUDIOMDL or State.datamodelFormat >= 22:
             if re.match(r"[^a-z0-9_]", source.name):
@@ -648,7 +662,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             and e.vs.dmx_attachment
         ]
 
-        if candidate_empties:
+        if candidate_empties and all(self._rest_math_safe(e) for e in candidate_empties):
+            self.exportable_empties = [(e, self._empty_rest_world(e)) for e in candidate_empties]
+        elif candidate_empties:
             original_pose = self.armature_src.data.pose_position
             toggle_rest = original_pose != "REST"
             if toggle_rest:
@@ -664,6 +680,25 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             self.exportable_empties = []
 
         return True
+
+    def _rest_math_safe(self, empty) -> bool:
+        # Constraints, drivers or a relative-parent bone can make the empty depend on
+        # the pose in ways _empty_rest_world can't reproduce; those use the REST toggle.
+        if any(not c.mute for c in empty.constraints):
+            return False
+        if empty.animation_data and len(empty.animation_data.drivers):
+            return False
+        return not self.armature_src.data.bones[empty.parent_bone].use_relative_parent
+
+    def _empty_rest_world(self, empty) -> Matrix:
+        # Swap the parent bone's posed tail matrix for its rest one, avoiding the two
+        # full scene re-evaluations a pose_position toggle costs.
+        arm = self.armature_src
+        pb = arm.pose.bones[empty.parent_bone]
+        tail = Matrix.Translation((0.0, pb.bone.length, 0.0))
+        posed = arm.matrix_world @ pb.matrix @ tail
+        rest = arm.matrix_world @ pb.bone.matrix_local @ tail
+        return rest @ posed.inverted() @ empty.matrix_world
 
     def _process_vertex_animations(self, source, bake_results: list[BakeResult], bench: BenchMarker) -> None:
         if not (isinstance(source, Collection) and len(getattr(source.vs, "vertex_animations", []))):

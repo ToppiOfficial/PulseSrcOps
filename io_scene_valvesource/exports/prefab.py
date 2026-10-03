@@ -540,6 +540,8 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 )
 
         lines: list[str] = []
+        from .. import procbones_sim as _pbsim
+        _pbsim.prefetch_proc_triggers(arm, list(enumerate(entries)), scene)
 
         for entry_idx, entry in enumerate(entries):
             proc_type   = getattr(entry, 'proc_type', 'TRIGGER')
@@ -637,6 +639,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 lines.append(f'<upvector>  {up[0]:.6f} {up[1]:.6f} {up[2]:.6f}')
                 lines.append('')
 
+        _pbsim.clear_proc_trigger_prefetch()
         return '\n'.join(lines)
 
 # -----------------------------------------------------------------------------

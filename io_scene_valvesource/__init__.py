@@ -100,11 +100,16 @@ class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
         name=get_id("updater_title"),
         default=False)
     dev_build_date : StringProperty(options={'HIDDEN'})
+    print_export_timings : BoolProperty(
+        name="Print export timings",
+        description="Print a per-phase time breakdown of each export to the system console",
+        default=False)
 
     def draw(self, context):
         layout = self.layout
 
         updater.draw_prefs(layout, self)
+        layout.prop(self, "print_export_timings")
 
         header = layout.row(align=True)
         header.prop(self, "show_bone_name_prefixes",
