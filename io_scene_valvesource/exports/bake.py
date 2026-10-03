@@ -46,8 +46,11 @@ class Baker:
         result.src = ob
         self._cache[uid] = result
 
+        # visible_get matches the mode_set poll that select_only used to trip on hidden objects.
         try:
-            select_only(ob)
+            if not ob.visible_get():
+                raise RuntimeError
+            _select_only_quiet(ob)
         except RuntimeError:
             self._exporter.warning(get_id("exporter_err_hidden", True).format(ob.name))
             return None
@@ -175,18 +178,21 @@ class Baker:
         # -- bake mesh --------------------------------------------------------
         if ob.type in exportable_types:
             depsgraph = bpy.context.evaluated_depsgraph_get()
+            bench.report("eval: depsgraph")
             data = bpy.data.meshes.new_from_object(
                 ob.evaluated_get(depsgraph), preserve_all_data_layers=True, depsgraph=depsgraph
             )
             data.name = ob.name + "_baked"
+            bench.report("eval: new_from_object")
             baked = self._put_in_object(ob, data, solidify_fill_rim)
+            bench.report("eval: put in object")
             if should_tri:
                 bpy.context.view_layer.objects.active = baked
                 select_only(baked)
                 self._triangulate()
+                bench.report("eval: triangulate")
         else:
             baked = None
-        bench.report("evaluate mesh")
 
         # Zero-state basis normal capture: when the user has shape keys at non-zero
         # default values, normals from the regular bake are shape-deformed.
@@ -255,6 +261,10 @@ class Baker:
 
         for mod in ob.modifiers:
             mod.show_viewport = False
+
+        # The working copy is spent; leaving it linked makes every later depsgraph rebuild bigger.
+        if ob is not result.src and ob.name in bpy.context.scene.collection.objects:
+            bpy.context.scene.collection.objects.unlink(ob)
 
         bpy.context.view_layer.objects.active = baked
         baked.select_set(True)
@@ -387,16 +397,18 @@ class Baker:
             key.value = (old_val - s_min) / rng if rng != 0 else 0.0
 
     def _put_in_object(self, source_ob: bpy.types.Object, data, solidify_fill_rim, quiet=False) -> bpy.types.Object:
-        if bpy.context.view_layer.objects.active:
-            ops.object.mode_set(mode="OBJECT")
-
         ob = bpy.data.objects.new(name=source_ob.name, object_data=data)
         ob.matrix_world = source_ob.matrix_world
         bpy.context.scene.collection.objects.link(ob)
-        select_only(ob)
+        _select_only_quiet(ob)
 
-        exporting_smd = State.exportFormat == ExportFormat.SMD
-        ops.object.transform_apply(scale=True, location=exporting_smd, rotation=exporting_smd)
+        # Same BKE_mesh_transform call transform_apply makes, without the operator's scene update.
+        if State.exportFormat == ExportFormat.SMD:
+            data.transform(ob.matrix_basis)
+            ob.matrix_basis.identity()
+        else:
+            data.transform(Matrix.Diagonal(ob.scale).to_4x4())
+            ob.scale = (1.0, 1.0, 1.0)
 
         if hasCurves(source_ob):
             ops.object.mode_set(mode="EDIT")
