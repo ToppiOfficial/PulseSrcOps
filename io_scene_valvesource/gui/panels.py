@@ -12,7 +12,8 @@ from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_en
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
-                     is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT)
+                     is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT,
+                     embedded_anim_allowed, get_collection_export_objects)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
 from .operators import (
@@ -55,6 +56,13 @@ class Properties_Panel(Panel):
 
     def draw(self, context):
         layout = self.layout
+
+
+def _model_armature(item):
+    """The rig a model exportable is skinned to, preferring one inside its collection."""
+    obs = list(get_collection_export_objects(item)) if isinstance(item, Collection) else [item]
+    own = next((ob for ob in obs if ob.type == 'ARMATURE'), None)
+    return own or next((arm for arm in map(get_armature, obs) if arm), None)
 
 
 class SMD_PT_ViewportSimulation(Panel):
@@ -207,9 +215,11 @@ class SMD_PT_SceneEncodingOptions(Panel):
         if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX):
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
-            if is_source1:
+            if is_source1 and State.datamodelFormat == 22:
                 row.row().prop(scene.vs, "prefab_export_mode", expand=True)
                 dme_active = scene.vs.prefab_export_mode == 'DME'
+            elif is_source1:
+                row.label(text=get_id("prefab_export_mode_model22_only"), icon='CHECKMARK')
             else:
                 # Source 2 is hand-authored in ModelDoc/vmdl - no embedding target exists.
                 row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
@@ -297,6 +307,36 @@ class SMD_PT_Exportables(Panel):
     def is_collection(cls, item):
         return isinstance(item, Collection)
 
+    def _draw_anim_settings(self, layout, scene, arm) -> None:
+        avs = arm.data.vs
+        box = layout.box()
+        col = box.column()
+        col.row().prop(avs, "action_selection", expand=True)
+        if any(e.proc_type == 'TRIGGER' and e.action for e in avs.proc_bones):
+            col.prop(avs, "export_proc_bone_actions")
+        if embedded_anim_allowed(scene):
+            col.prop(avs, "export_anims_separately")
+        if avs.action_selection != 'CURRENT':
+            is_slot_filter = avs.action_selection == 'FILTERED'
+            col.prop(arm.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
+            col.prop(avs, "reset_pose_per_anim")
+            if scene.vs.export_format == 'FBX':
+                col.prop(avs, "fbx_anim_layout")
+
+            col.separator(factor=0.5)
+            col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
+                      icon='ACTION')
+            if is_slot_filter:
+                ad = arm.animation_data
+                if ad:
+                    col.template_list("SMD_UL_ActionExport", "", ad, "action_suitable_slots",
+                                      avs, "action_preview_index", rows=3, maxrows=6)
+                else:
+                    col.label(text=get_id("action_preview_none_slots"), icon='INFO')
+            else:
+                col.template_list("SMD_UL_ActionExport", "", bpy.data, "actions",
+                                  avs, "action_preview_index", rows=3, maxrows=6)
+
     def draw(self, context) -> None:
         layout = self.layout
         active_object = context.object
@@ -333,34 +373,15 @@ class SMD_PT_Exportables(Panel):
                                          armvs, "proc_bones_index", rows=3)
             return
 
-        if item is not None and not self.is_collection(item) and not (active_exportable and active_exportable.is_prefab) and is_armature(item):
-            avs = item.data.vs
-            box = layout.box()
-            col = box.column()
-            col.row().prop(avs, "action_selection", expand=True)
-            if any(e.proc_type == 'TRIGGER' and e.action for e in avs.proc_bones):
-                col.prop(avs, "export_proc_bone_actions")
-            if avs.action_selection != 'CURRENT':
-                is_slot_filter = avs.action_selection == 'FILTERED'
-                col.prop(item.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
-                col.prop(avs, "reset_pose_per_anim")
-                if scene.vs.export_format == 'FBX':
-                    col.prop(avs, "fbx_anim_layout")
-
-                col.separator(factor=0.5)
-                col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
-                          icon='ACTION')
-                if is_slot_filter:
-                    ad = item.animation_data
-                    if ad:
-                        col.template_list("SMD_UL_ActionExport", "", ad, "action_suitable_slots",
-                                          avs, "action_preview_index", rows=3, maxrows=6)
-                    else:
-                        col.label(text=get_id("action_preview_none_slots"), icon='INFO')
-                else:
-                    col.template_list("SMD_UL_ActionExport", "", bpy.data, "actions",
-                                      avs, "action_preview_index", rows=3, maxrows=6)
+        if item is not None and not self.is_collection(item) and is_armature(item):
+            self._draw_anim_settings(layout, scene, item)
             return
+
+        # Embedded clips ride in the model DMX, so its rig's animation settings show here too.
+        if item is not None and embedded_anim_allowed(scene):
+            arm = _model_armature(item)
+            if arm:
+                self._draw_anim_settings(layout, scene, arm)
 
         if not item or not self.is_collection(item): return
 

@@ -344,6 +344,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             ad = id.animation_data
             if not ad:
                 return False
+            if embeds_animations(context.scene, id):
+                self.warning(get_id("exporter_warn_anim_embedded", True).format(id.name))
+                return True
 
         check_obs = get_collection_export_objects(id) if isinstance(id, Collection) else [id]
 
@@ -380,7 +383,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             bench.report("planning")
 
             for task in tasks:
-                if not self._execute_task(context, id, task, path, bench, planner):
+                # LOD / edgeline tasks follow the base one and don't need the clips again.
+                if not self._execute_task(context, id, task, path, bench, planner,
+                                          embed_anims=task is tasks[0]):
                     return False
         finally:
             planner.cleanup()
@@ -391,7 +396,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         return True
 
     def _execute_task(self, context, original_id, task: ExportTask, path: str,
-                      bench: BenchMarker, planner: ExportPlanner = None) -> bool:
+                      bench: BenchMarker, planner: ExportPlanner = None, embed_anims: bool = False) -> bool:
         source = task.source_id
 
         if isinstance(source, Collection) and not any(ob.vs.export for ob in source.objects):
@@ -570,7 +575,12 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             self.warning(get_id("exporter_warn_procbone_anim", True).format(
                 source.animation_data.action_slot.name_display))
         else:
-            self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
+            embed_jobs = self._embedded_anim_jobs(source) if embed_anims else None
+            if embed_jobs:
+                self.files_exported += self._run_dmx_writer(
+                    source, bake_results, self.sanitiseFilename(task.export_name), path, anim_jobs=embed_jobs)
+            else:
+                self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
 
         bench.report("write")
 
@@ -1005,7 +1015,38 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 jobs.append((action.name, action, action.slots[0] if action.slots else None))
         return jobs
 
-    def _run_dmx_writer(self, datablock, bake_results, name, dir_path, skeleton_only=False):
+    def _embedded_anim_jobs(self, source):
+        """(name, action, slot) clips for a model DMX to embed, picked like the per-file export."""
+        arm, baked = self.armature_src, self.armature
+        if isinstance(source, bpy.types.Object) and source.type == "ARMATURE":
+            return None
+        if not (arm and baked and embeds_animations(bpy.context.scene, arm)):
+            return None
+
+        constraint_baked = getattr(self, "_constraint_bake_actions", {}).get(arm.session_uid)
+        if constraint_baked:
+            # Motion is already in the baked actions; live constraints would fight it.
+            for pb in baked.pose.bones:
+                for con in pb.constraints:
+                    con.mute = True
+            return [(name, action, action.slots[0] if action.slots else None)
+                    for action, name in constraint_baked]
+
+        mode = arm.data.vs.action_selection
+        ad = baked.animation_data
+        if mode == "FILTERED_ACTIONS":
+            return self._filtered_anim_jobs(arm, baked)
+        if not (ad and ad.action):
+            return None
+        if mode == "FILTERED":
+            return self._filtered_anim_jobs(arm, baked)
+        if ad.action_slot and isProcBoneAnimSkipped(arm, None, ad.action_slot.name_display):
+            self.warning(get_id("exporter_warn_procbone_anim", True).format(ad.action_slot.name_display))
+            return None
+        name = actionSlotExportName(ad) if ad.action_slot else ad.action.name
+        return [(name, ad.action, ad.action_slot)]
+
+    def _run_dmx_writer(self, datablock, bake_results, name, dir_path, skeleton_only=False, anim_jobs=None):
         writer = DmxWriter(
             self, datablock, bake_results, name, dir_path,
             armature=self.armature, armature_src=self.armature_src,
@@ -1015,7 +1056,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),
-            skeleton_only=skeleton_only,
+            skeleton_only=skeleton_only, anim_jobs=anim_jobs,
         )
         return writer.write()
 

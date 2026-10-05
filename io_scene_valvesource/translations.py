@@ -44,6 +44,15 @@ _data = {
     'fbx_anim_layout_single_tip': {
         'en': "Write one FBX holding every animation as a separate take",
     },
+    'prop_export_anims_separately': {
+        'en': "Export Animations Separately",
+    },
+    'prop_export_anims_separately_tip': {
+        'en': "Write one animation DMX per clip instead of embedding the clips into the model DMX (EMBEDDED prefab mode embeds them by default, named for $sequence blockname)",
+    },
+    'exporter_warn_anim_embedded': {
+        'en': "Skipped animation export for \"{0}\": its animations are embedded in the model DMX.",
+    },
     'action_selection_mode_tip': {
         'en': "How actions are selected for export",
         'ja': "アクションのエクスポート選択方法",
@@ -1432,20 +1441,24 @@ _data = {
         'ja': "プレハブモード",
     },
     'prefab_export_mode_tip': {
-        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
+        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead, along with the armature's animations (DMX only)",
         'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
     },
     'prefab_export_mode_source2_forced': {
         'en': "FILE (Source 2 is hand-authored in ModelDoc/vmdl)",
         'ja': "FILE (Source 2 は ModelDoc/vmdl で手動作成)",
     },
+    'prefab_export_mode_model22_only': {
+        'en': "FILE (EMBEDDED needs Model 22 / PulseModel)",
+        'ja': "FILE (EMBEDDED は Model 22 / PulseModel が必要)",
+    },
     'prefab_export_mode_qci_tip': {
         'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",
         'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci/.vmdl プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseModel)",
-        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseModel) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Model 22 (Source 1) only - a PulseModel feature",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。Model 22 (Source 1) 専用 - PulseModel の機能です",
     },
     'bone_naming_label': {
         'en': "Bone Naming",

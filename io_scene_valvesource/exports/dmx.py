@@ -34,7 +34,7 @@ class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
                  exportable_empties, all_bake_results, flex_mode, flex_source,
-                 skeleton_only=False):
+                 skeleton_only=False, anim_jobs=None):
         self.r = reporter
         self.datablock = datablock
         self.bake_results = bake_results
@@ -51,6 +51,8 @@ class DmxWriter:
         # FBX companion: skeleton + flex controllers + prefabs, no DmeMesh. The mesh, its
         # morphs and its materials ship in the .fbx instead.
         self.skeleton_only = skeleton_only
+        # (name, action, slot) clips embedded into a model DMX; see embedded_anim_allowed.
+        self.anim_jobs = anim_jobs
         self.bone_ids: dict[str, int] = {}
 
     # -- reporting -----------------------------------------------------------
@@ -105,13 +107,11 @@ class DmxWriter:
 
         if self.armature:
             self.armature.data.pose_position = "POSE" if self.is_anim else "REST"
-            if self.armature.data.vs.reset_pose_per_anim:
-                if self.is_anim:
-                    self.r.warnUnkeyframedPose(self.name)
+            if self.is_anim:
+                self._prepare_anim_pose(self.name)
+            elif self.armature.data.vs.reset_pose_per_anim:
                 for pb in self.armature.pose.bones:
                     pb.matrix_basis.identity()
-            elif self.is_anim:
-                self.r.applyUnkeyframedSourcePose()
             bpy.context.view_layer.update()
 
         root["skeleton"] = DmeModel
@@ -148,7 +148,10 @@ class DmxWriter:
             self._write_meshes(combination_operator, bench)
 
         if self.is_anim:
-            self._write_animation(bench)
+            ad = self.armature.animation_data
+            self._write_animation_list([self._write_clip(self.name, "", ad, bench)])
+        elif self.anim_jobs and self.armature and not self.skeleton_only:
+            self._write_embedded_animations(bench)
 
         return self._write_out(bench)
 
@@ -570,8 +573,13 @@ class DmxWriter:
             ob = bake.object
             assert isinstance(ob.data, bpy.types.Mesh)
 
+            _src_mt = getattr(bake.src.vs, 'mesh_type', 'DEFAULT') if bake.src else 'DEFAULT'
+            # DME mode embeds collision in the model DMX as DmePhysicsShape, which
+            # $rendermesh skips and $datamodelphysics reads.
+            shape_class = "DmePhysicsShape" if (self.dme_mode and not self.proxy_only
+                                                and _src_mt == 'COLLISION') else "DmeMesh"
             vertex_data = dm.add_element("bind", "DmeVertexData", id=bake.name + "verts")
-            DmeMesh = dm.add_element(bake.name, "DmeMesh", id=bake.name + "mesh")
+            DmeMesh = dm.add_element(bake.name, shape_class, id=bake.name + "mesh")
             DmeMesh["visible"] = True
             DmeMesh["bindState"] = vertex_data
             DmeMesh["currentState"] = vertex_data
@@ -597,7 +605,6 @@ class DmxWriter:
             self.DmeModel_transforms.append(self._make_transform(bake.name, trfm_mat, "ob_base" + bake.name))
 
             _limit_mode = getattr(bpy.context.scene.vs, 'vertex_influence_limit_mode', 'AUTO')
-            _src_mt = getattr(bake.src.vs, 'mesh_type', 'DEFAULT') if bake.src else 'DEFAULT'
             if _src_mt == 'COLLISION':
                 weight_link_limit = 1
             elif _src_mt == 'CLOTHPROXY':
@@ -1214,21 +1221,60 @@ class DmxWriter:
         assert isinstance(evaluated, bpy.types.Object) and evaluated.pose
         return [evaluated.pose.bones[b.name] for b in self.exportable_bones]
 
-    def _write_animation(self, bench):
-        dm = self.dm
+    def _prepare_anim_pose(self, anim_name):
+        if self.armature.data.vs.reset_pose_per_anim:
+            self.r.warnUnkeyframedPose(anim_name)
+            for pb in self.armature.pose.bones:
+                pb.matrix_basis.identity()
+        else:
+            self.r.applyUnkeyframedSourcePose()
+
+    def _write_animation_list(self, clips):
         armature_name = self.armature_src.name if self.armature_src else self.name
-        ad = self.armature.animation_data
+        DmeAnimationList = self.dm.add_element(armature_name, "DmeAnimationList", id=armature_name + "list")
+        DmeAnimationList["animations"] = datamodel.make_array(clips, datamodel.Element)
+        self.root["animationList"] = DmeAnimationList
+
+    def _write_embedded_animations(self, bench):
+        # Meshes are already written at REST; sample every clip in POSE, then put the
+        # shared baked armature back as later tasks of this export id expect it.
+        scene = bpy.context.scene
+        arm_data = self.armature.data
+        ad = self.armature.animation_data or self.armature.animation_data_create()
+        saved_action, saved_slot = ad.action, ad.action_slot
+        saved_pose, saved_frame = arm_data.pose_position, scene.frame_current
+        clips = []
+        try:
+            arm_data.pose_position = "POSE"
+            for name, action, slot in self.anim_jobs:
+                ad.action = action
+                if slot is not None:
+                    ad.action_slot = slot
+                print(f"- Embedding animation \"{name}\"")
+                self._prepare_anim_pose(name)
+                # Element ids must stay unique with several clips in one datamodel.
+                clips.append(self._write_clip(name, name + ":", ad, bench))
+        finally:
+            ad.action = saved_action
+            if saved_action is not None and saved_slot is not None:
+                ad.action_slot = saved_slot
+            for pb in self.armature.pose.bones:
+                pb.matrix_basis.identity()
+            arm_data.pose_position = saved_pose
+            scene.frame_set(saved_frame)
+        if clips:
+            self._write_animation_list(clips)
+
+    def _write_clip(self, name, id_prefix, ad, bench):
+        dm = self.dm
         # first_frame offsets sampling so actions that don't start on frame 0 export their real
         # motion; the DmeChannelsClip timeline stays 0-based. See animationFrameRange.
         first_frame, anim_len = animationFrameRange(ad) if ad else (0, 0)
         fps = bpy.context.scene.render.fps * bpy.context.scene.render.fps_base
 
-        DmeChannelsClip = dm.add_element(self.name, "DmeChannelsClip", id=self.name + "clip")
-        DmeAnimationList = dm.add_element(armature_name, "DmeAnimationList", id=armature_name + "list")
-        DmeAnimationList["animations"] = datamodel.make_array([DmeChannelsClip], datamodel.Element)
-        self.root["animationList"] = DmeAnimationList
+        DmeChannelsClip = dm.add_element(name, "DmeChannelsClip", id=name + "clip")
 
-        DmeTimeFrame = dm.add_element("timeframe", "DmeTimeFrame", id=self.name + "time")
+        DmeTimeFrame = dm.add_element("timeframe", "DmeTimeFrame", id=name + "time")
         duration = anim_len / fps
         if dm.format_ver >= 11:
             DmeTimeFrame["duration"] = datamodel.Time(duration)
@@ -1236,7 +1282,8 @@ class DmxWriter:
             DmeTimeFrame["durationTime"] = int(duration * 10000)
         DmeTimeFrame["scale"] = 1.0
         DmeChannelsClip["timeFrame"] = DmeTimeFrame
-        DmeChannelsClip["frameRate"] = fps if self.source2 else int(fps)
+        # Only the Source 2 compilers read a float frameRate.
+        DmeChannelsClip["frameRate"] = fps if self.source2 and State.compiler > Compiler.STUDIOMDL else int(fps)
 
         channels = DmeChannelsClip["channels"] = datamodel.make_array([], datamodel.Element)
         bone_channels = {}
@@ -1253,7 +1300,8 @@ class DmxWriter:
             bone_channels[bone.name] = []
             for suffix, attr, type_name, dm_type in channel_template:
                 ch_name = export_name + suffix
-                cur = dm.add_element(ch_name, "DmeChannel", id=bone.name + suffix)
+                ch_id = id_prefix + ch_name
+                cur = dm.add_element(ch_name, "DmeChannel", id=id_prefix + bone.name + suffix)
                 cur["toAttribute"] = attr
                 cur["toElement"] = (self.bone_elements[bone.name] if bone else self.DmeModel)["transform"]
                 cur["mode"] = 1
@@ -1261,8 +1309,8 @@ class DmxWriter:
                     # scale is a single float on the transform, not an indexed vector component
                     cur["fromIndex"] = 0
                     cur["toIndex"] = 0
-                layer = dm.add_element(type_name + " log", f"Dme{type_name}LogLayer", ch_name + "loglayer")
-                cur["log"] = dm.add_element(type_name + " log", f"Dme{type_name}Log", ch_name + "log")
+                layer = dm.add_element(type_name + " log", f"Dme{type_name}LogLayer", ch_id + "loglayer")
+                cur["log"] = dm.add_element(type_name + " log", f"Dme{type_name}Log", ch_id + "log")
                 cur["log"]["layers"] = datamodel.make_array([layer], datamodel.Element)
                 layer["times"] = datamodel.make_array([], datamodel.Time if dm.format_ver > 11 else int)
                 layer["values"] = datamodel.make_array([], dm_type)
@@ -1313,6 +1361,7 @@ class DmxWriter:
                 print(".", debug_only=True, newline=False)
 
         print(debug_only=True)
+        return DmeChannelsClip
 
     # -- write-out -----------------------------------------------------------
     def _write_out(self, bench) -> int:

@@ -519,7 +519,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         # name as a prefix and strips it ("ValveBiped.Bip01" -> "Bip01"). That is
         # intended for real prefixes like "ValveBiped.", but an accidental dot in a
         # bone name silently drops part of the name. Only the Source 1 .vrd path is
-        # affected - DME prefab, Source 2 and newer studiomdl/PulseMDL don't strip.
+        # affected - DME prefab, Source 2 and newer studiomdl/PulseModel don't strip.
         preserved = tuple(p.lower() for p in get_preserved_bone_prefixes())
         warned_dotnames: set[str] = set()
         for entry in entries:

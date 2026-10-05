@@ -77,7 +77,8 @@ class SMD_UL_GroupItems(UIList):
             return
         r = layout.row(align=True)
         r.prop(ob.vs,"export",text="",icon='CHECKBOX_HLT' if ob.vs.export else 'CHECKBOX_DEHLT',emboss=False)
-        r.label(text=ob.name,translate=False,icon=MakeObjectIcon(ob,suffix="_DATA"))
+        icon = 'MOD_PHYSICS' if getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'COLLISION' else MakeObjectIcon(ob, suffix="_DATA")
+        r.label(text=ob.name,translate=False,icon=icon)
 
     def filter_items(self, context, data, propname): # pyright: ignore
         # Entries (own objects plus those folded in from bypassed child groups)

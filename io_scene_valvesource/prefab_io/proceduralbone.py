@@ -1,7 +1,7 @@
 """Procedural (helper) bone serialization - DME export for the model DMX.
 
 Converts the armature's ``vs.proc_bones`` entries (``ProcBoneEntry``) into the
-two DME skeleton-joint element types PulseMDL reads out of the model ``.dmx``:
+two DME skeleton-joint element types PulseModel reads out of the model ``.dmx``:
 
 * **DmeQuatInterpBone** - a ``$driverbone`` / VRD ``<helper>`` (proc_type TRIGGER)
 * **DmeAimAtBone**       - a ``$driverlookat`` / VRD ``<aimconstraint>`` (proc_type LOOKAT)
@@ -136,7 +136,7 @@ def build_trigger_transforms(arm, entry, entry_idx, scene):
 
 
 # -----------------------------------------------------------------------------
-# DME (model-DMX / PulseMDL)
+# DME (model-DMX / PulseModel)
 # -----------------------------------------------------------------------------
 
 def write_dme_quatinterp_attrs(elem, arm, entry, entry_idx, scene, control_bone,

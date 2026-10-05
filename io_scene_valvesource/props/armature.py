@@ -219,6 +219,8 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
         ('SINGLE_FILE', get_id("fbx_anim_layout_single"), get_id("fbx_anim_layout_single_tip")),
     ))
 
+    export_anims_separately : BoolProperty(name=get_id("prop_export_anims_separately"), description=get_id("prop_export_anims_separately_tip"), default=False)
+
     hitboxes       : CollectionProperty(type=HitboxEntry)
     hitboxes_index : IntProperty(default=-1, update=_on_hitboxes_index_changed)
     hboxset_name          : StringProperty(name=get_id('prop_hitbox_hboxset'), description=get_id('prop_hitbox_hboxset_tip'), default='')

@@ -110,7 +110,7 @@ export_formats_by_engine = {
 
 class Compiler:
     UNKNOWN = 0
-    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseModel)
+    STUDIOMDL = 1 # Source 1 (studiomdl / PulseModel)
     RESOURCECOMPILER = 2 # Source 2 pre-Alyx (Dota 2)
     MODELDOC = 3 # Source 2 post-Alyx (Alyx / CS2 / Deadlock)
 
@@ -814,14 +814,27 @@ def is_bypassed_into_parent(col) -> bool:
     fold it into. Top-level bypassed collections behave as normal groups."""
     return col.vs.bypass and get_collection_parent_collection(col) is not None
 
+def _collection_own_export_objects(col) -> list[bpy.types.Object]:
+    result = list(col.objects)
+    for child in col.children:
+        if child.vs.bypass:
+            result.extend(_collection_own_export_objects(child))
+    return result
+
 def get_collection_export_objects(col) -> list[bpy.types.Object]:
     """The objects that belong to `col` for export purposes: its own objects
     plus, recursively, the objects of any child collections marked 'bypass'
     (those fold into this group instead of exporting separately)."""
-    result = list(col.objects)
-    for child in col.children:
-        if child.vs.bypass:
-            result.extend(get_collection_export_objects(child))
+    result = _collection_own_export_objects(col)
+    # Embedded mode writes collision as DmePhysicsShape in the model DMX, so COLLISION
+    # meshes rigged to this group's armature join it wherever they are collected.
+    arms = {ob for ob in result if ob.type == 'ARMATURE'}
+    if arms and prefab_mode_is_dme(bpy.context.scene):
+        members = set(result)
+        result.extend(ob for ob in bpy.context.scene.objects
+                      if ob.type == 'MESH' and ob not in members
+                      and getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'COLLISION'
+                      and get_armature(ob) in arms)
     return result
 
 def hasFlexControllerSource(source):
@@ -919,14 +932,22 @@ def make_export_list(scene: bpy.types.Scene):
     # Collections
     ungrouped_object_ids = State.exportableObjects.copy()
 
-    scene_groups = []
+    group_members = {}
+    absorbed = set()  # collision meshes another group pulls in (Embedded mode)
     for group in sorted(bpy.data.collections, key=lambda g: g.name.lower()):
-        valid = False
-        for obj in [obj for obj in get_collection_export_objects(group) if obj.session_uid in State.exportableObjects]:
+        members = [obj for obj in get_collection_export_objects(group) if obj.session_uid in State.exportableObjects]
+        group_members[group] = members
+        if shouldExportGroup(group):
+            own = set(_collection_own_export_objects(group))
+            absorbed.update(obj.session_uid for obj in members if obj not in own)
+
+    scene_groups = []
+    for group, members in group_members.items():
+        for obj in members:
             if not group.vs.mute and obj.type != 'ARMATURE' and obj.session_uid in ungrouped_object_ids:
                 ungrouped_object_ids.remove(obj.session_uid)
-            valid = True
-        if valid:
+        meshes = [obj for obj in members if obj.type != 'ARMATURE']
+        if members and not (meshes and all(obj.session_uid in absorbed for obj in meshes)):
             scene_groups.append(group)
 
     for g in scene_groups:
@@ -1384,15 +1405,24 @@ prefab_type_info = {
 
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs are encoded into the model file rather than written to
-    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseModel) - Source 2
-    models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
-    GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
-    DMX and FBX honour the user's prefab_export_mode (FBX embeds into its companion
-    DMX). SMD has no embedding, so it always uses file mode."""
-    if getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL:
+    .qci/.vmdl files. Embedding is a PulseModel feature, so it needs Source 1 Model 22;
+    every other engine/format uses file mode. DMX and FBX (via its companion DMX)
+    honour the user's prefab_export_mode; SMD has no embedding."""
+    if (getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL
+            or State.datamodelFormat != 22):
         return False
     return (State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX)
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
+
+
+def embedded_anim_allowed(scene) -> bool:
+    """True when model DMXs carry their armature's animations: EMBEDDED prefab mode, DMX only."""
+    return prefab_mode_is_dme(scene) and State.exportFormat == ExportFormat.DMX
+
+
+def embeds_animations(scene, arm) -> bool:
+    return (getattr(arm, 'type', None) == 'ARMATURE' and not arm.data.vs.export_anims_separately
+            and embedded_anim_allowed(scene))
 
 
 def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str, int]]:
