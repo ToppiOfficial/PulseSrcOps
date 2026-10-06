@@ -9,6 +9,7 @@ __all__ = [
     'ArmatureItemEntry',
     'HitboxEntry',
     'PhysicsShapeEntry',
+    'ProcBoneTriggerInfluence',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',

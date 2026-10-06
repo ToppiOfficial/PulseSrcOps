@@ -1,4 +1,6 @@
 import bpy
+from bpy.app.translations import pgettext
+from .. import procbones_sim as _procbones_sim
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
 from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable, isProcBoneAnimSkipped, _procBoneSlotDisplayName
 from .helpers import _model_armature, build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
@@ -340,6 +342,25 @@ class SMD_UL_ArmatureItems(UIList):
                     row.label(text=get_id('label_not_in_collection', format_string=True), icon='GROUP_BONE')
 
 
+class SMD_UL_ProcBoneInfluences(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, 'selected', text="")
+        row.label(text=f"Frame {item.frame}")
+        row.prop(item, 'use_override', text="Override")
+        if item.use_override:
+            row.prop(item, 'angle', text="")
+        else:
+            angle = row.row()
+            angle.enabled = False
+            angle.prop(data, 'influence_angle', text="Default")
+        arm_ob = get_armature(context.object)
+        if arm_ob:
+            weights = _procbones_sim.get_live_proc_influences(arm_ob, data)
+            if weights is not None:
+                row.label(text=f"{weights.get(item.frame, 0.0):.0%}")
+
+
 class SMD_UL_ProcBones(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
@@ -368,6 +389,17 @@ class SMD_UL_BoneNamePrefixes(UIList):
         split = layout.split(factor=0.6, align=True)
         split.prop(item, "prefix", text="", emboss=True)
         split.prop(item, "shortcut", text="", emboss=True, icon='SYNTAX_OFF')
+
+
+class SMD_UL_MeshMaterials(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        material = item.material
+        if self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='MATERIAL' if material else 'MATERIAL_DATA')
+        else:
+            layout.label(text=material.name if material else pgettext("Empty"),
+                         icon='MATERIAL' if material else 'MATERIAL_DATA', translate=False)
 
 
 class SMD_UL_MaterialPaths(UIList):

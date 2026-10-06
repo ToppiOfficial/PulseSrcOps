@@ -319,7 +319,7 @@ def _ensure_proc_action(armature):
 def _add_trigger_slot(action, armature, helper_name, driver_name, triggers):
     """Add a slot (named after the helper) to ``action`` whose N frames pose the
     driver at each trigger rotation and the helper at the matching target pose,
-    plus a per-frame proc_tolerance curve. ``triggers`` is a list of
+    with transforms keyed at each trigger frame. ``triggers`` is a list of
     ``(tol_rad, d_mat_quat, h_export_quat, h_export_trans)`` in absolute-local
     space. Returns the slot name to store in ``entry.action_slot_name``."""
     d_rest_inv = bone_rest_rot(armature, driver_name).to_quaternion().inverted()
@@ -334,7 +334,6 @@ def _add_trigger_slot(action, armature, helper_name, driver_name, triggers):
     d_rot = [curve(f'pose.bones["{driver_name}"].rotation_quaternion', i) for i in range(4)]
     h_rot = [curve(f'pose.bones["{helper_name}"].rotation_quaternion', i) for i in range(4)]
     h_loc = [curve(f'pose.bones["{helper_name}"].location', i) for i in range(3)]
-    tol_fc = curve(f'bones["{driver_name}"].vs.proc_tolerance', 0)
 
     for t, (tol, d_mat_q, h_exp_q, h_exp_t) in enumerate(triggers):
         frame = t + 1
@@ -349,9 +348,8 @@ def _add_trigger_slot(action, armature, helper_name, driver_name, triggers):
             h_rot[i].keyframe_points.insert(frame, hq[i], options={'FAST'})
         for i in range(3):
             h_loc[i].keyframe_points.insert(frame, hloc[i], options={'FAST'})
-        tol_fc.keyframe_points.insert(frame, tol, options={'FAST'})
 
-    for fc in (*d_rot, *h_rot, *h_loc, tol_fc):
+    for fc in (*d_rot, *h_rot, *h_loc):
         fc.update()
 
     return slot.name_display
@@ -369,6 +367,11 @@ def _add_trigger_entry(action, armature, helper_name, driver_name, triggers):
     entry.use_manual_frame_range = True
     entry.trigger_frame_start = 1
     entry.trigger_frame_end = max(1, len(triggers))
+    for frame, (tol, *_pose) in enumerate(triggers, start=1):
+        trigger = entry.trigger_influences.add()
+        trigger.frame = frame
+        trigger.angle = tol
+        trigger.use_override = True
     return entry
 
 

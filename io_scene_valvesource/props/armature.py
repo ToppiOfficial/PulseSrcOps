@@ -191,13 +191,6 @@ class ValveSource_BoneProps(JiggleBoneProps, bpy.types.PropertyGroup):
     export_location_offset_arm_y : FloatProperty(name=get_id('prop_location_arm_y'), description=get_id('prop_location_arm_y_tip'), default=0, precision=4, update=_sync_arm_to_local)
     export_location_offset_arm_z : FloatProperty(name=get_id('prop_location_arm_z'), description=get_id('prop_location_arm_z_tip'), default=0, precision=4, update=_sync_arm_to_local)
 
-    proc_tolerance : FloatProperty(
-        name=get_id('prop_pose_bone_proc_tolerance'),
-        description=get_id('prop_pose_bone_proc_tolerance_tip'),
-        default=math.pi / 2, min=0.01, max=math.pi, subtype='ANGLE', precision=2,
-        update=_proc_entry_invalidate_cache,
-    )
-
 
 class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     implicit_zero_bone : BoolProperty(name=get_id("dummy_bone"), default=False, description=get_id("dummy_bone_tip"))

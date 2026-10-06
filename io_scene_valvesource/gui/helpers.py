@@ -147,27 +147,3 @@ def _count_flex_rule_errors(ob) -> int:
         return 0
     ctx = build_flex_rule_context(ob)
     return sum(flex_rule_has_error(rule, ctx) for rule in rules)
-
-
-_get_or_create_proc_tol_fcurve = _procbones_sim._get_or_create_proc_tol_fcurve
-
-
-def _get_entry_proc_tol(entry, frame: float, arm_ob=None) -> float:
-    """Return proc_tolerance from entry.action's fcurves at frame.
-    Falls back to the bone's static value, then to the 90° default."""
-    if not entry.action or not entry.driver_bone:
-        if arm_ob:
-            eb = arm_ob.data.bones.get(entry.driver_bone)
-            if eb:
-                return eb.vs.proc_tolerance
-        return math.pi / 2
-    fcurves = _procbones_sim._get_action_fcurves(entry.action, entry.action_slot_name)
-    dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-    for fc in fcurves:
-        if fc.data_path == dp and fc.array_index == 0:
-            return fc.evaluate(frame)
-    if arm_ob:
-        eb = arm_ob.data.bones.get(entry.driver_bone)
-        if eb:
-            return eb.vs.proc_tolerance
-    return math.pi / 2

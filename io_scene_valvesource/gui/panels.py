@@ -86,21 +86,9 @@ class SMD_PT_ViewportSimulation(Panel):
         box2.prop(vs, 'preview_export_pose')
         box2.prop(vs, 'preview_jigglebone_constraints')
         box2.prop(vs, 'preview_proc_bones')
-        box2.prop(vs, 'preview_edgeline')
         box2.prop(vs, 'preview_hitboxes')
         box2.prop(vs, 'preview_physics_shapes')
         box2.prop(vs, 'preview_attachment_mesh')
-        if vs.preview_edgeline:
-            if vs.jiggle_sim_enabled:
-                row = box2.row()
-                row.alert = True
-                row.label(text=get_id('warn_edgeline_jiggle_sim'), icon='PAUSE')
-            else:
-                row = box2.row()
-                row.alert = True
-                row.label(text=get_id('warn_edgeline_expensive'), icon='ERROR')
-                box2.label(text=get_id('warn_edgeline_approximate'), icon='INFO')
-                box2.label(text=get_id('warn_edgeline_smudging'))
 
 
 class SMD_PT_Scene(Panel):
@@ -632,7 +620,8 @@ class SMD_PT_ProcBones(Properties_Panel):
                     box.prop_search(entry, 'action_slot_name', entry.action, 'slots',
                                     text=get_id('prop_proc_bone_slot'))
                 if entry.action:
-                    fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, arm_ob)
+                    sample_arm = entry.reference_armature or arm_ob
+                    fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, sample_arm)
                     if entry.use_manual_frame_range:
                         row = box.row(align=True)
                         row.prop(entry, 'trigger_frame_start', text=get_id('prop_proc_bone_frame_start'))
@@ -645,14 +634,32 @@ class SMD_PT_ProcBones(Properties_Panel):
                         else:
                             row.label(text=get_id('warn_no_trigger_frames'), icon='ERROR')
                     box.prop(entry, 'use_manual_frame_range', toggle=True)
-                    nav = box.row(align=True)
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='REW').direction    = 'FIRST'
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='PREV_KEYFRAME').direction = 'PREV'
-                    nav.prop(entry, 'trigger_preview_frame', text="")
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='NEXT_KEYFRAME').direction = 'NEXT'
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='FF').direction     = 'LAST'
-                    nav.enabled = valid
-                    box.prop(entry, 'trigger_preview_tol')
+                    influence = box.box()
+                    influence.label(text="Trigger Influence", icon='DRIVER_DISTANCE')
+                    influence.prop(entry, 'influence_angle')
+                    influence.label(text="Smaller: isolated poses. Larger: wider blending.")
+                    row = influence.row(align=True)
+                    row.operator("smd.proc_bone_refresh_influences", icon='FILE_REFRESH')
+                    row.enabled = valid
+                    if entry.trigger_influences:
+                        sample_arm = entry.reference_armature or arm_ob
+                        fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, sample_arm)
+                        frames = [t.frame for t in entry.trigger_influences]
+                        current = valid and frames == list(range(fs, fe + 1))
+                        if not current:
+                            influence.label(text="Frame range changed. Refresh the trigger list.", icon='INFO')
+                        table = influence.column()
+                        table.enabled = current
+                        table.label(text="Check rows for bulk edits.")
+                        table.label(text="Enable Override to set a trigger's angle.")
+                        table.template_list("SMD_UL_ProcBoneInfluences", "", entry, "trigger_influences",
+                                            entry, "trigger_influence_index", rows=5)
+                        row = table.row(align=True)
+                        row.operator("smd.proc_bone_set_tolerance", text="Edit Selected").scope = 'SELECTED'
+                        row.operator("smd.proc_bone_set_tolerance", text="Edit All").scope = 'ALL'
+                        influence.label(text="Live blend percentages appear during simulation.")
+                    else:
+                        influence.label(text="Refresh to edit individual trigger angles.", icon='INFO')
             elif entry.proc_type == 'LOOKAT':
                 box.row().prop(entry, 'lookat_target_type', expand=True)
                 target_type = entry.lookat_target_type
@@ -786,11 +793,17 @@ class SMD_PT_Jigglebones(Properties_Panel):
         active_armature = get_armature(active_object)
         active_bone = context.active_bone
 
+        if bpy.app.version >= (5, 0, 0):
+            pose_bone = active_object.pose.bones.get(active_bone.name) if active_bone else None
+            bone_selected = bool(pose_bone and pose_bone.select)
+        else:
+            bone_selected = bool(active_bone and active_bone.select)
+
         box = layout.box()
-        if active_bone and active_bone.select and _bone_is_hidden(active_bone):
+        if bone_selected and _bone_is_hidden(active_bone):
             box = box.box()
             box.label(text=get_id('label_bone_hidden', format_string=True), icon='ERROR')
-        elif active_bone and active_bone.select:
+        elif bone_selected:
             self.draw_jigglebone_properties(box, active_bone)
         else:
             box = box.box()
@@ -1695,14 +1708,17 @@ class SMD_PT_Material(Properties_Panel):
 
     def draw_header(self, context):
         active_object = context.object
-        active_material = active_object.active_material if is_mesh(active_object) else None
-        label = '{} ({})'.format(pgettext("Material"), active_material.name) if active_material else pgettext("Material")
+        label = '{} ({})'.format(pgettext("Materials"), len(active_object.material_slots))
         self.layout.label(text=label, icon='MATERIAL_DATA')
 
     def draw(self, context):
         layout = self.layout
         active_object = context.object
         active_material = active_object.active_material
+
+        if active_object.material_slots:
+            layout.template_list("SMD_UL_MeshMaterials", "", active_object, "material_slots",
+                                 active_object, "active_material_index", rows=3, maxrows=6)
 
         if not active_material:
             layout.label(text=get_id("panel_select_mesh_mat"), icon='ERROR')

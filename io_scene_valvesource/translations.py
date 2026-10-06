@@ -1264,20 +1264,20 @@ _data = {
         'ja': "頂点ウェイトの上限を手動で設定",
     },
     'op_proc_bone_copy_tolerance': {
-        'en': "Copy Tolerance",
-        'ja': "許容角度をコピー",
+        'en': "Copy Trigger Influence",
+        'ja': "トリガーの影響範囲をコピー",
     },
     'op_proc_bone_copy_tolerance_tip': {
-        'en': "Copy this entry's tolerance keyframes to the clipboard",
-        'ja': "このエントリの許容角度キーフレームをクリップボードにコピー",
+        'en': "Copy the default influence angle and per-trigger overrides to the clipboard",
+        'ja': "デフォルトの影響角度とトリガーごとの上書き設定をクリップボードにコピー",
     },
     'op_proc_bone_paste_tolerance': {
-        'en': "Paste Tolerance",
-        'ja': "許容角度を貼り付け",
+        'en': "Paste Trigger Influence",
+        'ja': "トリガーの影響範囲を貼り付け",
     },
     'op_proc_bone_paste_tolerance_tip': {
-        'en': "Paste tolerance keyframes from the clipboard into this entry's action",
-        'ja': "クリップボードの許容角度キーフレームをこのエントリのアクションに貼り付け",
+        'en': "Paste influence settings into this entry, matching overrides by trigger frame",
+        'ja': "影響範囲の設定をこのエントリに貼り付け、同じトリガーフレームの上書き設定を適用",
     },
     'op_proc_bone_copy_active': {
         'en': "Copy Active Entry",
@@ -2464,14 +2464,6 @@ _data = {
         'en': "Include this prefab when exporting the scene",
         'ja': "シーンのエクスポート時にこのプレハブを含める",
     },
-    'prop_preview_edgeline': {
-        'en': "Preview Edgeline",
-        'ja': "エッジラインをプレビュー",
-    },
-    'prop_preview_edgeline_tip': {
-        'en': "Draw edgeline shell in the viewport, approximating the exported result",
-        'ja': "エクスポート結果に近いエッジラインシェルをビューポートに描画",
-    },
     'prop_preview_attachment_mesh': {
         'en': "Attachment Mesh Preview",
     },
@@ -2493,22 +2485,6 @@ _data = {
     'warn_dme_dmx_only_panel': {
         'en': "DME mode is DMX-only - ignored for SMD export.",
         'ja': "DMEモードはDMX専用です — SMDエクスポートでは無視されます。",
-    },
-    'warn_edgeline_jiggle_sim': {
-        'en': "Inactive: paused while jiggle simulation runs",
-        'ja': "非アクティブ: ジグルシミュレーション中は停止",
-    },
-    'warn_edgeline_expensive': {
-        'en': "Expensive - may cause viewport lag",
-        'ja': "負荷が高い - ビューポートが重くなる場合があります",
-    },
-    'warn_edgeline_approximate': {
-        'en': "Preview is approximate - may show",
-        'ja': "プレビューは近似値です。エクスポートには",
-    },
-    'warn_edgeline_smudging': {
-        'en': "smudging not present in export",
-        'ja': "存在しないにじみが表示される場合があります",
     },
     'prop_preview_hitboxes': {
         'en': "Preview Hitboxes",

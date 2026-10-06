@@ -639,11 +639,11 @@ def _get_proc_trigger_frame_range(entry, arm_ob) -> tuple[int, int, bool]:
 
     Manual mode uses the stored frame range props.  Auto mode scans the action
     for the first/last keyframe of any transform channel on a bone that still
-    exists in the armature (excluding property paths like vs.proc_tolerance)."""
+    exists in the armature (transform channels only)."""
     if getattr(entry, 'use_manual_frame_range', False):
         fs = entry.trigger_frame_start
         fe = entry.trigger_frame_end
-        return fs, fe, (fs < fe)
+        return fs, fe, (fs <= fe)
 
     action = entry.action
     if not action:
@@ -659,34 +659,6 @@ def _get_proc_trigger_frame_range(entry, arm_ob) -> tuple[int, int, bool]:
     if not frames:
         return 0, 0, False
     return int(min(frames)), int(max(frames)), True
-
-
-# Dead code?
-def _get_or_create_proc_tol_fcurve(entry, dp: str):
-    """Find or create the proc_tolerance fcurve in entry.action. Returns None on failure."""
-    action = entry.action
-    if getattr(action, 'is_action_legacy', True):
-        fc = action.fcurves.find(dp, index=0)
-        return fc if fc is not None else action.fcurves.new(dp, index=0)
-    target_slot = _find_action_slot(action, entry.action_slot_name)
-    if target_slot is None:
-        return None
-    for layer in action.layers:
-        for strip in layer.strips:
-            cb_fn = getattr(strip, 'channelbag', None)
-            if cb_fn and callable(cb_fn):
-                try:
-                    bag = cb_fn(target_slot)
-                    if bag is not None:
-                        fc = bag.fcurves.find(dp, index=0)
-                        return fc if fc is not None else bag.fcurves.new(dp, index=0)
-                except Exception:
-                    pass
-            for bag in getattr(strip, 'channelbags', ()):
-                if getattr(bag, 'slot_handle', None) == target_slot.handle:
-                    fc = bag.fcurves.find(dp, index=0)
-                    return fc if fc is not None else bag.fcurves.new(dp, index=0)
-    return None
 
 
 def _set_helper_mute(arm_ob, bone_name: str, mute: bool) -> None:
@@ -875,6 +847,33 @@ def clear_proc_trigger_prefetch() -> None:
     _export_trigger_prefetch.clear()
 
 
+def _proc_trigger_weights(current_quat, triggers):
+    weights = []
+    for trig_q, _dloc, _loc, _rot, trig_tol in triggers:
+        dot = max(-1.0, min(1.0, abs(current_quat.dot(trig_q))))
+        angle = 2.0 * math.acos(dot)
+        weights.append(max(0.0, 1.0 - angle / trig_tol))
+    return weights
+
+
+def get_live_proc_influences(arm_ob, entry):
+    """Read normalized blend weights from the simulation cache without sampling actions."""
+    avs = arm_ob.data.vs
+    driver = arm_ob.pose.bones.get(entry.driver_bone)
+    if not driver or not entry.action:
+        return None
+    key = (arm_ob.name, avs.proc_bones_index, entry.action.name, entry.action_slot_name)
+    triggers = _proc_trigger_cache.get(key)
+    if not triggers or (arm_ob.name, entry.helper_bone) not in _overridden_helpers:
+        return None
+    current = _pose_to_local(arm_ob, driver, driver.matrix).to_quaternion().normalized()
+    weights = _proc_trigger_weights(current, triggers)
+    total = sum(weights)
+    weights = [w / total for w in weights] if total > 1e-4 else [1.0] + [0.0] * (len(weights) - 1)
+    fs, _fe, valid = _get_proc_trigger_frame_range(entry, entry.reference_armature or arm_ob)
+    return {fs + i: w for i, w in enumerate(weights)} if valid else None
+
+
 def _sample_trigger_group(arm_ob, sample_arm, action, target_slot, frames, items, scene,
                           export_print) -> list:
     """Sweep frames once and read every (entry, entry_idx) in items per frame.
@@ -885,13 +884,8 @@ def _sample_trigger_group(arm_ob, sample_arm, action, target_slot, frames, items
     if anim is None:
         anim = sample_arm.animation_data_create()
 
-    # Per-trigger tolerance fcurve, keyed on each entry's driver bone.
-    fcurves = _get_action_fcurves(action, items[0][0].action_slot_name)
-    tol_fcs = []
-    for entry, _ in items:
-        tol_dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-        tol_fcs.append(next((fc for fc in fcurves
-                             if fc.data_path == tol_dp and fc.array_index == 0), None))
+    influences = [{t.frame: t.angle for t in entry.trigger_influences if t.use_override}
+                  for entry, _ in items]
 
     # Save state
     orig_frame   = scene.frame_current
@@ -955,8 +949,7 @@ def _sample_trigger_group(arm_ob, sample_arm, action, target_slot, frames, items
                     from_space='POSE', to_space='LOCAL')
                 hloc = h_local.to_translation()
                 hq   = h_local.to_quaternion().normalized()
-                tol = (tol_fcs[i].evaluate(frame) if tol_fcs[i] is not None
-                       else d_pb.bone.vs.proc_tolerance)
+                tol = influences[i].get(frame, items[i][0].influence_angle)
                 results[i].append((dq, dloc, hloc, hq, tol))
     finally:
         anim.action  = orig_action
@@ -1171,12 +1164,7 @@ def _sim_proc_entries(arm_ob, scene, is_s2: bool, arm_world_inv: Matrix) -> int:
         d_local      = _pose_to_local(arm_ob, driver_pb, driver_pb.matrix)
         current_quat = d_local.to_quaternion().normalized()
 
-        weights = []
-        for trig_q, _dloc, _loc, _rot, trig_tol in triggers:
-            dot   = abs(current_quat.dot(trig_q))
-            dot   = max(-1.0, min(1.0, dot))
-            angle = 2.0 * math.acos(dot)
-            weights.append(max(0.0, 1.0 - angle / trig_tol))
+        weights = _proc_trigger_weights(current_quat, triggers)
 
         total = sum(weights)
         if total <= 1e-4:
@@ -1219,7 +1207,10 @@ def simulate_armature(arm_ob, scene, dt: float, skip_selected: bool = False) -> 
         # In Pose Mode, selected jiggle bones are skipped so the user can pose
         # them manually. Stale detection resumes sim cleanly after deselection.
         if skip_selected and bpy.context.mode == 'POSE':
-            jiggle_pbs = [pb for pb in jiggle_pbs if not pb.bone.select]
+            if bpy.app.version >= (5, 0, 0):
+                jiggle_pbs = [pb for pb in jiggle_pbs if not pb.select]
+            else:
+                jiggle_pbs = [pb for pb in jiggle_pbs if not pb.bone.select]
         for pb in jiggle_pbs:
             try:
                 _sim_bone(arm_ob, pb, dt, is_s2, arm_world_inv)

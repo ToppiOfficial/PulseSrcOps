@@ -8,6 +8,7 @@ __all__ = [
     'ArmatureItemEntry',
     'HitboxEntry',
     'PhysicsShapeEntry',
+    'ProcBoneTriggerInfluence',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',
@@ -17,7 +18,7 @@ __all__ = [
 import bpy, re, math as _math
 from mathutils import Matrix, Vector
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
-                       FloatProperty, FloatVectorProperty, PointerProperty)
+                       FloatProperty, FloatVectorProperty, PointerProperty, CollectionProperty)
 from ..utils import get_id, hitbox_group, sanitize_string_for_delta
 from .. import procbones_sim as _procbones_sim
 
@@ -304,37 +305,18 @@ class PhysicsShapeEntry(bpy.types.PropertyGroup):
     segments   : IntProperty(name=get_id('prop_physshape_segments'), description=get_id('prop_physshape_segments_tip'), default=6, min=3, max=64)
 
 
-def _get_preview_tol(self) -> float:
-    frame = self.trigger_preview_frame
-    if self.action and self.driver_bone:
-        fcurves = _procbones_sim._get_action_fcurves(self.action, self.action_slot_name)
-        dp = f'bones["{self.driver_bone}"].vs.proc_tolerance'
-        for fc in fcurves:
-            if fc.data_path == dp and fc.array_index == 0:
-                return fc.evaluate(frame)
-    arm_ob = bpy.context.object
-    if arm_ob and arm_ob.type != 'ARMATURE':
-        arm_ob = arm_ob.find_armature()
-    if arm_ob and arm_ob.type == 'ARMATURE' and self.driver_bone:
-        eb = arm_ob.data.bones.get(self.driver_bone)
-        if eb:
-            return eb.vs.proc_tolerance
-    return _math.pi / 2
-
-
-def _set_preview_tol(self, value: float) -> None:
-    if not self.driver_bone or not self.action:
-        return
-    dp = f'bones["{self.driver_bone}"].vs.proc_tolerance'
-    fc = _procbones_sim._get_or_create_proc_tol_fcurve(self, dp)
-    if fc is not None:
-        fc.keyframe_points.insert(self.trigger_preview_frame, value, options={'NEEDED', 'FAST'})
-        fc.update()
-    arm_ob = bpy.context.object
-    if arm_ob and arm_ob.type != 'ARMATURE':
-        arm_ob = arm_ob.find_armature()
-    if arm_ob:
-        _procbones_sim.invalidate_proc_cache(arm_ob.name)
+class ProcBoneTriggerInfluence(bpy.types.PropertyGroup):
+    frame : IntProperty(name="Trigger Frame")
+    selected : BoolProperty(name="Select", description="Include this trigger in bulk edits")
+    use_override : BoolProperty(
+        name="Override", description="Use this trigger's own influence angle",
+        update=_proc_entry_invalidate_cache,
+    )
+    angle : FloatProperty(
+        name="Influence Angle", description="Angular distance at which this trigger stops contributing",
+        default=_math.pi / 2, min=_math.radians(0.01), max=_math.pi, subtype='ANGLE', precision=2,
+        update=_proc_entry_invalidate_cache,
+    )
 
 
 class ProcBoneEntry(bpy.types.PropertyGroup):
@@ -376,18 +358,14 @@ class ProcBoneEntry(bpy.types.PropertyGroup):
         default=1,
         update=_proc_entry_invalidate_cache,
     )
-    trigger_preview_frame : IntProperty(
-        name=get_id('prop_proc_bone_preview_frame'),
-        description=get_id('prop_proc_bone_preview_frame_tip'),
-        default=0,
+    influence_angle : FloatProperty(
+        name="Default Influence Angle",
+        description="Influence angle for triggers without an override. Smaller angles isolate poses; larger angles blend more poses",
+        default=_math.pi / 2, min=_math.radians(0.01), max=_math.pi, subtype='ANGLE', precision=2,
+        update=_proc_entry_invalidate_cache,
     )
-    trigger_preview_tol : FloatProperty(
-        name=get_id('prop_pose_bone_proc_tolerance'),
-        description=get_id('prop_pose_bone_proc_tolerance_tip'),
-        default=_math.pi / 2, min=0.01, max=_math.pi, subtype='ANGLE', precision=2,
-        get=_get_preview_tol,
-        set=_set_preview_tol,
-    )
+    trigger_influences : CollectionProperty(type=ProcBoneTriggerInfluence)
+    trigger_influence_index : IntProperty(default=0)
     _lookat_axes = [
         ('+X', "+X", "Positive X",  1),
         ('+Y', "+Y", "Positive Y",  2),
