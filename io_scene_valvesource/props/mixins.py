@@ -93,7 +93,7 @@ class ExportableProps():
     flex_controller_modes = (
         ('SIMPLE',   "Simple",   get_id("controllers_simple_tip")),
         ('ADVANCED', "Advanced", get_id("controllers_advanced_tip")),
-        ('DME',      "DMX",      get_id("controllers_dme_tip")),
+        ('DME',      "DataModel", get_id("controllers_dme_tip")),
     )
 
     export : BoolProperty(name=get_id("scene_export"), description=get_id("use_scene_export_tip"), default=True)

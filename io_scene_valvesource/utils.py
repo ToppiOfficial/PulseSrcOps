@@ -120,6 +120,15 @@ class Compiler:
 compiler_suffixes = {'': Compiler.STUDIOMDL, 'resourcecompiler': Compiler.RESOURCECOMPILER, 'modeldoc': Compiler.MODELDOC}
 compiler_to_suffix = {v: (f"_{k}" if k else "") for k, v in compiler_suffixes.items()}
 
+
+def pulsemodel_compiler_enabled():
+    vs = bpy.context.scene.vs
+    return vs.engine == 'SOURCE' and vs.dmx_format == '22'
+
+
+def pulsemodel_vertex_data_enabled():
+    return pulsemodel_compiler_enabled() and bpy.context.scene.vs.export_format == 'DMX'
+
 @dataclasses.dataclass(frozen = True)
 class dmx_version:
     encoding : int

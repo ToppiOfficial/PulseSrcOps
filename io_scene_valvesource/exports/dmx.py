@@ -483,6 +483,8 @@ class DmxWriter:
 
     # -- flex controller setup ----------------------------------------------
     def _setup_flex(self, bench):
+        self.corrective_separator = getCorrectiveShapeSeparator()
+        self.raw_control_names = set()
         if not any(b.shapes for b in self.bake_results):
             return None
 
@@ -501,8 +503,25 @@ class DmxWriter:
                     print("- Loading flex controllers from " + path_fc)
                     self.controller_dm = datamodel.load(path=path_fc, element_path=element_path)
                 combination_operator = self.controller_dm.root["combinationOperator"]
+                self.raw_control_names = {
+                    name for ctrl in combination_operator["controls"]
+                    for name in ctrl["rawControlNames"]
+                }
                 for elem in [e for e in combination_operator["targets"] if e.type != "DmeFlexRules"]:
                     combination_operator["targets"].remove(elem)
+                shape_names = {name for bake in self.bake_results for name in bake.shapes}
+                component_names = shape_names | self.raw_control_names
+                for separator in ('__', '_'):
+                    if any(separator in delta.name and delta.name not in self.raw_control_names
+                           and all(part in component_names for part in delta.name.split(separator))
+                           for rules in combination_operator["targets"] for delta in rules["deltaStates"]):
+                        self.corrective_separator = separator
+                        break
+                for rules in combination_operator["targets"]:
+                    rules["target"] = None
+                # Controller elements transfer to the export without importing its mesh into the source.
+                for elem in self.controller_dm.elements:
+                    elem._datamodels.discard(self.controller_dm)
             except Exception as err:
                 self._error(get_id("exporter_err_flexctrl_loadfail", True).format(err))
                 return None
@@ -766,8 +785,18 @@ class DmxWriter:
                 vertex_data[keywords["weight_indices"]] = datamodel.make_array(jointIndices, int)
                 fmt.extend([keywords["weight"], keywords["weight_indices"]])
 
-            # Any group named "<name>$<N>" is written as a per-vertex float stream
-            stream_groups = [g for g in ob.vertex_groups if re.fullmatch(r".+\$[0-9]+", g.name)]
+            pulse_streams = {}
+            if pulsemodel_vertex_data_enabled() and src_mt == 'DEFAULT':
+                if ob.vs.use_toon_edgeline:
+                    pulse_streams['toonoutline$0'] = (ob.vs.toon_edgeline_vertexgroup, True)
+                if ob.vs.non_exportable_vgroup:
+                    pulse_streams['cullvertex$0'] = (ob.vs.non_exportable_vgroup, False)
+                if ob.vs.generate_backface:
+                    pulse_streams['backface$0'] = (ob.vs.backface_vgroup, False)
+
+            # Configured PulseModel streams take precedence over groups with the same name.
+            stream_groups = [g for g in ob.vertex_groups
+                             if re.fullmatch(r".+\$[0-9]+", g.name) and g.name not in pulse_streams]
             deform_layer = get_bm().verts.layers.deform.active if stream_groups else None
             if deform_layer:
                 for vgroup in stream_groups:
@@ -778,6 +807,20 @@ class DmxWriter:
                     vertex_data[vgroup.name + "Indices"] = datamodel.make_array(
                         (value_set.index(values[i]) for i in Indices), int
                     )
+
+            for stream_name, (group_name, invert) in pulse_streams.items():
+                group = ob.vertex_groups.get(group_name) if group_name else None
+                if group_name and group is None:
+                    self._warning(f"Vertex group '{group_name}' not found on '{bake.name}' for {stream_name}; using default weights.")
+                values = [0.0] * num_verts
+                if group is not None:
+                    for vertex in ob.data.vertices:
+                        values[vertex.index] = next((g.weight for g in vertex.groups if g.group == group.index), 0.0)
+                if invert:
+                    values = [1.0 - weight for weight in values]
+                fmt.append(stream_name)
+                vertex_data[stream_name] = datamodel.make_array(values, float)
+                vertex_data[stream_name + 'Indices'] = datamodel.make_array(Indices, int)
 
             if bake.shapes and bake.balance_vg:
                 vertex_data[keywords["balance"]] = datamodel.make_array(balance, float)
@@ -950,6 +993,8 @@ class DmxWriter:
             num_correctives = num_wrinkles = 0
 
             bake_flex_mode = getattr(getattr(bake.src, 'vs', None), 'flex_controller_mode', 'DME')
+            if self.flex_controller_mode == 'ADVANCED':
+                bake_flex_mode = 'ADVANCED'
             dme_corrective_names = get_dme_corrective_delta_names(bake.src) if bake_flex_mode == 'DME' else None
             dme_delta_map = get_dme_delta_name_map(bake.src) if bake_flex_mode == 'DME' else None
             dme_split_map = get_dme_split_delta_map(bake.src) if bake_flex_mode == 'DME' else {}
@@ -977,11 +1022,13 @@ class DmxWriter:
                     shape_name, _extra_delta_names, _split_base = resolve_dme_delta_names(
                         shape_name, dme_corrective_names, dme_delta_map, dme_split_map)
                 else:
-                    corrective = getCorrectiveShapeSeparator() in shape_name
+                    separator = self.corrective_separator
+                    corrective = separator in shape_name and not (
+                        bake_flex_mode == 'ADVANCED' and shape_name in self.raw_control_names)
 
                     if corrective:
                         driver_targets = ordered_set.OrderedSet(flex.getCorrectiveShapeKeyDrivers(bake.src.data.shape_keys.key_blocks[shape_name]) or [])
-                        name_targets = ordered_set.OrderedSet(shape_name.split(getCorrectiveShapeSeparator()))
+                        name_targets = ordered_set.OrderedSet(shape_name.split(separator))
                         corrective_targets = driver_targets or name_targets
                         corrective_targets.source = shape_name
 
@@ -991,8 +1038,8 @@ class DmxWriter:
                             continue
                         corrective_shapes_seen.append(corrective_targets)
 
-                        if driver_targets and driver_targets != name_targets:
-                            generated = getCorrectiveShapeSeparator().join(driver_targets)
+                        if bake_flex_mode != 'ADVANCED' and driver_targets and driver_targets != name_targets:
+                            generated = separator.join(driver_targets)
                             print(f"- Renamed shape key '{shape_name}' to '{generated}' to match corrective drivers.")
                             shape_name = generated
                         num_correctives += 1
@@ -1154,8 +1201,7 @@ class DmxWriter:
             if not combination_operator:
                 raise RuntimeError("Internal error: shapes exist but no DmeCombinationOperator was created.")
             targets = combination_operator["targets"]
-            # Match any delta rule, allowing missing targets to bind to this mesh.
-            # Preserve resolved targets so each rule set drives only one mesh.
+            # Each rule set binds once, and multiple sets can drive the same mesh.
             added = False
             for elem in targets:
                 if elem.type != "DmeFlexRules":
@@ -1166,7 +1212,6 @@ class DmxWriter:
                 if any(d.name in shape_names for d in elem["deltaStates"]):
                     elem["target"] = DmeMesh
                     added = True
-                    break
             if not added:
                 targets.append(DmeMesh)
 
@@ -1319,8 +1364,8 @@ class DmxWriter:
             DmeTimeFrame["durationTime"] = int(duration * 10000)
         DmeTimeFrame["scale"] = 1.0
         DmeChannelsClip["timeFrame"] = DmeTimeFrame
-        # Only the Source 2 compilers read a float frameRate.
-        DmeChannelsClip["frameRate"] = fps if self.source2 and State.compiler > Compiler.STUDIOMDL else int(fps)
+        # Model 22 and newer support a float frameRate.
+        DmeChannelsClip["frameRate"] = fps if self.source2 else int(fps)
 
         channels = DmeChannelsClip["channels"] = datamodel.make_array([], datamodel.Element)
         bone_channels = {}

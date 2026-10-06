@@ -144,7 +144,7 @@ class ExportPlanner:
         for_collection: bool,
         ) -> typing.Optional[bpy.types.Object]:
         
-        if not source_ob.vs.use_toon_edgeline:
+        if pulsemodel_vertex_data_enabled() or not source_ob.vs.use_toon_edgeline:
             return None
         if source_ob.vs.export_edgeline_separately:
             return None  # caller handles separately-exported case
@@ -161,7 +161,7 @@ class ExportPlanner:
         return None
 
     def _apply_backface(self, target: bpy.types.Object, export_name: str, post_ok: bool) -> typing.Optional[bpy.types.Object]:
-        if not post_ok or not target.vs.generate_backface:
+        if pulsemodel_vertex_data_enabled() or not post_ok or not target.vs.generate_backface:
             return None
         if not is_mesh_compatible(target) or target.type not in modifier_compatible:
             return None
@@ -179,10 +179,11 @@ class ExportPlanner:
         post_ok  = getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'DEFAULT'
         is_mesh  = is_mesh_compatible(ob) and ob.type in modifier_compatible
 
-        needs_pp = post_ok and is_mesh and (ob.vs.use_mesh_split or ob.vs.use_toon_edgeline or ob.vs.generate_backface)
+        needs_pp = post_ok and is_mesh and (ob.vs.use_mesh_split or
+                    (not pulsemodel_vertex_data_enabled() and (ob.vs.use_toon_edgeline or ob.vs.generate_backface)))
 
         lod_source = None
-        if post_ok and is_mesh and ob.vs.generate_lods and ob.vs.lod_count > 0 \
+        if not pulsemodel_compiler_enabled() and post_ok and is_mesh and ob.vs.generate_lods and ob.vs.lod_count > 0 \
                 and not self._is_existing_lod(export_name):
             lod_source = self._make_ob_copy(ob)
             if not hasShapes(ob):

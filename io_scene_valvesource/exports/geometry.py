@@ -18,6 +18,8 @@ class LODBuilder:
         Returns [(lod_index, lod_ob), ...] for each LOD level.
         Caller owns the returned objects and must remove them when done.
         """
+        if pulsemodel_compiler_enabled():
+            return []
         results = []
         for idx in range(1, ob.vs.lod_count + 1):
             ratio = max(0.0, 1.0 - (ob.vs.decimate_factor / 100.0) * idx)
@@ -50,7 +52,8 @@ class LODBuilder:
             mod = lod.modifiers.new(name="Decimate_LOD", type="DECIMATE")
             mod.ratio = ratio
             lod.vs.generate_lods = False
-            lod.vs.use_toon_edgeline = False
+            if not pulsemodel_vertex_data_enabled():
+                lod.vs.use_toon_edgeline = False
             lod.vs.export_edgeline_separately = False
 
             results.append((idx, lod))
@@ -73,7 +76,7 @@ class EdgelineBuilder:
         - Otherwise: modifies ob in-place and returns ob.
         Returns None if nothing should be done.
         """
-        if not ob.vs.use_toon_edgeline:
+        if pulsemodel_vertex_data_enabled() or not ob.vs.use_toon_edgeline:
             return None
         if not is_mesh_compatible(ob):
             return None

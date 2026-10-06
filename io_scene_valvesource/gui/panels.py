@@ -13,7 +13,8 @@ from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_en
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
                      is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT,
-                     embedded_anim_allowed, prefab_mode_is_dme)
+                     embedded_anim_allowed, prefab_mode_is_dme, pulsemodel_vertex_data_enabled,
+                     pulsemodel_compiler_enabled)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
 from .helpers import _model_armature, _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
 from .operators import (
@@ -1045,9 +1046,14 @@ class SMD_PT_Mesh(Properties_Panel):
 
         if vs.mesh_type == 'DEFAULT':
             box = layout.box().column(align=True)
-            box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups')
+            if pulsemodel_vertex_data_enabled():
+                box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups', text='Cull Vertex Group')
+            else:
+                box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups')
             box.separator(factor=0.5)
-            box.prop(vs, 'non_exportable_vgroup_tolerance')
+            threshold = box.column(align=True)
+            threshold.enabled = not pulsemodel_compiler_enabled()
+            threshold.prop(vs, 'non_exportable_vgroup_tolerance')
 
 
 class SMD_PT_Shapekey(Properties_Panel):
@@ -1581,10 +1587,18 @@ class SMD_PT_ToonEdgeline(Properties_Panel):
 
         col = box.column(align=True)
         col.enabled = vs.use_toon_edgeline
+        if pulsemodel_vertex_data_enabled():
+            width = col.column(align=True)
+            width.enabled = False
+            width.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
+            col.prop_search(vs, 'toon_edgeline_vertexgroup', active_object, 'vertex_groups', text="Outline Width VertexGroup", icon='GROUP_VERTEX')
+            return
         col.prop(vs, 'edgeline_per_material')
         col.prop(vs, 'edgeline_weld')
         col.prop(vs, 'export_edgeline_separately', text="Export Edgeline Separately")
-        col.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
+        width = col.column(align=True)
+        width.enabled = not pulsemodel_compiler_enabled()
+        width.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
         col.prop_search(vs, 'toon_edgeline_vertexgroup', active_object, 'vertex_groups', text="Outline Width VertexGroup", icon='GROUP_VERTEX')
 
 
@@ -1594,7 +1608,7 @@ class SMD_PT_LOD(Properties_Panel):
 
     @classmethod
     def poll(cls, context):
-        return is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'lod')
+        return not pulsemodel_compiler_enabled() and is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'lod')
 
     def draw_header(self, context):
         active_object = context.object
@@ -1696,7 +1710,9 @@ class SMD_PT_MeshBackface(Properties_Panel):
         col.enabled = vs.generate_backface
         col.prop_search(vs, 'backface_vgroup', active_object, 'vertex_groups')
         col.separator(factor=0.5)
-        col.prop(vs, 'backface_vgroup_tolerance')
+        threshold = col.column(align=True)
+        threshold.enabled = not pulsemodel_compiler_enabled()
+        threshold.prop(vs, 'backface_vgroup_tolerance')
 
 
 class SMD_PT_Material(Properties_Panel):

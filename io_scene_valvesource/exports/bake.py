@@ -423,17 +423,15 @@ class Baker:
 
         self._delete_filtered_faces(ob.data, source_ob, quiet=quiet)
 
-        # Not the way I hope to fix it but too bad.
-        # if source_ob.vs.use_toon_edgeline and not source_ob.vs.edgeline_per_material:
-        # oh ffs.
-        #
-        if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
+        if not pulsemodel_vertex_data_enabled() and (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
             self._collapse_edgeline_materials(ob.data)
 
         return ob
 
     def _delete_filtered_faces(self, me: bpy.types.Mesh, vg_source: bpy.types.Object, quiet: bool = False) -> None:
         if not getattr(vg_source, "vs", None):
+            return
+        if pulsemodel_vertex_data_enabled():
             return
 
         # Non-exportable vgroup: base faces (and their edgeline shell counterparts)
@@ -599,7 +597,7 @@ class Baker:
 
         self._delete_filtered_faces(data, source_ob, quiet=True)
 
-        if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
+        if not pulsemodel_vertex_data_enabled() and (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
             self._collapse_edgeline_materials(data)
 
         # Must stay after the face filter: the base mesh triangulates last too, and filtering
