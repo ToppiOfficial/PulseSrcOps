@@ -52,7 +52,6 @@ PHYS = 0x3 # $collisionmesh, $collisionjoints
 ANIM = 0x4 # $sequence, $animation
 FLEX = 0x6 # $model VTA
 
-MAX_MESH_SPLIT = 16
 
 mesh_compatible = ('MESH', 'TEXT', 'FONT', 'SURFACE', 'META', 'CURVE')
 modifier_compatible = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'LATTICE'}
@@ -1339,18 +1338,6 @@ class VertexGroupNormalizer:
             if total > 0 and total != 1.0:
                 for g in groups:
                     g.weight = g.weight / total
-
-_ORDER_VG_RE = re.compile(r"^mesh split (\d+)$", re.IGNORECASE)
- 
-def parse_order_vg_name(name: str) -> int | None:
-    """Return the integer n for a 'mesh split {n}' vgroup name, or None."""
-    m = _ORDER_VG_RE.match(name.strip())
-    if m is None:
-        return None
-    n = int(m.group(1))
-    if n < 0:
-        return None
-    return n
 
 #
 #   GET

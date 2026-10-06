@@ -114,11 +114,6 @@ class ExportableProps():
     non_exportable_vgroup : StringProperty(name=get_id('prop_non_exportable_vgroup'), description=get_id("prop_non_exportable_vgroup_tip"), default='')
     non_exportable_vgroup_tolerance : FloatProperty(name=get_id('prop_non_exportable_vgroup_tolerance'), description=get_id("prop_non_exportable_vgroup_tolerance_tip"), default=0.90, min=0.8, max=1.0, precision=2)
 
-    use_mesh_split : BoolProperty(name='Separate Mesh Split', description=get_id("prop_use_mesh_split_tip"), default=False)
-    export_mesh_split_separately : BoolProperty(name='Export Mesh Split Separately', description=get_id("prop_export_mesh_split_separately_tip"), default=False)
-    mesh_split_threshold : FloatProperty(name='Mesh Split Threshold', description=get_id("prop_mesh_split_threshold_tip"), default=0.95, min=0.8, max=1.0, precision=2)
-    max_mesh_split : IntProperty(name='Max Order Number', description=get_id("prop_max_mesh_split_tip"), default=16, max=16, min=1)
-
     show_vertexanim_items : BoolProperty()
 
     generate_backface : BoolProperty(name='Generate Backface', description=get_id("prop_generate_backface_tip"), default=False)

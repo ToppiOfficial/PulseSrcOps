@@ -12,7 +12,7 @@ from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_en
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
-                     is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT,
+                     is_bypassed_into_parent, get_material_path,
                      embedded_anim_allowed, prefab_mode_is_dme, pulsemodel_vertex_data_enabled,
                      pulsemodel_compiler_enabled)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
@@ -1634,48 +1634,6 @@ class SMD_PT_LOD(Properties_Panel):
 
         col.prop(vs, 'lod_count', slider=True)
         col.prop(vs, 'decimate_factor', slider=True)
-
-
-class SMD_PT_MeshSplit(Properties_Panel):
-    bl_label = ''
-    bl_parent_id = 'SMD_PT_Mesh'
-
-    @classmethod
-    def poll(cls, context):
-        return is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'meshsplit')
-
-    def draw_header(self, context):
-        active_object = context.object
-        label = get_id("panel_mesh_split", True)
-        if is_mesh_compatible(active_object):
-            if active_object.vs.use_mesh_split:
-                max_n = min(active_object.vs.max_mesh_split, MAX_MESH_SPLIT)
-                count = sum(1 for vg in active_object.vertex_groups
-                            if (n := parse_order_vg_name(vg.name)) is not None and n < max_n)
-                label = '{} ({})'.format(label, count)
-            else:
-                label = '{} (False)'.format(label)
-        self.layout.label(text=label, icon='TEXTURE_DATA')
-
-    def draw(self, context):
-        layout = self.layout
-        active_object = context.object
-
-        if not is_mesh_compatible(active_object) or active_object.type not in modifier_compatible:
-            layout.label(text=get_id("panel_select_mesh"), icon='ERROR')
-            return
-
-        vs = active_object.vs
-
-        box = layout.box()
-        box.prop(vs, 'use_mesh_split', toggle=True)
-
-        col = box.column(align=True)
-        col.enabled = vs.use_mesh_split
-
-        col.prop(vs, 'export_mesh_split_separately')
-        col.prop(vs, 'max_mesh_split', slider=True)
-        col.prop(vs, 'mesh_split_threshold', slider=True)
 
 
 class SMD_PT_MeshBackface(Properties_Panel):

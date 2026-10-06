@@ -225,7 +225,6 @@ _classes = (
     GUI.SMD_PT_Vertexanimations,
     GUI.SMD_PT_ToonEdgeline,
     GUI.SMD_PT_MeshBackface,
-    GUI.SMD_PT_MeshSplit,
     GUI.SMD_PT_LOD,
     GUI.SMD_PT_Empty,
     GUI.SMD_PT_Curve,

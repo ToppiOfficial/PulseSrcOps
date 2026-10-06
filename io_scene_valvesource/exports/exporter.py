@@ -11,8 +11,8 @@ from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 from .check import ExportCheck
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan, is_proxy_only
-from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _MeshPlan, is_proxy_only
+from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder
 from .bake import Baker
 from .plan import ExportPlanner
 from .dmx import DmxWriter

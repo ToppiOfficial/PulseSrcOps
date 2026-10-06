@@ -1396,10 +1396,6 @@ _data = {
         'en': "Level Of Detail",
         'ja': "詳細度レベル",
     },
-    'panel_mesh_split': {
-        'en': "Mesh Split",
-        'ja': "メッシュ分割",
-    },
     'panel_physshapes': {
         'en': "Physics Shapes",
     },
@@ -1707,14 +1703,6 @@ _data = {
     'prop_edgeline_weld_tip': {
         'en': "Merge doubles (weld coincident verts) on the edgeline copy before solidifying. Disable to keep the mesh unwelded",
         'ja': "ソリッド化の前にエッジラインコピーの重複頂点を結合する。無効にするとメッシュを結合しない",
-    },
-    'prop_export_mesh_split_separately': {
-        'en': "Export Mesh Split Separately",
-        'ja': "メッシュ分割を別ファイルでエクスポート",
-    },
-    'prop_export_mesh_split_separately_tip': {
-        'en': "Write mesh split segments as separate DMX files",
-        'ja': "メッシュ分割セグメントを別個のDMXファイルとして書き出す",
     },
     'prop_eyelid': {
         'en': "Eyelid",
@@ -2400,22 +2388,6 @@ _data = {
         'en': "Number of LOD levels to generate beyond LOD0",
         'ja': "LOD0以降に生成するLODレベルの数",
     },
-    'prop_max_mesh_split': {
-        'en': "Max Order Number",
-        'ja': "最大順序番号",
-    },
-    'prop_max_mesh_split_tip': {
-        'en': "Maximum number of mesh split order segments to generate",
-        'ja': "生成するメッシュ分割の最大セグメント数",
-    },
-    'prop_mesh_split_threshold': {
-        'en': "Mesh Split Threshold",
-        'ja': "メッシュ分割しきい値",
-    },
-    'prop_mesh_split_threshold_tip': {
-        'en': "Weight threshold above which a vertex belongs to the split mesh",
-        'ja': "このしきい値を超える頂点は分割メッシュに属します",
-    },
     'prop_non_exportable_vgroup': {
         'en': "Export Cull Vertex Group",
         'ja': "エクスポートカリング頂点グループ",
@@ -2771,14 +2743,6 @@ _data = {
     'prop_use_bone_length_for_jb_tip': {
         'en': "Use this bone's length as the jigglebone segment length",
         'ja': "このボーンの長さをジグルボーンセグメントの長さとして使用",
-    },
-    'prop_use_mesh_split': {
-        'en': "Separate Mesh Split",
-        'ja': "メッシュ分割",
-    },
-    'prop_use_mesh_split_tip': {
-        'en': "Split the mesh by vertex group weight for multi-part export",
-        'ja': "頂点グループのウェイトでメッシュを分割してマルチパートエクスポート",
     },
     'prop_use_toon_edgeline': {
         'en': "Use Toon Edge Line",

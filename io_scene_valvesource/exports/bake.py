@@ -7,7 +7,7 @@ from bpy.types import Collection
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _MeshPlan
 from .geometry import EdgelineBuilder
 
 

@@ -85,18 +85,9 @@ class ExportTask:
 
 
 @dataclasses.dataclass
-class _SplitPart:
-    ob:       bpy.types.Object
-    name:     str
-    edgeline: typing.Optional[bpy.types.Object]
-    backface: typing.Optional[bpy.types.Object]
-
-
-@dataclasses.dataclass
 class _MeshPlan:
     source:        bpy.types.Object
     target:        bpy.types.Object
     lod_source:    typing.Optional[bpy.types.Object]
     base_edgeline: typing.Optional[bpy.types.Object]
     base_backface: typing.Optional[bpy.types.Object]
-    split_parts:   list

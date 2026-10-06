@@ -42,7 +42,7 @@ The add-on updates itself. Open *Edit > Preferences > Add-ons*, expand **PulseSr
 
 ### Export
 
-- **Post-Processing** - Automatic mesh processing at export time: toon outline generation, backface generation, mesh splitting, mesh cleanup (face/vertex removal by vertex group or material), and per-vertex weight normalization.
+- **Post-Processing** - Automatic mesh processing at export time: toon outline generation, backface generation, mesh cleanup (face/vertex removal by vertex group or material), and per-vertex weight normalization.
 - **Bone Controls** - Per-bone export name, rotation offset, and position override; jigglebone property export directly to QC or VMDL.
 - **Prefab data** - Jigglebones, hitboxes, and attachments exported to `.qci` for Source 1, or `.vmdl` / `.vmdl_prefab` for Source 2.
 - **DME Prefab mode** - Jigglebones, hitboxes, attachments, and procedural bones embedded directly into the model DMX for Model 22 (Source 1). This is a feature of [PulseModel](https://github.com/ToppiOfficial/PulseModel), my own `studiomdl` fork.
