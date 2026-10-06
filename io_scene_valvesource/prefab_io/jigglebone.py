@@ -89,22 +89,24 @@ def kv3_kwargs(vs, s2name, jiggle_length) -> dict:
         elif kind == 'basespringbool':
             kw[key] = KVBool(vs.jiggle_base_type == 'BASESPRING')
         elif kind == 'length':
-            kw[key] = jiggle_length
+            kw[key] = round(float(jiggle_length), 4)
         elif kind == 'bool':
             kw[key] = KVBool(getattr(vs, attr))
         elif kind == 'deg':
-            kw[key] = math.degrees(getattr(vs, attr))
+            kw[key] = round(math.degrees(getattr(vs, attr)), 4)
         elif kind == 'collbool':
             kw[key] = KVBool(vs.jiggle_has_collision)
         elif kind == 'collraw0':
-            kw[key] = vs.jiggle_collision_radius0
+            kw[key] = round(float(vs.jiggle_collision_radius0), 4)
         elif kind == 'collraw1':
-            kw[key] = vs.jiggle_collision_radius1
+            kw[key] = round(float(vs.jiggle_collision_radius1), 4)
         elif kind == 'collvec0':
-            kw[key] = KVVector3(*vs.jiggle_collision_point0)
+            kw[key] = KVVector3(*(round(float(v), 4) for v in vs.jiggle_collision_point0))
         elif kind == 'collvec1':
-            kw[key] = KVVector3(*vs.jiggle_collision_point1)
-        else:  # 'int' / 'raw'
+            kw[key] = KVVector3(*(round(float(v), 4) for v in vs.jiggle_collision_point1))
+        elif kind == 'raw':
+            kw[key] = round(float(getattr(vs, attr)), 4)
+        else:  # 'int'
             kw[key] = getattr(vs, attr)
     return kw
 
@@ -204,62 +206,62 @@ def write_dme_attrs(elem, bone) -> None:
 
     elem["flexible"] = is_flexible
     elem["rigid"]    = is_rigid
-    elem["length"]   = float(jiggle_length)
-    elem["tipMass"]  = float(bvs.jiggle_tip_mass)
+    elem["length"]   = round(float(jiggle_length), 4)
+    elem["tipMass"]  = round(float(bvs.jiggle_tip_mass), 4)
 
     if is_flexible:
-        elem["yawStiffness"]   = float(bvs.jiggle_yaw_stiffness)
-        elem["yawDamping"]     = float(bvs.jiggle_yaw_damping)
-        elem["pitchStiffness"] = float(bvs.jiggle_pitch_stiffness)
-        elem["pitchDamping"]   = float(bvs.jiggle_pitch_damping)
+        elem["yawStiffness"]   = round(float(bvs.jiggle_yaw_stiffness), 4)
+        elem["yawDamping"]     = round(float(bvs.jiggle_yaw_damping), 4)
+        elem["pitchStiffness"] = round(float(bvs.jiggle_pitch_stiffness), 4)
+        elem["pitchDamping"]   = round(float(bvs.jiggle_pitch_damping), 4)
 
         elem["yawConstrained"] = bool(bvs.jiggle_has_yaw_constraint)
         if bvs.jiggle_has_yaw_constraint:
-            elem["yawMin"]      = -abs(math.degrees(bvs.jiggle_yaw_constraint_min))
-            elem["yawMax"]      =  abs(math.degrees(bvs.jiggle_yaw_constraint_max))
-            elem["yawFriction"] = float(bvs.jiggle_yaw_friction)
+            elem["yawMin"]      = round(-abs(math.degrees(bvs.jiggle_yaw_constraint_min)), 4)
+            elem["yawMax"]      =  round(abs(math.degrees(bvs.jiggle_yaw_constraint_max)), 4)
+            elem["yawFriction"] = round(float(bvs.jiggle_yaw_friction), 4)
 
         elem["pitchConstrained"] = bool(bvs.jiggle_has_pitch_constraint)
         if bvs.jiggle_has_pitch_constraint:
-            elem["pitchMin"]      = -abs(math.degrees(bvs.jiggle_pitch_constraint_min))
-            elem["pitchMax"]      =  abs(math.degrees(bvs.jiggle_pitch_constraint_max))
-            elem["pitchFriction"] = float(bvs.jiggle_pitch_friction)
+            elem["pitchMin"]      = round(-abs(math.degrees(bvs.jiggle_pitch_constraint_min)), 4)
+            elem["pitchMax"]      =  round(abs(math.degrees(bvs.jiggle_pitch_constraint_max)), 4)
+            elem["pitchFriction"] = round(float(bvs.jiggle_pitch_friction), 4)
 
         # Flexible jigglebones constrain length by default; allow_length_flex releases
         # it, so lengthConstrained is the inverse.
         elem["lengthConstrained"] = not bvs.jiggle_allow_length_flex
         if bvs.jiggle_allow_length_flex:
-            elem["alongStiffness"] = float(bvs.jiggle_along_stiffness)
-            elem["alongDamping"]   = float(bvs.jiggle_along_damping)
+            elem["alongStiffness"] = round(float(bvs.jiggle_along_stiffness), 4)
+            elem["alongDamping"]   = round(float(bvs.jiggle_along_damping), 4)
 
         elem["angleConstrained"] = bool(bvs.jiggle_has_angle_constraint)
         if bvs.jiggle_has_angle_constraint:
-            elem["angleLimit"] = math.degrees(bvs.jiggle_angle_constraint)
+            elem["angleLimit"] = round(math.degrees(bvs.jiggle_angle_constraint), 4)
 
     if bvs.jiggle_base_type == 'BASESPRING':
         elem["baseSpring"]    = True
-        elem["baseStiffness"] = float(bvs.jiggle_base_stiffness)
-        elem["baseDamping"]   = float(bvs.jiggle_base_damping)
-        elem["baseMass"]      = float(bvs.jiggle_base_mass)
+        elem["baseStiffness"] = round(float(bvs.jiggle_base_stiffness), 4)
+        elem["baseDamping"]   = round(float(bvs.jiggle_base_damping), 4)
+        elem["baseMass"]      = round(float(bvs.jiggle_base_mass), 4)
         if bvs.jiggle_has_left_constraint:
-            elem["baseYawMin"]      = -abs(bvs.jiggle_left_constraint_min)
-            elem["baseYawMax"]      =  abs(bvs.jiggle_left_constraint_max)
-            elem["baseYawFriction"] = float(bvs.jiggle_left_friction)
+            elem["baseYawMin"]      = round(-abs(bvs.jiggle_left_constraint_min), 4)
+            elem["baseYawMax"]      =  round(abs(bvs.jiggle_left_constraint_max), 4)
+            elem["baseYawFriction"] = round(float(bvs.jiggle_left_friction), 4)
         if bvs.jiggle_has_up_constraint:
-            elem["basePitchMin"]      = -abs(bvs.jiggle_up_constraint_min)
-            elem["basePitchMax"]      =  abs(bvs.jiggle_up_constraint_max)
-            elem["basePitchFriction"] = float(bvs.jiggle_up_friction)
+            elem["basePitchMin"]      = round(-abs(bvs.jiggle_up_constraint_min), 4)
+            elem["basePitchMax"]      =  round(abs(bvs.jiggle_up_constraint_max), 4)
+            elem["basePitchFriction"] = round(float(bvs.jiggle_up_friction), 4)
         if bvs.jiggle_has_forward_constraint:
-            elem["baseAlongMin"]      = -abs(bvs.jiggle_forward_constraint_min)
-            elem["baseAlongMax"]      =  abs(bvs.jiggle_forward_constraint_max)
-            elem["baseAlongFriction"] = float(bvs.jiggle_forward_friction)
+            elem["baseAlongMin"]      = round(-abs(bvs.jiggle_forward_constraint_min), 4)
+            elem["baseAlongMax"]      =  round(abs(bvs.jiggle_forward_constraint_max), 4)
+            elem["baseAlongFriction"] = round(float(bvs.jiggle_forward_friction), 4)
     elif bvs.jiggle_base_type == 'BOING':
         elem["boing"]            = True
-        elem["boingImpactSpeed"] = float(bvs.jiggle_impact_speed)
-        elem["boingImpactAngle"] = math.degrees(bvs.jiggle_impact_angle)
-        elem["boingDampingRate"] = float(bvs.jiggle_damping_rate)
-        elem["boingFrequency"]   = float(bvs.jiggle_frequency)
-        elem["boingAmplitude"]   = float(bvs.jiggle_amplitude)
+        elem["boingImpactSpeed"] = round(float(bvs.jiggle_impact_speed), 4)
+        elem["boingImpactAngle"] = round(math.degrees(bvs.jiggle_impact_angle), 4)
+        elem["boingDampingRate"] = round(float(bvs.jiggle_damping_rate), 4)
+        elem["boingFrequency"]   = round(float(bvs.jiggle_frequency), 4)
+        elem["boingAmplitude"]   = round(float(bvs.jiggle_amplitude), 4)
 
 
 def import_jigglebones_from_dmx_elements(elements, armature: 'object') -> 'tuple[int, list]':
@@ -373,7 +375,7 @@ def import_jigglebones_from_dmx_elements(elements, armature: 'object') -> 'tuple
 def qc_block_lines(bone) -> list:
     """Return the QC text lines for one ``$jigglebone`` block. Inverse of
     ``import_jigglebones_from_content`` below. QC intentionally omits
-    ``along_damping`` (DME/KV3 write it) to keep .qci output byte-identical.
+    ``along_damping`` (DME/KV3 write it).
     """
     d = []
     d.append(f'$jigglebone "{utils.get_bone_exportname(bone)}"')
@@ -384,18 +386,18 @@ def qc_block_lines(bone) -> list:
         d.append('\tis_flexible' if bone.vs.jiggle_flex_type == 'FLEXIBLE' else '\tis_rigid')
         d.append('\t{')
         d.append(f'\t\tlength {jiggle_length:.4f}')
-        d.append(f'\t\ttip_mass {bone.vs.jiggle_tip_mass:.2f}')
+        d.append(f'\t\ttip_mass {bone.vs.jiggle_tip_mass:.4f}')
         if bone.vs.jiggle_flex_type == 'FLEXIBLE':
             d.append(f'\t\tyaw_stiffness {bone.vs.jiggle_yaw_stiffness:.4f}')
             d.append(f'\t\tyaw_damping {bone.vs.jiggle_yaw_damping:.4f}')
             if bone.vs.jiggle_has_yaw_constraint:
                 d.append(f'\t\tyaw_constraint {-abs(math.degrees(bone.vs.jiggle_yaw_constraint_min)):.4f} {abs(math.degrees(bone.vs.jiggle_yaw_constraint_max)):.4f}')
-                d.append(f'\t\tyaw_friction {bone.vs.jiggle_yaw_friction:.3f}')
+                d.append(f'\t\tyaw_friction {bone.vs.jiggle_yaw_friction:.4f}')
             d.append(f'\t\tpitch_stiffness {bone.vs.jiggle_pitch_stiffness:.4f}')
             d.append(f'\t\tpitch_damping {bone.vs.jiggle_pitch_damping:.4f}')
             if bone.vs.jiggle_has_pitch_constraint:
                 d.append(f'\t\tpitch_constraint {-abs(math.degrees(bone.vs.jiggle_pitch_constraint_min)):.4f} {abs(math.degrees(bone.vs.jiggle_pitch_constraint_max)):.4f}')
-                d.append(f'\t\tpitch_friction {bone.vs.jiggle_pitch_friction:.3f}')
+                d.append(f'\t\tpitch_friction {bone.vs.jiggle_pitch_friction:.4f}')
             if bone.vs.jiggle_allow_length_flex:
                 d.append('\t\tallow_length_flex')
                 d.append(f'\t\talong_stiffness {bone.vs.jiggle_along_stiffness:.4f}')
@@ -410,23 +412,23 @@ def qc_block_lines(bone) -> list:
         d.append(f'\t\tdamping {bone.vs.jiggle_base_damping:.4f}')
         d.append(f'\t\tbase_mass {bone.vs.jiggle_base_mass}')
         if bone.vs.jiggle_has_left_constraint:
-            d.append(f'\t\tleft_constraint {-abs(bone.vs.jiggle_left_constraint_min):.2f} {abs(bone.vs.jiggle_left_constraint_max):.2f}')
-            d.append(f'\t\tleft_friction {bone.vs.jiggle_left_friction:.3f}')
+            d.append(f'\t\tleft_constraint {-abs(bone.vs.jiggle_left_constraint_min):.4f} {abs(bone.vs.jiggle_left_constraint_max):.4f}')
+            d.append(f'\t\tleft_friction {bone.vs.jiggle_left_friction:.4f}')
         if bone.vs.jiggle_has_up_constraint:
-            d.append(f'\t\tup_constraint {-abs(bone.vs.jiggle_up_constraint_min):.2f} {abs(bone.vs.jiggle_up_constraint_max):.2f}')
-            d.append(f'\t\tup_friction {bone.vs.jiggle_up_friction:.3f}')
+            d.append(f'\t\tup_constraint {-abs(bone.vs.jiggle_up_constraint_min):.4f} {abs(bone.vs.jiggle_up_constraint_max):.4f}')
+            d.append(f'\t\tup_friction {bone.vs.jiggle_up_friction:.4f}')
         if bone.vs.jiggle_has_forward_constraint:
-            d.append(f'\t\tforward_constraint {-abs(bone.vs.jiggle_forward_constraint_min):.2f} {abs(bone.vs.jiggle_forward_constraint_max):.2f}')
-            d.append(f'\t\tforward_friction {bone.vs.jiggle_forward_friction:.3f}')
+            d.append(f'\t\tforward_constraint {-abs(bone.vs.jiggle_forward_constraint_min):.4f} {abs(bone.vs.jiggle_forward_constraint_max):.4f}')
+            d.append(f'\t\tforward_friction {bone.vs.jiggle_forward_friction:.4f}')
         d.append('\t}')
     elif bone.vs.jiggle_base_type == 'BOING':
         d.append('\tis_boing')
         d.append('\t{')
         d.append(f'\t\timpact_speed {bone.vs.jiggle_impact_speed}')
         d.append(f'\t\timpact_angle {math.degrees(bone.vs.jiggle_impact_angle):.4f}')
-        d.append(f'\t\tdamping_rate {bone.vs.jiggle_damping_rate:.3f}')
-        d.append(f'\t\tfrequency {bone.vs.jiggle_frequency:.3f}')
-        d.append(f'\t\tamplitude {bone.vs.jiggle_amplitude:.3f}')
+        d.append(f'\t\tdamping_rate {bone.vs.jiggle_damping_rate:.4f}')
+        d.append(f'\t\tfrequency {bone.vs.jiggle_frequency:.4f}')
+        d.append(f'\t\tamplitude {bone.vs.jiggle_amplitude:.4f}')
         d.append('\t}')
     d.append('}')
     d.append('\n')

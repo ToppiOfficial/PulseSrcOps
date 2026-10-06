@@ -29,13 +29,13 @@ def write_dme_attrs(el, entry, bone_export: str) -> None:
     el["merge"]    = bool(entry.merge)
     if entry.shape_type == 'CAPSULE':
         p0, p1 = _capsule_points(entry)
-        el["point0"]  = datamodel.Vector3(p0)
-        el["point1"]  = datamodel.Vector3(p1)
-        el["radius0"] = float(entry.radius0)
-        el["radius1"] = float(entry.radius1)
+        el["point0"]  = round(datamodel.Vector3(p0), 4)
+        el["point1"]  = round(datamodel.Vector3(p1), 4)
+        el["radius0"] = round(float(entry.radius0), 4)
+        el["radius1"] = round(float(entry.radius1), 4)
         el["segments"] = max(3, min(64, int(entry.segments)))
     else:
-        el["minBounds"]   = datamodel.Vector3(Vector(entry.vec_min))
-        el["maxBounds"]   = datamodel.Vector3(Vector(entry.vec_max))
+        el["minBounds"]   = round(datamodel.Vector3(Vector(entry.vec_min)), 4)
+        el["maxBounds"]   = round(datamodel.Vector3(Vector(entry.vec_max)), 4)
         # Euler degrees (pitch, yaw, roll) as Vector3, matching DmeHitbox.orientation.
-        el["orientation"] = datamodel.Vector3(tuple(math.degrees(a) for a in entry.rotation))
+        el["orientation"] = round(datamodel.Vector3(tuple(math.degrees(a) for a in entry.rotation)), 4)

@@ -175,18 +175,18 @@ def write_dme_quatinterp_attrs(elem, arm, entry, entry_idx, scene, control_bone,
 
     tolerances, trig_rots, tgt_pos, tgt_rots = [], [], [], []
     for d_mat, h_export, tol, _dq, _dloc in transforms:
-        tolerances.append(degrees(tol))
-        trig_rots.append(utils.getDatamodelQuat(d_mat.to_quaternion()))
-        tgt_rots.append(utils.getDatamodelQuat(h_export.to_quaternion()))
+        tolerances.append(round(degrees(tol), 4))
+        trig_rots.append(round(utils.getDatamodelQuat(d_mat.to_quaternion()), 4))
+        tgt_rots.append(round(utils.getDatamodelQuat(h_export.to_quaternion()), 4))
         p = h_export.to_translation()
-        tgt_pos.append(datamodel.Vector3([p.x * armature_scale[0],
+        tgt_pos.append(round(datamodel.Vector3([p.x * armature_scale[0],
                                           p.y * armature_scale[1],
-                                          p.z * armature_scale[2]]))
+                                          p.z * armature_scale[2]]), 4))
 
     elem["controlBone"]      = control_bone
-    elem["basePos"]          = datamodel.Vector3([bp.x * armature_scale[0],
+    elem["basePos"]          = round(datamodel.Vector3([bp.x * armature_scale[0],
                                                   bp.y * armature_scale[1],
-                                                  bp.z * armature_scale[2]])
+                                                  bp.z * armature_scale[2]]), 4)
     elem["unlockBones"]      = False
     elem["tolerances"]       = datamodel.make_array(tolerances, float)
     elem["triggerRotations"] = datamodel.make_array(trig_rots, datamodel.Quaternion)

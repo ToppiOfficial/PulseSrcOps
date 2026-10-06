@@ -568,7 +568,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             if proc_type == 'TRIGGER':
                 drv_parent_vrd = _driver_parent_vrd(driver_name)
                 lines.append(f'<helper>  {helper_vrd}  {parent_vrd}  {drv_parent_vrd}  {driver_vrd}')
-                lines.append(f'<basepos>  {bx:.6f} {by:.6f} {bz:.6f}')
+                lines.append(f'<basepos>  {bx:.4f} {by:.4f} {bz:.4f}')
 
                 if not entry.action:
                     self.report({'WARNING'}, f"Procedural entry '{helper_name}' has no action; skipping triggers")
@@ -621,7 +621,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                     hpz = h_pos.z * scale
                     hrx, hry, hrz = degrees(h_euler.x), degrees(h_euler.y), degrees(h_euler.z)
 
-                    lines.append(f'<trigger>  {tol_deg:.4f}  {drx:.6f} {dry:.6f} {drz:.6f}  {hrx:.6f} {hry:.6f} {hrz:.6f}  {hpx:.6f} {hpy:.6f} {hpz:.6f}')
+                    lines.append(f'<trigger>  {tol_deg:.4f}  {drx:.4f} {dry:.4f} {drz:.4f}  {hrx:.4f} {hry:.4f} {hrz:.4f}  {hpx:.4f} {hpy:.4f} {hpz:.4f}')
 
                 lines.append('')
 
