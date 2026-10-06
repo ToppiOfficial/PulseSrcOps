@@ -134,20 +134,16 @@ class SMD_PT_Scene(Panel):
             # prop_enum draws one button per identifier, so only the ones this engine
             # allows appear - export_format's own item list stays static/unfiltered
             # (see props/scene.py on_export_format_changed for why).
-            for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX', 'FBX')):
+            for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX')):
                 sub.prop_enum(scene.vs, "export_format", _fmt_id)
 
-        # FBX writes a companion DMX holding the skeleton, flex controllers and embedded
-        # prefabs, so it needs a datamodel version too.
-        if scene.vs.export_format in ('DMX', 'FBX'):
+        if scene.vs.export_format == 'DMX':
             if scene.vs.game == 'CUSTOM':
                 row = l.split(factor=0.33)
                 row.label(text=get_id("exportpanel_dmxver"))
                 sub = row.row(align=True)
                 sub.prop(scene.vs, "dmx_encoding", text="")
                 sub.prop(scene.vs, "dmx_format", text="")
-            if scene.vs.export_format == 'FBX':
-                l.label(text=get_id("exportpanel_fbx_companion"), icon='INFO')
         # smd_format (Source/GoldSrc SMD byte layout) is driven entirely by Engine now -
         # no separate control needed here.
 
@@ -185,8 +181,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
 
     @classmethod
     def poll(cls, context):
-        return State.compiler == Compiler.STUDIOMDL or State.exportFormat in (
-            ExportFormat.DMX, ExportFormat.FBX)
+        return State.compiler == Compiler.STUDIOMDL or State.exportFormat == ExportFormat.DMX
 
     def draw(self, context) -> None:
         scene = context.scene
@@ -195,7 +190,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
         dme_active = False
         # The DMX model format decides Source 1 vs 2, not scene.vs.engine.
         is_source1 = State.compiler == Compiler.STUDIOMDL
-        if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX):
+        if State.exportFormat == ExportFormat.DMX:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
             if is_source1 and State.datamodelFormat == 22:
@@ -303,8 +298,6 @@ class SMD_PT_Exportables(Panel):
             is_slot_filter = avs.action_selection == 'FILTERED'
             col.prop(arm.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
             col.prop(avs, "reset_pose_per_anim")
-            if scene.vs.export_format == 'FBX':
-                col.prop(avs, "fbx_anim_layout")
 
             col.separator(factor=0.5)
             col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
@@ -1121,8 +1114,7 @@ class SMD_PT_Shapekey(Properties_Panel):
             row.operator("wm.url_open",text=get_id("exportables_flex_help", True),icon='HELP').url = "http://developer.valvesoftware.com/wiki/Blender_SMD_Tools_Help#Flex_properties"
 
         elif active_object.vs.flex_controller_mode == 'DME':
-            # FBX carries the controllers in its companion DMX, so only SMD drops them.
-            if State.exportFormat not in (ExportFormat.DMX, ExportFormat.FBX):
+            if State.exportFormat != ExportFormat.DMX:
                 info_row = box.row()
                 info_row.label(text=get_id("warn_dme_dmx_only_panel"), icon='INFO')
 

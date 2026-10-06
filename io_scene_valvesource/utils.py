@@ -98,13 +98,12 @@ hitbox_group = [
 class ExportFormat:
     SMD = 1
     DMX = 2
-    FBX = 3
 
 # Engine only separates GoldSrc from Source - which Source engine a DMX targets is
 # carried by dmx_format's compiler suffix, not by a second engine setting.
 export_formats_by_engine = {
     'GOLDSRC': ('SMD',),
-    'SOURCE': ('SMD', 'DMX', 'FBX'),
+    'SOURCE': ('SMD', 'DMX'),
 }
 
 class Compiler:
@@ -209,7 +208,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     @property
     def exportFormat(cls):
         fmt = bpy.context.scene.vs.export_format
-        if fmt == 'FBX': return ExportFormat.FBX
         return ExportFormat.DMX if fmt == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
 
     @property
@@ -511,8 +509,6 @@ def animationFrameRange(ad : bpy.types.AnimData):
 
 def getFileExt(flex=False, anim=False):
     fmt = bpy.context.scene.vs.export_format
-    if fmt == 'FBX':
-        return ".fbx"
     if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
@@ -1399,12 +1395,11 @@ prefab_type_info = {
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs are encoded into the model file rather than written to
     .qci/.vmdl files. Embedding is a PulseModel feature, so it needs Source 1 Model 22;
-    every other engine/format uses file mode. DMX and FBX (via its companion DMX)
-    honour the user's prefab_export_mode; SMD has no embedding."""
+    DMX honours prefab_export_mode; other formats use file mode."""
     if (getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL
             or State.datamodelFormat != 22):
         return False
-    return (State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX)
+    return (State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
 
 
@@ -2028,7 +2023,6 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
                 else arm_prop.bone_direction_naming_left)
     cache_key = None
     if _bone_exportname_cache is not None:
-        # Bone names are in the key because the FBX writer renames baked bones mid-export.
         cache_key = (armature.data.as_pointer(), mode, tuple(armature.data.bones.keys()))
         cached = _bone_exportname_cache.get(cache_key)
         if cached is not None:

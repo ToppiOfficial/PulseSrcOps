@@ -59,7 +59,7 @@ for _id, (_l, _eng, _enc, _fmt) in game_presets.items():
 # load as 'SOURCE'. Files saved with the removed 'SOURCE2' (value 2) are repaired on load.
 _engine_items = (
     ('GOLDSRC', "GoldSrc", "Half-Life 1 - SMD only", 0, 0),
-    ('SOURCE', "Source", "Source 1 and 2 - SMD, DMX and FBX. Which Source engine is set by the DMX model format", 0, 1),
+    ('SOURCE', "Source", "Source 1 and 2 - SMD and DMX. Which Source engine is set by the DMX model format", 0, 1),
 )
 
 def on_engine_changed(self, context):
@@ -91,7 +91,7 @@ def _on_blend_load_migrate_engine(filepath):
 
 
 # Identifiers are historical (QCI/DME); the labels describe where the data lands,
-# since the file format varies (.qci/.vmdl) and embedding applies to DMX and FBX.
+# since the file format varies (.qci/.vmdl) and embedding applies to DMX.
 _prefab_export_mode_items = (
     ('QCI', "FILE", get_id("prefab_export_mode_qci_tip"), 0),
     ('DME', "EMBEDDED", get_id("prefab_export_mode_dme_tip"), 1),
@@ -204,7 +204,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
 
     smd_format : EnumProperty(name=get_id("smd_format"), description=get_id("smd_format_tip"), items=(('SOURCE', "Source", "Source Engine (Half-Life 2)"), ("GOLDSOURCE", "GoldSrc", "GoldSrc engine (Half-Life 1)")), default="SOURCE")
 
-    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange"), ('FBX', "FBX", "Autodesk FBX (Source 2 / external tools)")], default='DMX', update=on_export_format_changed)
+    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange")], default='DMX', update=on_export_format_changed)
     up_axis : EnumProperty(name=get_id("up_axis"), items=axes, default='Z', description=get_id("up_axis_tip"))
     up_axis_offset : FloatProperty(name=get_id("up_axis_offset"), description=get_id("up_axis_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     forward_axis : EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("up_axis_tip"))

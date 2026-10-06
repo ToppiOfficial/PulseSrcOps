@@ -207,11 +207,6 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     action_selection : EnumProperty(name=get_id("action_selection_mode"), items=arm_modes, description=get_id("action_selection_mode_tip"), default='FILTERED')
     action_preview_index : IntProperty(default=-1)
 
-    fbx_anim_layout : EnumProperty(name=get_id("fbx_anim_layout"), description=get_id("fbx_anim_layout_tip"), default='PER_FILE', items=(
-        ('PER_FILE', get_id("fbx_anim_layout_per"), get_id("fbx_anim_layout_per_tip")),
-        ('SINGLE_FILE', get_id("fbx_anim_layout_single"), get_id("fbx_anim_layout_single_tip")),
-    ))
-
     export_anims_separately : BoolProperty(name=get_id("prop_export_anims_separately"), description=get_id("prop_export_anims_separately_tip"), default=False)
 
     hitboxes       : CollectionProperty(type=HitboxEntry)

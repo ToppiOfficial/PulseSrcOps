@@ -26,24 +26,6 @@ _data = {
         'en': "Action Selection",
         'ja': "アクション選択",
     },
-    'fbx_anim_layout': {
-        'en': "FBX Animation Layout",
-    },
-    'fbx_anim_layout_tip': {
-        'en': "How exported animations are split across FBX files",
-    },
-    'fbx_anim_layout_per': {
-        'en': "One File Per Animation",
-    },
-    'fbx_anim_layout_per_tip': {
-        'en': "Write a separate FBX for each action slot / action",
-    },
-    'fbx_anim_layout_single': {
-        'en': "Single File",
-    },
-    'fbx_anim_layout_single_tip': {
-        'en': "Write one FBX holding every animation as a separate take",
-    },
     'prop_export_anims_separately': {
         'en': "Export Animations Separately",
     },
@@ -404,21 +386,6 @@ _data = {
         'en': "Could not create {0} file. Python reports: {1}.",
         'ja': "{0}ファイルを作成できませんでした。Pythonの報告: {1}",
     },
-    'exporter_err_fbx_addon': {
-        'en': "FBX export requires Blender's \"Import-Export: FBX format\" add-on, which could not be enabled.",
-    },
-    'exporter_warn_fbx_vca': {
-        'en': "\"{0}\" has vertex animations, which FBX export does not support - they were skipped.",
-    },
-    'importer_warn_fbx_companion': {
-        'en': "Could not read the companion DMX \"{0}\", so no flex controllers or prefab data were imported. Python reports: {1}.",
-    },
-    'exporter_warn_fbx_corrective': {
-        'en': "\"{0}\" has corrective shape keys. The companion DMX has no mesh, so it cannot declare them as correctives - export as DMX instead if you need them.",
-    },
-    'exporter_warn_fbx_shapeverts': {
-        'en': "Shape key \"{0}\" on \"{1}\" baked to a different vertex count to its base mesh - skipped.",
-    },
     'exporter_err_relativeunsaved': {
         'en': "Cannot export to a relative path until the blend file has been saved.",
         'ja': "blendファイルが保存されるまで相対パスにエクスポートできません",
@@ -542,10 +509,6 @@ _data = {
         'en': "Override the bone name written to exported files",
         'ja': "エクスポートされるファイルに書き込まれるボーン名を上書き",
     },
-    'exportpanel_fbx_companion': {
-        'en': "A .dmx is written beside each .fbx for the flex controllers (and prefabs when embedded).",
-        'ja': "フレックスコントローラー（埋め込み時はプレハブも）用に、各 .fbx の隣に .dmx が書き出されます。",
-    },
     'exportpanel_dmxver': {
         'en': "DMX Version:",
         'ja': "DMXのバージョン：",
@@ -633,24 +596,6 @@ _data = {
     'importmenu_title': {
         'en': "Source Engine",
         'ja': "Source Engine",
-    },
-    'import_menuitem_fbx': {
-        'en': "FBX (.fbx)",
-    },
-    'importer_fbx_title': {
-        'en': "Import FBX",
-    },
-    'importer_fbx_tip': {
-        'en': "Imports an FBX model, restoring any Source data an FBX export wrote into it",
-    },
-    'importer_fbx_scale': {
-        'en': "Scale",
-    },
-    'importer_fbx_scale_tip': {
-        'en': "Scale applied on import. Defaults to the inverse of the scene's world scale, undoing the conversion to engine units",
-    },
-    'importer_err_fbx': {
-        'en': "Could not import \"{0}\". Blender's FBX importer reports: {1}",
     },
     'import_menuitem_dmx': {
         'en': "DMX (.dmx)",

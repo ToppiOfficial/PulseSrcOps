@@ -34,7 +34,7 @@ class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
                  exportable_empties, all_bake_results, flex_mode, flex_source,
-                 skeleton_only=False, anim_jobs=None):
+                 anim_jobs=None):
         self.r = reporter
         self.datablock = datablock
         self.bake_results = bake_results
@@ -48,9 +48,6 @@ class DmxWriter:
         self.all_bake_results = all_bake_results
         self.flex_controller_mode = flex_mode
         self.flex_controller_source = flex_source
-        # FBX companion: skeleton + flex controllers + prefabs, no DmeMesh. The mesh, its
-        # morphs and its materials ship in the .fbx instead.
-        self.skeleton_only = skeleton_only
         # (name, action, slot) clips embedded into a model DMX; see embedded_anim_allowed.
         self.anim_jobs = anim_jobs
         self.bone_ids: dict[str, int] = {}
@@ -134,24 +131,20 @@ class DmxWriter:
         bench.report("Procedural bones")
         self._write_hitboxes(bench)
         self._write_physics_shapes(bench)
-        if not self.skeleton_only:
-            self._write_vca_bones()
+        self._write_vca_bones()
 
         combination_operator = self._setup_flex(bench)
-        if not combination_operator and not self.skeleton_only and self.bake_results and self.bake_results[0].vertex_animations:
+        if not combination_operator and self.bake_results and self.bake_results[0].vertex_animations:
             combination_operator = flex.DmxWriteFlexControllers.make_controllers(self.datablock).root["combinationOperator"]
         if combination_operator:
             root["combinationOperator"] = combination_operator
 
-        if self.skeleton_only:
-            root["model"] = self.DmeModel
-        else:
-            self._write_meshes(combination_operator, bench)
+        self._write_meshes(combination_operator, bench)
 
         if self.is_anim:
             ad = self.armature.animation_data
             self._write_animation_list([self._write_clip(self.name, "", ad, bench)])
-        elif self.anim_jobs and self.armature and not self.skeleton_only:
+        elif self.anim_jobs and self.armature:
             self._write_embedded_animations(bench)
 
         return self._write_out(bench)
