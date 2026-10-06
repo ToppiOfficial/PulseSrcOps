@@ -5,7 +5,7 @@ from mathutils import Vector, Matrix
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
-from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
+from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone, physicsshape as _physicsshape
 
 from .records import BakeResult, ExportTask, is_proxy_only
 
@@ -133,6 +133,7 @@ class DmxWriter:
         self._write_procedural_bones()
         bench.report("Procedural bones")
         self._write_hitboxes(bench)
+        self._write_physics_shapes(bench)
         if not self.skeleton_only:
             self._write_vca_bones()
 
@@ -443,6 +444,40 @@ class DmxWriter:
 
         self.root["hitboxSetList"] = hbox_set_list
         bench.report("Hitboxes")
+
+    def _write_physics_shapes(self, bench):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
+            return
+        dm = self.dm
+        arm_data = self.armature_src.data
+        avs = getattr(arm_data, 'vs', None)
+        entries = [e for e in (getattr(avs, 'physics_shapes', []) if avs else [])
+                   if e.bone_name and arm_data.bones.get(e.bone_name)]
+        if not entries:
+            return
+
+        empty = [e.bone_name for e in entries
+                 if e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0]
+        if empty:
+            self._warning(f"Skipping {len(empty)} physics capsule(s) with zero radius: {', '.join(empty)}")
+            entries = [e for e in entries if not (e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)]
+            if not entries:
+                return
+        inverted = [e.bone_name for e in entries
+                    if e.shape_type == 'BOX' and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
+        if inverted:
+            self._warning(f"Physics box min/max are inverted on: {', '.join(inverted)}")
+
+        prim_list = dm.add_element("physicsPrimitiveList", "DmePhysicsPrimitiveList", id="physicsPrimitiveList")
+        prim_list["primitives"] = datamodel.make_array([], datamodel.Element)
+        for pi, e in enumerate(entries):
+            bone_export = self.exportable_boneNames.get(e.bone_name, get_bone_exportname(arm_data.bones[e.bone_name]))
+            el = dm.add_element(bone_export, _physicsshape.element_class(e), id=f"physprim_{pi}_{e.bone_name}")
+            _physicsshape.write_dme_attrs(el, e, bone_export)
+            prim_list["primitives"].append(el)
+
+        self.root["physicsPrimitiveList"] = prim_list
+        bench.report("Physics shapes")
 
     # -- flex controller setup ----------------------------------------------
     def _setup_flex(self, bench):

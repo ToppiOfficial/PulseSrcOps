@@ -158,6 +158,7 @@ _classes = (
     VertexAnimation,
     ProcBoneEntry,
     HitboxEntry,
+    PhysicsShapeEntry,
     ArmatureItemEntry,
     PrefabItem,
     AttachmentDisplayMeshItem,
@@ -225,6 +226,7 @@ _classes = (
     GUI.SMD_PT_Curve,
     GUI.SMD_UL_ArmatureItems,
     GUI.SMD_UL_Hitboxes,
+    GUI.SMD_UL_PhysicsShapes,
     GUI.SMD_UL_ProcBones,
     GUI.SMD_MT_HitboxSpecials,
     GUI.SMD_MT_ProcBoneSpecials,
@@ -238,6 +240,10 @@ _classes = (
     GUI.SMD_OT_HitboxPasteValues,
     GUI.SMD_OT_HitboxCopyToArmature,
     GUI.SMD_OT_HitboxMirror,
+    GUI.SMD_OT_PhysShapeAdd,
+    GUI.SMD_OT_PhysShapeRemove,
+    GUI.SMD_OT_PhysShapeFromBone,
+    GUI.SMD_OT_PhysShapeDuplicate,
     GUI.SMD_OT_ProcBoneAdd,
     GUI.SMD_OT_ProcBoneAddFromSelected,
     GUI.SMD_OT_ProcBoneAddLookAt,
@@ -252,6 +258,7 @@ _classes = (
     GUI.SMD_OT_ProcBoneCopyAll,
     GUI.SMD_OT_ProcBonePasteEntries,
     GUI.SMD_PT_Hitboxes,
+    GUI.SMD_PT_PhysicsShapes,
     GUI.SMD_PT_ProcBones,
 GUI.SMD_PT_Jigglebones,
 
@@ -327,18 +334,26 @@ GUI.SMD_PT_Jigglebones,
     ValveSource_AddonPreferences,
 )
 
-def register():
-    icons.register()
-
-    for cls in _classes:
-        bpy.utils.register_class(cls)
-
+def _register_translations():
     from . import translations
     try:
         bpy.app.translations.unregister(__name__)
     except Exception:
         pass
     bpy.app.translations.register(__name__, translations.translations)
+
+
+def register():
+    icons.register()
+
+    for cls in _classes:
+        bpy.utils.register_class(cls)
+
+    # Translation updates notify file browsers after their interface initializes.
+    if bpy.app.background:
+        _register_translations()
+    elif not bpy.app.timers.is_registered(_register_translations):
+        bpy.app.timers.register(_register_translations, first_interval=0.0)
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
@@ -386,6 +401,8 @@ def register():
     bpy.app.timers.register(updater._startup_check, first_interval=5.0)
 
 def unregister():
+    if bpy.app.timers.is_registered(_register_translations):
+        bpy.app.timers.unregister(_register_translations)
     if bpy.app.timers.is_registered(updater._startup_check):
         bpy.app.timers.unregister(updater._startup_check)
 
@@ -415,7 +432,10 @@ def unregister():
     bpy.types.VIEW3D_MT_bone_options_toggle.remove(draw_copy_bone_props)
     bpy.types.VIEW3D_MT_pose_context_menu.remove(GUI._draw_proc_bone_context_menu)
 
-    bpy.app.translations.unregister(__name__)
+    try:
+        bpy.app.translations.unregister(__name__)
+    except ValueError:
+        pass
 
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

@@ -13,9 +13,9 @@ from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_en
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
                      is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT,
-                     embedded_anim_allowed, get_collection_export_objects)
+                     embedded_anim_allowed, prefab_mode_is_dme)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
-from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
+from .helpers import _model_armature, _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
 from .operators import (
     SMD_OT_AssignBoneRotExportOffset,
     SMD_OT_AddFlexController,
@@ -58,13 +58,6 @@ class Properties_Panel(Panel):
         layout = self.layout
 
 
-def _model_armature(item):
-    """The rig a model exportable is skinned to, preferring one inside its collection."""
-    obs = list(get_collection_export_objects(item)) if isinstance(item, Collection) else [item]
-    own = next((ob for ob in obs if ob.type == 'ARMATURE'), None)
-    return own or next((arm for arm in map(get_armature, obs) if arm), None)
-
-
 class SMD_PT_ViewportSimulation(Panel):
     bl_label = get_id('panel_viewport_simulation')
     bl_category = 'PulseSrcOps'
@@ -95,6 +88,7 @@ class SMD_PT_ViewportSimulation(Panel):
         box2.prop(vs, 'preview_proc_bones')
         box2.prop(vs, 'preview_edgeline')
         box2.prop(vs, 'preview_hitboxes')
+        box2.prop(vs, 'preview_physics_shapes')
         box2.prop(vs, 'preview_attachment_mesh')
         if vs.preview_edgeline:
             if vs.jiggle_sim_enabled:
@@ -520,6 +514,68 @@ class SMD_PT_Hitboxes(Properties_Panel):
         scvs = context.scene.vs
         row.prop(scvs, 'hitbox_sync_pose',      toggle=True, icon='BONE_DATA')
         row.prop(scvs, 'hitbox_sync_propagate', toggle=True, icon='CONSTRAINT_BONE')
+
+
+class SMD_PT_PhysicsShapes(Properties_Panel):
+    bl_label = ''
+    bl_parent_id = 'SMD_PT_Armature'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(get_armature(context.object))
+
+    def draw_header(self, context):
+        arm_ob = get_armature(context.object)
+        count = len(arm_ob.data.vs.physics_shapes) if arm_ob else 0
+        self.layout.label(text='{} ({})'.format(get_id('panel_physshapes', True), count), icon='PHYSICS')
+
+    def draw(self, context):
+        layout = self.layout
+        arm_data = get_armature(context.object).data
+        avs = arm_data.vs
+
+        if not prefab_mode_is_dme(context.scene):
+            layout.label(text=get_id('label_physshape_embedded_only'), icon='INFO')
+
+        row = layout.row()
+        row.template_list("SMD_UL_PhysicsShapes", "", avs, "physics_shapes",
+                          avs, "physics_shapes_index", rows=3)
+        col = row.column(align=True)
+        col.operator("smd.physshape_add", icon='META_CAPSULE', text='').shape_type = 'CAPSULE'
+        col.operator("smd.physshape_add", icon='MESH_CUBE',    text='').shape_type = 'BOX'
+        col.operator("smd.physshape_remove", icon='REMOVE', text='')
+        col.separator()
+        col.operator("smd.physshape_from_bone", icon='BONE_DATA', text='')
+        col.operator("smd.physshape_duplicate", icon='DUPLICATE', text='')
+
+        idx = avs.physics_shapes_index
+        if not 0 <= idx < len(avs.physics_shapes):
+            return
+        entry = avs.physics_shapes[idx]
+        is_capsule = entry.shape_type == 'CAPSULE'
+        box = layout.box()
+        box.prop_search(entry, 'bone_name', arm_data, 'bones', text=get_id('prop_hitbox_bone'))
+        row = box.row()
+        row.prop(entry, 'shape_type', expand=True)
+        row.prop(entry, 'merge', toggle=True, icon='AUTOMERGE_ON' if entry.merge else 'AUTOMERGE_OFF')
+
+        split = box.split(factor=0.22, align=True)
+        split.label(text=get_id('prop_physshape_point0' if is_capsule else 'prop_hitbox_vec_min') + ":")
+        split.row(align=True).prop(entry, 'vec_min', text='')
+        split = box.split(factor=0.22, align=True)
+        split.label(text=get_id('prop_physshape_point1' if is_capsule else 'prop_hitbox_vec_max') + ":")
+        split.row(align=True).prop(entry, 'vec_max', text='')
+
+        if not is_capsule and any(entry.vec_min[i] > entry.vec_max[i] for i in range(3)):
+            box.label(text="Min > Max : inverted box, swap Min and Max", icon='ERROR')
+
+        box.prop(entry, 'rotation', text=get_id('prop_hitbox_rotation'))
+        if is_capsule:
+            row = box.row(align=True)
+            row.prop(entry, 'radius0')
+            row.prop(entry, 'radius1')
+            box.prop(entry, 'segments')
 
 
 class SMD_PT_ProcBones(Properties_Panel):

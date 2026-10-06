@@ -152,29 +152,26 @@ game_presets = {
 }
 
 def getAllDataNameTranslations(string : str) -> set[str]:
+    """Read data-name translations without changing Blender's language."""
+    import gettext
+
     if not bpy.app.translations.locales:
-        return { string } # Blender was compiled without translations
-    
-    translations = set()
-        
-    view_prefs = bpy.context.preferences.view
-    user_language = view_prefs.language
-    user_dataname_translate = view_prefs.use_translate_new_dataname
-        
-    try:
-        view_prefs.use_translate_new_dataname = True
-        for language in bpy.app.translations.locales:
-            if language == "hr_HR" and bpy.app.version < (4,5,3):
-                continue # enabling Croatian generates a C error message in the console, and it's very sparsely translated anyway
-            try:
-                view_prefs.language = language
-                translations.add(bpy.app.translations.pgettext_data(string))
-            except:
-                pass
-    finally:
-        view_prefs.language = user_language
-        view_prefs.use_translate_new_dataname = user_dataname_translate
-    
+        return {string}
+
+    translations = {string, bpy.app.translations.pgettext_data(string)}
+    locale_dir = bpy.utils.system_resource('DATAFILES', path='locale')
+    if not locale_dir:
+        return translations
+
+    for language in os.listdir(locale_dir):
+        catalog_path = os.path.join(locale_dir, language, 'LC_MESSAGES', 'blender.mo')
+        try:
+            with open(catalog_path, 'rb') as catalog_file:
+                catalog = gettext.GNUTranslations(catalog_file)
+            translations.add(catalog.gettext(string))
+        except (OSError, EOFError, ValueError, struct.error):
+            continue
+
     return translations
 
 class _StateMeta(type): # class properties are not supported below Python 3.9, so we use a metaclass instead

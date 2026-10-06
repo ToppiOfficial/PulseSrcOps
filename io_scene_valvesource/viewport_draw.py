@@ -535,6 +535,46 @@ def _draw_hitbox_for_bone(ob, pb, hb):
     _draw_lines(lines, (r, g, b, 0.70), 1.5)
 
 
+_COLOR_PHYS_FILL    = (1.0, 0.9, 0.1)
+_COLOR_PHYS_OUTLINE = (1.0, 0.1, 0.1)
+
+
+def _draw_physics_shape_for_bone(ob, pb, ps):
+    """Draw a physics shape entry (box or tapered capsule) in bone-local space."""
+    bone_mat  = ob.matrix_world @ get_bone_matrix(pb)
+    arm_scale = Vector((bone_mat[0][0], bone_mat[1][0], bone_mat[2][0])).length
+    rot_mat   = Euler((ps.rotation[0], ps.rotation[1], ps.rotation[2]), 'XYZ').to_matrix()
+    mn  = Vector(ps.vec_min)
+    mx  = Vector(ps.vec_max)
+    ctr = (mn + mx) * 0.5
+
+    if ps.shape_type == 'BOX':
+        bm3 = bone_mat.to_3x3()
+        x_w, y_w, z_w = (bm3 @ rot_mat.col[i] for i in range(3))
+        center_w = (bone_mat @ Vector((*ctr, 1.0))).to_3d()
+        hx, hy, hz = (abs(mx[i] - mn[i]) * 0.5 for i in range(3))
+        tris  = _box_tris( center_w, x_w, y_w, z_w, hx, hx, hy, hy, hz, hz)
+        lines = _box_lines(center_w, x_w, y_w, z_w, hx, hx, hy, hy, hz, hz)
+    else:
+        p0 = (bone_mat @ Vector((*(ctr + rot_mat @ (mn - ctr)), 1.0))).to_3d()
+        p1 = (bone_mat @ Vector((*(ctr + rot_mat @ (mx - ctr)), 1.0))).to_3d()
+        r0 = ps.radius0 * arm_scale
+        r1 = ps.radius1 * arm_scale
+        if r0 <= 0.0 and r1 <= 0.0:
+            return
+        axis = p1 - p0
+        # Degenerate segment draws as a sphere around p0.
+        fwd = axis.normalized() if axis.length > 1e-6 else bone_mat.to_3x3().col[1].normalized()
+        up    = Vector((0, 0, 1)) if abs(fwd.z) < 0.9 else Vector((1, 0, 0))
+        perp1 = fwd.cross(up).normalized()
+        perp2 = fwd.cross(perp1).normalized()
+        tris  = _tapered_capsule_tris( p0, p1, perp1, perp2, fwd, r0, r1)
+        lines = _tapered_capsule_lines(p0, p1, perp1, perp2, fwd, r0, r1)
+
+    _emit_tris(tris, (*_COLOR_PHYS_FILL, 0.18), depth_mask=False)
+    _draw_lines(lines, (*_COLOR_PHYS_OUTLINE, 0.85), 1.5)
+
+
 def _draw_jigglebone_collider(pb, ghost_mat, scale_fac=1.0):
     """Draw the Source 2 jigglebone collision capsule (tapered, independent end radii).
     Endpoints are bone-local; ghost_mat already bakes in the bone's export offsets."""
@@ -984,6 +1024,24 @@ def _collect_export_pose_preview():
             pb_hb = pose_bones.get(hb.bone_name)
             if pb_hb:
                 _draw_hitbox_for_bone(ob, pb_hb, hb)
+
+    # -- Physics shape preview -------------------------------------------------
+    phys_shapes = getattr(avs, 'physics_shapes', None) if avs else None
+    phys_mode   = getattr(scvs, 'preview_physics_shapes', 'NONE')
+
+    if phys_mode != 'NONE' and phys_shapes:
+        if phys_mode == 'ALL':
+            to_draw = phys_shapes
+        elif phys_mode == 'POSE':
+            sel_names = {pb.name for pb in (context.selected_pose_bones or [])}
+            to_draw   = [ps for ps in phys_shapes if ps.bone_name in sel_names]
+        else:  # SELECTED
+            idx     = avs.physics_shapes_index
+            to_draw = [phys_shapes[idx]] if 0 <= idx < len(phys_shapes) else []
+        for ps in to_draw:
+            pb_ps = ob.pose.bones.get(ps.bone_name)
+            if pb_ps:
+                _draw_physics_shape_for_bone(ob, pb_ps, ps)
 
     if context.mode != 'POSE':
         return

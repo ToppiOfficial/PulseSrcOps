@@ -1400,6 +1400,66 @@ _data = {
         'en': "Mesh Split",
         'ja': "メッシュ分割",
     },
+    'panel_physshapes': {
+        'en': "Physics Shapes",
+    },
+    'label_physshape_embedded_only': {
+        'en': "Exported only with Embedded prefabs (PulseModel)",
+    },
+    'op_physshape_add': {
+        'en': "Add Physics Shape",
+    },
+    'op_physshape_remove': {
+        'en': "Remove Physics Shape",
+    },
+    'op_physshape_duplicate': {
+        'en': "Duplicate Physics Shape",
+    },
+    'prop_physshape_bone_tip': {
+        'en': "Bone this physics shape is attached to",
+    },
+    'prop_physshape_type': {
+        'en': "Shape",
+    },
+    'prop_physshape_rotation_tip': {
+        'en': "Rotation around the shape center in bone-local space. Capsules bake it into P0/P1 on export",
+    },
+    'prop_physshape_point0': {
+        'en': "P0",
+    },
+    'prop_physshape_point1': {
+        'en': "P1",
+    },
+    'prop_physshape_radius0': {
+        'en': "Radius P0",
+    },
+    'prop_physshape_radius0_tip': {
+        'en': "Capsule radius at P0",
+    },
+    'prop_physshape_radius1': {
+        'en': "Radius P1",
+    },
+    'prop_physshape_radius1_tip': {
+        'en': "Capsule radius at P1",
+    },
+    'prop_physshape_merge': {
+        'en': "Merge",
+    },
+    'prop_physshape_merge_tip': {
+        'en': "Compile into one collision piece with the other Merge-enabled shapes on the same bone. Off: this shape is its own piece",
+    },
+    'prop_physshape_segments': {
+        'en': "Segments",
+    },
+    'prop_physshape_segments_tip': {
+        'en': "Tessellation of the compiled capsule hull (3-64)",
+    },
+    'prop_preview_physshapes': {
+        'en': "Preview Physics Shapes",
+    },
+    'prop_preview_physshapes_tip': {
+        'en': "All: draw all physics shapes; Selected: draw only the list-selected entry; Pose: draw shapes for selected pose bones; None: hide preview",
+    },
     'panel_hitboxes': {
         'en': "Hitboxes",
         'ja': "ヒットボックス",

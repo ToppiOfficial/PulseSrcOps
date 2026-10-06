@@ -267,6 +267,17 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
         ],
         default='POSE',
     )
+    preview_physics_shapes : EnumProperty(
+        name=get_id('prop_preview_physshapes'),
+        description=get_id('prop_preview_physshapes_tip'),
+        items=[
+            ('ALL',      'All',      'Show all physics shapes in the viewport'),
+            ('SELECTED', 'Selected', 'Show only the physics shape entry selected in the list'),
+            ('POSE',     'Pose',     'Show physics shapes for all selected pose bones (Pose mode only)'),
+            ('NONE',     'None',     'Hide physics shape preview'),
+        ],
+        default='SELECTED',
+    )
 
     arm_items_view : EnumProperty(name=get_id('prop_arm_items_view'), items=[
         ('JIGGLEBONES', get_id('label_all_jigglebones'), '', 'BONE_DATA',  0),

@@ -1,7 +1,7 @@
 import bpy
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
 from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable, isProcBoneAnimSkipped, _procBoneSlotDisplayName
-from .helpers import build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
+from .helpers import _model_armature, build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
 
 
 class SMD_UL_ExportItems(UIList):
@@ -118,7 +118,7 @@ class SMD_UL_ActionExport(UIList):
         from fnmatch import fnmatch
         items = getattr(data, propname)
         ae = get_active_exportable(context)
-        arm = ae.item if ae else None
+        arm = _model_armature(ae.item) if ae and ae.item else None
         filt = arm.vs.action_filter if arm else ""
 
         flags = []
@@ -298,6 +298,19 @@ class SMD_UL_Hitboxes(UIList):
         if is_capsule:
             row.label(text=f"r={item.scale:.2f}")
         if is_inverted:
+            row.label(text='', icon='ERROR')
+
+
+class SMD_UL_PhysicsShapes(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        is_capsule = item.shape_type == 'CAPSULE'
+        row.label(text='', icon='META_CAPSULE' if is_capsule else 'MESH_CUBE')
+        row.label(text=item.bone_name if item.bone_name else '-', icon='BONE_DATA')
+        if is_capsule:
+            row.label(text=f"r={item.radius0:.2f}/{item.radius1:.2f}")
+        row.prop(item, 'merge', text='', emboss=False, icon='AUTOMERGE_ON' if item.merge else 'AUTOMERGE_OFF')
+        if not is_capsule and any(item.vec_min[i] > item.vec_max[i] for i in range(3)):
             row.label(text='', icon='ERROR')
 
 

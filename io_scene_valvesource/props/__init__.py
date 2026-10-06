@@ -8,6 +8,7 @@ __all__ = [
     'VertexAnimation',
     'ArmatureItemEntry',
     'HitboxEntry',
+    'PhysicsShapeEntry',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',

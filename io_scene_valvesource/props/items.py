@@ -7,6 +7,7 @@ __all__ = [
     'VertexAnimation',
     'ArmatureItemEntry',
     'HitboxEntry',
+    'PhysicsShapeEntry',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
     'BoneNamePrefixItem',
@@ -283,6 +284,23 @@ class HitboxEntry(bpy.types.PropertyGroup):
                                     update=lambda s, c: _hb_propagate(s, c, 'rotation', True))
     scale     : FloatProperty(name=get_id('prop_hitbox_scale'), description=get_id('prop_hitbox_scale_tip'), default=0, min=-1.0, precision=4,
                               update=lambda s, c: _hb_propagate(s, c, 'scale',    False))
+
+
+# ---- PhysicsShapeEntry ------------------------------------------------------
+
+class PhysicsShapeEntry(bpy.types.PropertyGroup):
+    bone_name  : StringProperty(name=get_id('prop_hitbox_bone'), description=get_id('prop_physshape_bone_tip'))
+    shape_type : EnumProperty(name=get_id('prop_physshape_type'), default='CAPSULE', items=[
+        ('CAPSULE', 'Capsule', '', 'META_CAPSULE', 0),
+        ('BOX',     'Box',     '', 'MESH_CUBE',    1),
+    ])
+    vec_min    : FloatVectorProperty(name=get_id('prop_hitbox_vec_min'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
+    vec_max    : FloatVectorProperty(name=get_id('prop_hitbox_vec_max'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
+    rotation   : FloatVectorProperty(name=get_id('prop_hitbox_rotation'), description=get_id('prop_physshape_rotation_tip'), size=3, default=(0.0, 0.0, 0.0), subtype='EULER', unit='ROTATION', precision=4)
+    radius0    : FloatProperty(name=get_id('prop_physshape_radius0'), description=get_id('prop_physshape_radius0_tip'), default=1.0, min=0.0, precision=4)
+    radius1    : FloatProperty(name=get_id('prop_physshape_radius1'), description=get_id('prop_physshape_radius1_tip'), default=1.0, min=0.0, precision=4)
+    merge      : BoolProperty(name=get_id('prop_physshape_merge'), description=get_id('prop_physshape_merge_tip'), default=True)
+    segments   : IntProperty(name=get_id('prop_physshape_segments'), description=get_id('prop_physshape_segments_tip'), default=6, min=3, max=64)
 
 
 def _get_preview_tol(self) -> float:

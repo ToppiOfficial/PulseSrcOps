@@ -1,7 +1,15 @@
 import bpy, math
+from bpy.types import Collection
 from typing import NamedTuple
-from ..utils import get_armature, vertex_float_maps, validate_corrective_components, validate_flex_expression, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_renamed_delta_names
+from ..utils import get_armature, get_collection_export_objects, vertex_float_maps, validate_corrective_components, validate_flex_expression, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_renamed_delta_names
 from .. import procbones_sim as _procbones_sim
+
+
+def _model_armature(item):
+    """The rig a model exportable is skinned to, preferring one inside its collection."""
+    obs = list(get_collection_export_objects(item)) if isinstance(item, Collection) else [item]
+    own = next((ob for ob in obs if ob.type == 'ARMATURE'), None)
+    return own or next((arm for arm in map(get_armature, obs) if arm), None)
 
 
 def _bone_is_hidden(bone) -> bool:

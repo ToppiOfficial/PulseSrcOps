@@ -1331,6 +1331,92 @@ class SMD_OT_HitboxFromBone(Operator):
         return {'FINISHED'}
 
 
+_PHYSSHAPE_TYPES = [('CAPSULE', 'Capsule', ''), ('BOX', 'Box', '')]
+
+
+class SMD_OT_PhysShapeAdd(Operator):
+    bl_idname  = "smd.physshape_add"
+    bl_label   = get_id('op_physshape_add')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    shape_type : EnumProperty(items=_PHYSSHAPE_TYPES, default='CAPSULE')
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        entry = avs.physics_shapes.add()
+        entry.shape_type = self.shape_type
+        if context.active_pose_bone:
+            entry.bone_name = context.active_pose_bone.name
+        avs.physics_shapes_index = len(avs.physics_shapes) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeRemove(Operator):
+    bl_idname  = "smd.physshape_remove"
+    bl_label   = get_id('op_physshape_remove')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        idx = avs.physics_shapes_index
+        if 0 <= idx < len(avs.physics_shapes):
+            avs.physics_shapes.remove(idx)
+            avs.physics_shapes_index = max(0, min(idx, len(avs.physics_shapes) - 1))
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeFromBone(Operator):
+    bl_idname  = "smd.physshape_from_bone"
+    bl_label   = get_id('op_hitbox_from_bone')
+    bl_options = {'UNDO'}
+
+    shape_type : EnumProperty(items=_PHYSSHAPE_TYPES, default='CAPSULE')
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'POSE' and context.selected_pose_bones
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        for pb in context.selected_pose_bones:
+            entry = avs.physics_shapes.add()
+            entry.bone_name = pb.name
+            entry.shape_type = self.shape_type
+        avs.physics_shapes_index = len(avs.physics_shapes) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeDuplicate(Operator):
+    bl_idname  = "smd.physshape_duplicate"
+    bl_label   = get_id('op_physshape_duplicate')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        idx = avs.physics_shapes_index
+        if not 0 <= idx < len(avs.physics_shapes):
+            return {'CANCELLED'}
+        src = avs.physics_shapes[idx]
+        dst = avs.physics_shapes.add()
+        for key in ('bone_name', 'shape_type', 'vec_min', 'vec_max', 'rotation', 'radius0', 'radius1', 'merge', 'segments'):
+            setattr(dst, key, getattr(src, key))
+        avs.physics_shapes.move(len(avs.physics_shapes) - 1, idx + 1)
+        avs.physics_shapes_index = idx + 1
+        return {'FINISHED'}
+
+
 _hitbox_clipboard: list[dict] | None = None
 
 
