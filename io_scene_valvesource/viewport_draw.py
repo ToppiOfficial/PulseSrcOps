@@ -535,8 +535,8 @@ def _draw_hitbox_for_bone(ob, pb, hb):
     _draw_lines(lines, (r, g, b, 0.70), 1.5)
 
 
-_COLOR_PHYS_FILL    = (1.0, 0.9, 0.1)
-_COLOR_PHYS_OUTLINE = (1.0, 0.1, 0.1)
+_COLOR_PHYS_FILL    = (0.22, 0.38, 0.55)
+_COLOR_PHYS_OUTLINE = (0.4, 0.65, 0.85)
 
 
 def _draw_physics_shape_for_bone(ob, pb, ps):
@@ -548,7 +548,15 @@ def _draw_physics_shape_for_bone(ob, pb, ps):
     mx  = Vector(ps.vec_max)
     ctr = (mn + mx) * 0.5
 
-    if ps.shape_type == 'BOX':
+    if ps.shape_type == 'SPHERE':
+        center_w = bone_mat @ mn
+        radius = ps.radius0 * arm_scale
+        if radius <= 0:
+            return
+        x, y, z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
+        tris = _sphere_tris(center_w, x, y, z, radius)
+        lines = _sphere_lines(center_w, x, y, z, radius)
+    elif ps.shape_type == 'BOX':
         bm3 = bone_mat.to_3x3()
         x_w, y_w, z_w = (bm3 @ rot_mat.col[i] for i in range(3))
         center_w = (bone_mat @ Vector((*ctr, 1.0))).to_3d()
@@ -571,7 +579,7 @@ def _draw_physics_shape_for_bone(ob, pb, ps):
         tris  = _tapered_capsule_tris( p0, p1, perp1, perp2, fwd, r0, r1)
         lines = _tapered_capsule_lines(p0, p1, perp1, perp2, fwd, r0, r1)
 
-    _emit_tris(tris, (*_COLOR_PHYS_FILL, 0.18), depth_mask=False)
+    _emit_tris(tris, (*_COLOR_PHYS_FILL, 0.10), depth_mask=False)
     _draw_lines(lines, (*_COLOR_PHYS_OUTLINE, 0.85), 1.5)
 
 
@@ -911,10 +919,11 @@ def _on_hitbox_sync_depsgraph(scene, depsgraph):
 
         scvs = getattr(getattr(context, 'scene', None), 'vs', None)
         sync_hitbox = getattr(scvs, 'hitbox_sync_pose', True)
+        sync_physics = getattr(scvs, 'physics_shape_sync_pose', True)
 
         active_pb = context.active_pose_bone
         bone_name = active_pb.name if active_pb else ''
-        bone_key  = f"{ob.name}::{bone_name}"
+        bone_key  = f"{ob.name}::{bone_name}::{sync_hitbox}::{sync_physics}"
 
         if bone_key == _last_active_bone_key:
             return
@@ -932,6 +941,13 @@ def _on_hitbox_sync_depsgraph(scene, depsgraph):
                 if hb.bone_name == bone_name:
                     if avs.hitboxes_index != i:
                         avs.hitboxes_index = i  # triggers refresh_hitbox_snapshot via update callback
+                    break
+
+        if sync_physics and avs.physics_shapes:
+            for i, shape in enumerate(avs.physics_shapes):
+                if shape.bone_name == bone_name:
+                    if avs.physics_shapes_index != i:
+                        avs.physics_shapes_index = i
                     break
 
         if avs.proc_bones:

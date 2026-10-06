@@ -544,10 +544,13 @@ class SMD_PT_PhysicsShapes(Properties_Panel):
         col = row.column(align=True)
         col.operator("smd.physshape_add", icon='META_CAPSULE', text='').shape_type = 'CAPSULE'
         col.operator("smd.physshape_add", icon='MESH_CUBE',    text='').shape_type = 'BOX'
+        col.operator("smd.physshape_add", icon='SPHERE',       text='').shape_type = 'SPHERE'
         col.operator("smd.physshape_remove", icon='REMOVE', text='')
         col.separator()
         col.operator("smd.physshape_from_bone", icon='BONE_DATA', text='')
         col.operator("smd.physshape_duplicate", icon='DUPLICATE', text='')
+
+        layout.prop(context.scene.vs, 'physics_shape_sync_pose', toggle=True, icon='BONE_DATA')
 
         idx = avs.physics_shapes_index
         if not 0 <= idx < len(avs.physics_shapes):
@@ -559,6 +562,12 @@ class SMD_PT_PhysicsShapes(Properties_Panel):
         row = box.row()
         row.prop(entry, 'shape_type', expand=True)
         row.prop(entry, 'merge', toggle=True, icon='AUTOMERGE_ON' if entry.merge else 'AUTOMERGE_OFF')
+
+        if entry.shape_type == 'SPHERE':
+            box.prop(entry, 'vec_min', text='Position')
+            box.prop(entry, 'radius0', text='Radius')
+            box.prop(entry, 'segments')
+            return
 
         split = box.split(factor=0.22, align=True)
         split.label(text=get_id('prop_physshape_point0' if is_capsule else 'prop_hitbox_vec_min') + ":")

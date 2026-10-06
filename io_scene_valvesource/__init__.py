@@ -47,6 +47,9 @@ from . import datamodel, imports, exports, flex, procbones_sim, updater, icons
 from . import gui as GUI
 from .utils import *
 from .props import *
+from .physics_gizmos import (SMD_OT_PhysicsShapeDrag, SMD_GT_PhysicsRadiusRing,
+                             SMD_GT_PhysicsEndpointLink, SMD_GT_PhysicsMovePlane,
+                             SMD_GT_PhysicsMoveArrow, SMD_GGT_PhysicsShape, SMD_GGT_Hitbox)
 
 def menu_func_import(self, context):
     self.layout.menu("SMD_MT_ImportChoice", text=get_id("importmenu_title"))
@@ -244,6 +247,13 @@ _classes = (
     GUI.SMD_OT_PhysShapeRemove,
     GUI.SMD_OT_PhysShapeFromBone,
     GUI.SMD_OT_PhysShapeDuplicate,
+    SMD_OT_PhysicsShapeDrag,
+    SMD_GT_PhysicsRadiusRing,
+    SMD_GT_PhysicsEndpointLink,
+    SMD_GT_PhysicsMovePlane,
+    SMD_GT_PhysicsMoveArrow,
+    SMD_GGT_PhysicsShape,
+    SMD_GGT_Hitbox,
     GUI.SMD_OT_ProcBoneAdd,
     GUI.SMD_OT_ProcBoneAddFromSelected,
     GUI.SMD_OT_ProcBoneAddLookAt,

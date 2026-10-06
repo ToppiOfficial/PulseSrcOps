@@ -1215,7 +1215,8 @@ class SMD_OT_AssignBoneRotExportOffset(Operator):
         selected_arms = [ob for ob in context.selected_objects if is_armature(ob)]
         if not selected_arms or context.mode in {'EDIT', 'EDIT_ARMATURE', 'OBJECT'}:
             return False
-        return any(b.select for arm in selected_arms for b in arm.data.bones if not b.hide_select)
+        return any(pb.id_data in selected_arms and not pb.bone.hide_select
+                   for pb in (context.selected_pose_bones or []))
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -1238,7 +1239,8 @@ class SMD_OT_AssignBoneRotExportOffset(Operator):
             if self.only_active_bone:
                 selected_bones = [arm.data.bones.active] if arm.data.bones.active else []
             else:
-                selected_bones = [b for b in arm.data.bones if not b.hide_select and b.select]
+                selected_bones = [pb.bone for pb in (context.selected_pose_bones or [])
+                                  if pb.id_data == arm and not pb.bone.hide_select]
 
             if not selected_bones:
                 continue
@@ -1331,7 +1333,7 @@ class SMD_OT_HitboxFromBone(Operator):
         return {'FINISHED'}
 
 
-_PHYSSHAPE_TYPES = [('CAPSULE', 'Capsule', ''), ('BOX', 'Box', '')]
+_PHYSSHAPE_TYPES = [('CAPSULE', 'Capsule', ''), ('BOX', 'Box', ''), ('SPHERE', 'Sphere', '')]
 
 
 class SMD_OT_PhysShapeAdd(Operator):
@@ -1348,6 +1350,11 @@ class SMD_OT_PhysShapeAdd(Operator):
         avs = arm_ob.data.vs
         entry = avs.physics_shapes.add()
         entry.shape_type = self.shape_type
+        if self.shape_type == 'CAPSULE':
+            entry.vec_max = (1.0, 0.0, 0.0)
+        elif self.shape_type == 'BOX':
+            entry.vec_min = (-1.0, -1.0, -1.0)
+            entry.vec_max = (1.0, 1.0, 1.0)
         if context.active_pose_bone:
             entry.bone_name = context.active_pose_bone.name
         avs.physics_shapes_index = len(avs.physics_shapes) - 1
@@ -1391,6 +1398,11 @@ class SMD_OT_PhysShapeFromBone(Operator):
             entry = avs.physics_shapes.add()
             entry.bone_name = pb.name
             entry.shape_type = self.shape_type
+            if self.shape_type == 'CAPSULE':
+                entry.vec_max = (1.0, 0.0, 0.0)
+            elif self.shape_type == 'BOX':
+                entry.vec_min = (-1.0, -1.0, -1.0)
+                entry.vec_max = (1.0, 1.0, 1.0)
         avs.physics_shapes_index = len(avs.physics_shapes) - 1
         return {'FINISHED'}
 

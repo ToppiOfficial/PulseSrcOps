@@ -1,4 +1,4 @@
-"""Bone-attached physics primitives (capsule / box), embedded into the model DMX for
+"""Bone-attached physics primitives (capsule / box / sphere), embedded into the model DMX for
 PulseModel (Source 1, model 22). Written under ``DmePhysicsPrimitiveList`` so they never
 collide with mesh-based ``DmePhysicsShape`` collision. See PHYSICS_SHAPES_SPEC.md.
 """
@@ -20,14 +20,19 @@ def _capsule_points(entry):
 
 
 def element_class(entry) -> str:
-    return "DmePhysicsCapsule" if entry.shape_type == 'CAPSULE' else "DmePhysicsBox"
+    return {'CAPSULE': 'DmePhysicsCapsule', 'BOX': 'DmePhysicsBox',
+            'SPHERE': 'DmePhysicsSphere'}[entry.shape_type]
 
 
 def write_dme_attrs(el, entry, bone_export: str) -> None:
     el["boneName"] = bone_export
     # True: one piece with every other merge=True primitive on the same bone.
     el["merge"]    = bool(entry.merge)
-    if entry.shape_type == 'CAPSULE':
+    if entry.shape_type == 'SPHERE':
+        el["position"] = round(datamodel.Vector3(Vector(entry.vec_min)), 4)
+        el["radius"] = round(float(entry.radius0), 4)
+        el["segments"] = max(3, min(64, int(entry.segments)))
+    elif entry.shape_type == 'CAPSULE':
         p0, p1 = _capsule_points(entry)
         el["point0"]  = round(datamodel.Vector3(p0), 4)
         el["point1"]  = round(datamodel.Vector3(p1), 4)

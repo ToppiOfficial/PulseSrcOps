@@ -254,6 +254,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
         default='SELECTED',
     )
     hitbox_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
+    physics_shape_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
     hitbox_sync_propagate : BoolProperty(name=get_id('prop_hitbox_sync_propagate'), description=get_id('prop_hitbox_sync_propagate_tip'), default=False)
 
     preview_hitboxes : EnumProperty(

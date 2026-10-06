@@ -457,10 +457,12 @@ class DmxWriter:
             return
 
         empty = [e.bone_name for e in entries
-                 if e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0]
+                 if (e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)
+                 or (e.shape_type == 'SPHERE' and e.radius0 <= 0.0)]
         if empty:
-            self._warning(f"Skipping {len(empty)} physics capsule(s) with zero radius: {', '.join(empty)}")
-            entries = [e for e in entries if not (e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)]
+            self._warning(f"Skipping {len(empty)} physics capsule/sphere(s) with zero radius: {', '.join(empty)}")
+            entries = [e for e in entries if not ((e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)
+                                                or (e.shape_type == 'SPHERE' and e.radius0 <= 0.0))]
             if not entries:
                 return
         inverted = [e.bone_name for e in entries

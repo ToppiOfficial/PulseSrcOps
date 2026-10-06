@@ -288,7 +288,7 @@ def populate_dme_flex_from_dmx(ob: bpy.types.Object, combo_op) -> None:
     seen_doms: set[tuple] = set()
     for dom in combo_op.get("dominators", []):
         d_names = dom.get("dominators", [])
-        s_names = dom.get("supressed", [])  # note: "supressed" is Valve's typo in the DMX format
+        s_names = dom.get("suppressed", dom.get("supressed", []))
         if d_names or s_names:
             key = (tuple(d_names), tuple(s_names))
             if key in seen_doms:

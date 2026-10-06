@@ -293,6 +293,7 @@ class PhysicsShapeEntry(bpy.types.PropertyGroup):
     shape_type : EnumProperty(name=get_id('prop_physshape_type'), default='CAPSULE', items=[
         ('CAPSULE', 'Capsule', '', 'META_CAPSULE', 0),
         ('BOX',     'Box',     '', 'MESH_CUBE',    1),
+        ('SPHERE',  'Sphere',  '', 'SPHERE',       2),
     ])
     vec_min    : FloatVectorProperty(name=get_id('prop_hitbox_vec_min'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
     vec_max    : FloatVectorProperty(name=get_id('prop_hitbox_vec_max'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
