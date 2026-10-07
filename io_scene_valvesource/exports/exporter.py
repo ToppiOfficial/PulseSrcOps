@@ -1,4 +1,4 @@
-import bpy, bmesh, collections, dataclasses, re, typing, os
+import bpy, bmesh, collections, dataclasses, gc, re, typing, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from mathutils import Vector, Matrix, Euler
@@ -11,13 +11,12 @@ from .. import datamodel, ordered_set, flex
 from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
 
 from .check import ExportCheck
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan, is_proxy_only
-from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _MeshPlan, is_proxy_only
+from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder
 from .bake import Baker
 from .plan import ExportPlanner
 from .dmx import DmxWriter
 from .smd import SmdWriter
-from .fbx import FbxWriter
 from .prefab import resolve_prefab_output, _PrefabRunnerAdapter
 
 
@@ -83,6 +82,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         ops.ed.undo_push(message=self.bl_label)
 
+        # The export allocates millions of short-lived objects; cyclic GC passes over them
+        # cost noticeable pauses and reclaim nothing until the export ends anyway.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
         try:
             context.tool_settings.use_keyframe_insert_auto = False
             context.tool_settings.use_keyframe_insert_keyingset = False
@@ -103,6 +106,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 unhide_all(view_layer.layer_collection)
 
             self.files_exported = self.attemptedExports = 0
+            begin_bone_exportname_cache()
             self._bake_constraint_poses(context)
 
             export_ids = self._collect_export_ids(context)
@@ -120,6 +124,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 self.errorReport(get_id("exporter_report_aborted", True).format(self.files_exported, self.elapsed_time()))
 
         finally:
+            if gc_was_enabled:
+                gc.enable()
+            end_bone_exportname_cache()
             ops.ed.undo_push(message=self.bl_label)
             if bpy.app.debug_value <= 1:
                 ops.ed.undo()
@@ -336,6 +343,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             ad = id.animation_data
             if not ad:
                 return False
+            if embeds_animations(context.scene, id):
+                self.warning(get_id("exporter_warn_anim_embedded", True).format(id.name))
+                return True
 
         check_obs = get_collection_export_objects(id) if isinstance(id, Collection) else [id]
 
@@ -344,7 +354,6 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 vs = getattr(_ob, 'vs', None)
                 if not vs:
                     continue
-                # FBX carries DME flex rules in its companion DMX, so only SMD drops them.
                 if (State.exportFormat == ExportFormat.SMD
                         and getattr(vs, 'flex_controller_mode', '') == 'DME' and hasShapes(_ob)):
                     self.warning(get_id("exporter_warn_dme_smd", True).format(_ob.name))
@@ -372,16 +381,20 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             bench.report("planning")
 
             for task in tasks:
-                if not self._execute_task(context, id, task, path, bench, planner):
+                # LOD / edgeline tasks follow the base one and don't need the clips again.
+                if not self._execute_task(context, id, task, path, bench, planner,
+                                          embed_anims=task is tasks[0]):
                     return False
         finally:
             planner.cleanup()
 
         self._warn_unicode(id)
+        if not bench.quiet:
+            print(f"- {id.name} total: {bench.total():.4f}s")
         return True
 
     def _execute_task(self, context, original_id, task: ExportTask, path: str,
-                      bench: BenchMarker, planner: ExportPlanner = None) -> bool:
+                      bench: BenchMarker, planner: ExportPlanner = None, embed_anims: bool = False) -> bool:
         source = task.source_id
 
         if isinstance(source, Collection) and not any(ob.vs.export for ob in source.objects):
@@ -404,6 +417,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
         baker = Baker(self)
         bake_results = []
+        ob_bench = BenchMarker(1, "bake")
 
         if isinstance(source, Collection):
             group_vmaps = valvesource_vertex_maps(source)
@@ -417,6 +431,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                     baked_metaballs.append(ob)
 
                 bake = baker.bake(ob)
+                ob_bench.report(ob.name)
                 if bake:
                     if planner:
                         orig = planner.original_name(ob.session_uid)
@@ -444,13 +459,14 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 if comp_bake:
                     bake_results.append(comp_bake)
 
-        bench.report("bake", len(bake_results))
+        bench.report(f"bake ({len(bake_results)} objects)")
 
         if not any(bake_results):
             return True
 
         # -- vertex animations ------------------------------------------------
         self._process_vertex_animations(source, bake_results, bench)
+        bench.report("vertex animations")
 
         # -- DMX automerge ----------------------------------------------------
         if isinstance(source, Collection) and State.exportFormat == ExportFormat.DMX:
@@ -489,12 +505,13 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             if not self._setup_skeleton(source, bake_results, baker):
                 return False
 
+        bench.report("skeleton setup")
         self.bake_results = list(baker._cache.values())
         self._last_bake_results.extend(bake_results)
 
         # -- flex controller setup ---------------------------------------------
         src_mt_flex = getattr(getattr(source, 'vs', None), 'mesh_type', 'DEFAULT')
-        if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX) and hasShapes(source) and src_mt_flex == 'DEFAULT':
+        if State.exportFormat == ExportFormat.DMX and hasShapes(source) and src_mt_flex == 'DEFAULT':
             self.flex_controller_mode = source.vs.flex_controller_mode
             self.flex_controller_source = source.vs.flex_controller_source
 
@@ -513,7 +530,6 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         # -- write -------------------------------------------------------------
         write_func = {
             ExportFormat.DMX: self._run_dmx_writer,
-            ExportFormat.FBX: self._run_fbx_writer,
         }.get(State.exportFormat, self._run_smd_writer)
         bench.report("Post Bake")
 
@@ -537,28 +553,26 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 and source.animation_data and source.animation_data.action):
             baked_armature = bake_results[0].object
             jobs = self._filtered_anim_jobs(source, baked_armature)
-            if (State.exportFormat == ExportFormat.FBX
-                    and source.data.vs.fbx_anim_layout == "SINGLE_FILE"):
-                if jobs:
-                    # One FBX holding every animation as a take; FbxWriter lays them out on NLA.
-                    self.files_exported += write_func(
-                        source, bake_results, self.sanitiseFilename(task.export_name) + "_multiclip", path, anim_jobs=jobs)
-            else:
-                for name, action, slot in jobs:
-                    if slot is not None:
-                        baked_armature.animation_data.action_slot = slot
-                    else:
-                        baked_armature.animation_data.action = action
-                    self.files_exported += write_func(source, bake_results, self.sanitiseFilename(name), path)
+            for name, action, slot in jobs:
+                if slot is not None:
+                    baked_armature.animation_data.action_slot = slot
+                else:
+                    baked_armature.animation_data.action = action
+                self.files_exported += write_func(source, bake_results, self.sanitiseFilename(name), path)
         elif (isinstance(source, bpy.types.Object) and source.type == "ARMATURE"
               and source.animation_data and source.animation_data.action_slot
               and isProcBoneAnimSkipped(source, None, source.animation_data.action_slot.name_display)):
             self.warning(get_id("exporter_warn_procbone_anim", True).format(
                 source.animation_data.action_slot.name_display))
         else:
-            self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
+            embed_jobs = self._embedded_anim_jobs(source) if embed_anims else None
+            if embed_jobs:
+                self.files_exported += self._run_dmx_writer(
+                    source, bake_results, self.sanitiseFilename(task.export_name), path, anim_jobs=embed_jobs)
+            else:
+                self.files_exported += write_func(source, bake_results, self.sanitiseFilename(task.export_name), path)
 
-        bench.report(write_func.__name__)
+        bench.report("write")
 
         if State.compiler > Compiler.STUDIOMDL or State.datamodelFormat >= 22:
             if re.match(r"[^a-z0-9_]", source.name):
@@ -648,7 +662,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             and e.vs.dmx_attachment
         ]
 
-        if candidate_empties:
+        if candidate_empties and all(self._rest_math_safe(e) for e in candidate_empties):
+            self.exportable_empties = [(e, self._empty_rest_world(e)) for e in candidate_empties]
+        elif candidate_empties:
             original_pose = self.armature_src.data.pose_position
             toggle_rest = original_pose != "REST"
             if toggle_rest:
@@ -663,7 +679,30 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         else:
             self.exportable_empties = []
 
+        from ..attachments import resolve_attachments
+        self.exportable_empties = resolve_attachments(
+            self.armature_src, self.exportable_empties, self.warning)
+
         return True
+
+    def _rest_math_safe(self, empty) -> bool:
+        # Constraints, drivers or a relative-parent bone can make the empty depend on
+        # the pose in ways _empty_rest_world can't reproduce; those use the REST toggle.
+        if any(not c.mute for c in empty.constraints):
+            return False
+        if empty.animation_data and len(empty.animation_data.drivers):
+            return False
+        return not self.armature_src.data.bones[empty.parent_bone].use_relative_parent
+
+    def _empty_rest_world(self, empty) -> Matrix:
+        # Swap the parent bone's posed tail matrix for its rest one, avoiding the two
+        # full scene re-evaluations a pose_position toggle costs.
+        arm = self.armature_src
+        pb = arm.pose.bones[empty.parent_bone]
+        tail = Matrix.Translation((0.0, pb.bone.length, 0.0))
+        posed = arm.matrix_world @ pb.matrix @ tail
+        rest = arm.matrix_world @ pb.bone.matrix_local @ tail
+        return rest @ posed.inverted() @ empty.matrix_world
 
     def _process_vertex_animations(self, source, bake_results: list[BakeResult], bench: BenchMarker) -> None:
         if not (isinstance(source, Collection) and len(getattr(source.vs, "vertex_animations", []))):
@@ -953,7 +992,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
 
     def _filtered_anim_jobs(self, source, baked_armature):
         """(display_name, action, slot) per exportable animation, proc-bone-only ones dropped.
-        slot is None in FILTERED_ACTIONS mode. Shared by the per-file loop and FBX single-file."""
+        slot is None in FILTERED_ACTIONS mode. Used by the per-file animation loop."""
         jobs = []
         if source.data.vs.action_selection == "FILTERED":
             action = baked_armature.animation_data.action
@@ -970,7 +1009,38 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
                 jobs.append((action.name, action, action.slots[0] if action.slots else None))
         return jobs
 
-    def _run_dmx_writer(self, datablock, bake_results, name, dir_path, skeleton_only=False):
+    def _embedded_anim_jobs(self, source):
+        """(name, action, slot) clips for a model DMX to embed, picked like the per-file export."""
+        arm, baked = self.armature_src, self.armature
+        if isinstance(source, bpy.types.Object) and source.type == "ARMATURE":
+            return None
+        if not (arm and baked and embeds_animations(bpy.context.scene, arm)):
+            return None
+
+        constraint_baked = getattr(self, "_constraint_bake_actions", {}).get(arm.session_uid)
+        if constraint_baked:
+            # Motion is already in the baked actions; live constraints would fight it.
+            for pb in baked.pose.bones:
+                for con in pb.constraints:
+                    con.mute = True
+            return [(name, action, action.slots[0] if action.slots else None)
+                    for action, name in constraint_baked]
+
+        mode = arm.data.vs.action_selection
+        ad = baked.animation_data
+        if mode == "FILTERED_ACTIONS":
+            return self._filtered_anim_jobs(arm, baked)
+        if not (ad and ad.action):
+            return None
+        if mode == "FILTERED":
+            return self._filtered_anim_jobs(arm, baked)
+        if ad.action_slot and isProcBoneAnimSkipped(arm, None, ad.action_slot.name_display):
+            self.warning(get_id("exporter_warn_procbone_anim", True).format(ad.action_slot.name_display))
+            return None
+        name = actionSlotExportName(ad) if ad.action_slot else ad.action.name
+        return [(name, ad.action, ad.action_slot)]
+
+    def _run_dmx_writer(self, datablock, bake_results, name, dir_path, anim_jobs=None):
         writer = DmxWriter(
             self, datablock, bake_results, name, dir_path,
             armature=self.armature, armature_src=self.armature_src,
@@ -980,35 +1050,9 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             all_bake_results=self.bake_results,
             flex_mode=getattr(self, "flex_controller_mode", "DME"),
             flex_source=getattr(self, "flex_controller_source", ""),
-            skeleton_only=skeleton_only,
+            anim_jobs=anim_jobs,
         )
         return writer.write()
-
-    def _run_fbx_writer(self, id, bake_results, name, dir_path, anim_jobs=None):
-        # A model export writes two files: the .fbx (mesh + skeleton + blendshapes) and a
-        # companion .dmx of the same name holding what FBX cannot carry - flex controllers
-        # and rules, jigglebones, hitboxes, procedural bones - over a mesh-less skeleton.
-        # DMX runs first: FbxWriter mutates the baked rig (bone renames, offsets, scale).
-        #
-        # An animation is FBX only - its bone channels are the whole file, baked by
-        # Blender's FBX animation exporter; there is no mesh to justify a companion DMX.
-        #
-        # A collision/cloth-only export has none of that extra data, so the companion
-        # would be a bare skeleton - skip it and write the .fbx alone.
-        is_anim = len(bake_results) == 1 and bake_results[0].object.type == "ARMATURE"
-        written = 0
-        if not is_anim and not is_proxy_only(bake_results):
-            written = self._run_dmx_writer(id, bake_results, name, dir_path, skeleton_only=True)
-
-        writer = FbxWriter(
-            self, id, bake_results, name, dir_path,
-            armature=self.armature, armature_src=self.armature_src,
-            exportable_bones=self.exportable_bones,
-            exportable_boneNames=self.exportable_boneNames,
-            all_bake_results=self.bake_results,
-            anim=is_anim, anim_jobs=anim_jobs,
-        )
-        return written + writer.write()
 
     def _run_smd_writer(self, id, bake_results, name, dir_path):
         writer = SmdWriter(

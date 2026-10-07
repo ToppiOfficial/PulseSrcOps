@@ -59,7 +59,7 @@ for _id, (_l, _eng, _enc, _fmt) in game_presets.items():
 # load as 'SOURCE'. Files saved with the removed 'SOURCE2' (value 2) are repaired on load.
 _engine_items = (
     ('GOLDSRC', "GoldSrc", "Half-Life 1 - SMD only", 0, 0),
-    ('SOURCE', "Source", "Source 1 and 2 - SMD, DMX and FBX. Which Source engine is set by the DMX model format", 0, 1),
+    ('SOURCE', "Source", "Source 1 and 2 - SMD and DMX. Which Source engine is set by the DMX model format", 0, 1),
 )
 
 def on_engine_changed(self, context):
@@ -91,7 +91,7 @@ def _on_blend_load_migrate_engine(filepath):
 
 
 # Identifiers are historical (QCI/DME); the labels describe where the data lands,
-# since the file format varies (.qci/.vmdl) and embedding applies to DMX and FBX.
+# since the file format varies (.qci/.vmdl) and embedding applies to DMX.
 _prefab_export_mode_items = (
     ('QCI', "FILE", get_id("prefab_export_mode_qci_tip"), 0),
     ('DME', "EMBEDDED", get_id("prefab_export_mode_dme_tip"), 1),
@@ -204,7 +204,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
 
     smd_format : EnumProperty(name=get_id("smd_format"), description=get_id("smd_format_tip"), items=(('SOURCE', "Source", "Source Engine (Half-Life 2)"), ("GOLDSOURCE", "GoldSrc", "GoldSrc engine (Half-Life 1)")), default="SOURCE")
 
-    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange"), ('FBX', "FBX", "Autodesk FBX (Source 2 / external tools)")], default='DMX', update=on_export_format_changed)
+    export_format : EnumProperty(name=get_id("export_format"), description=get_id("export_format_tip"), items=[('SMD', "SMD", "Studiomdl Data"), ('DMX', "DMX", "Datamodel Exchange")], default='DMX', update=on_export_format_changed)
     up_axis : EnumProperty(name=get_id("up_axis"), items=axes, default='Z', description=get_id("up_axis_tip"))
     up_axis_offset : FloatProperty(name=get_id("up_axis_offset"), description=get_id("up_axis_tip"), soft_max=30, soft_min=-30, default=0, precision=2)
     forward_axis : EnumProperty(name=get_id("forward_axis"), items=axes_forward, default='-Y', description=get_id("up_axis_tip"))
@@ -242,18 +242,19 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     jiggle_sim_rate : IntProperty(name=get_id('prop_jiggle_sim_rate'), description=get_id('prop_jiggle_sim_rate_tip'), default=60, min=12, max=240)
     sim_jiggle_bones : BoolProperty(name=get_id('prop_sim_jiggle_bones'), description=get_id('prop_sim_jiggle_bones_tip'), default=True)
     sim_proc_bones   : BoolProperty(name=get_id('prop_sim_proc_bones'), description=get_id('prop_sim_proc_bones_tip'), default=True)
-    preview_edgeline : BoolProperty(name=get_id('prop_preview_edgeline'), description=get_id('prop_preview_edgeline_tip'), default=False)
     preview_attachment_mesh : EnumProperty(
         name=get_id('prop_preview_attachment_mesh'),
         description=get_id('prop_preview_attachment_mesh_tip'),
         items=[
-            ('ALL',      'All',      'Show ghost mesh for all attachment empties in the scene'),
-            ('SELECTED', 'Selected', 'Show ghost mesh only for selected attachment empties'),
+            ('ALL',      'All',      'Show all attachment previews in the scene'),
+            ('SELECTED', 'Selected', 'Show previews for selected armatures and attachment empties'),
+            ('POSE',     'Pose',     'Show attachments for selected pose bones (Pose mode only)'),
             ('NONE',     'None',     'Hide attachment mesh preview'),
         ],
         default='SELECTED',
     )
     hitbox_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
+    physics_shape_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
     hitbox_sync_propagate : BoolProperty(name=get_id('prop_hitbox_sync_propagate'), description=get_id('prop_hitbox_sync_propagate_tip'), default=False)
 
     preview_hitboxes : EnumProperty(
@@ -266,6 +267,17 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
             ('NONE',     'None',     'Hide hitbox preview'),
         ],
         default='POSE',
+    )
+    preview_physics_shapes : EnumProperty(
+        name=get_id('prop_preview_physshapes'),
+        description=get_id('prop_preview_physshapes_tip'),
+        items=[
+            ('ALL',      'All',      'Show all physics shapes in the viewport'),
+            ('SELECTED', 'Selected', 'Show only the physics shape entry selected in the list'),
+            ('POSE',     'Pose',     'Show physics shapes for all selected pose bones (Pose mode only)'),
+            ('NONE',     'None',     'Hide physics shape preview'),
+        ],
+        default='SELECTED',
     )
 
     arm_items_view : EnumProperty(name=get_id('prop_arm_items_view'), items=[

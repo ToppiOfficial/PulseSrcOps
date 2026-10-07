@@ -12,9 +12,11 @@ from ..utils import (get_id, State, Compiler, ExportFormat, export_formats_by_en
                      sanitize_string_for_delta, _build_dme_ctrl_names, _build_stereo_delta_names,
                      get_dme_renamed_delta_names, get_dme_delta_override_conflicts,
                      get_dme_split_delta_conflicts, get_collection_parent_collection,
-                     is_bypassed_into_parent, parse_order_vg_name, get_material_path, MAX_MESH_SPLIT)
+                     is_bypassed_into_parent, get_material_path,
+                     embedded_anim_allowed, prefab_mode_is_dme, pulsemodel_vertex_data_enabled,
+                     pulsemodel_compiler_enabled)
 from ..flex import AddCorrectiveShapeDrivers, RenameShapesToMatchCorrectiveDrivers, DmxWriteFlexControllers
-from .helpers import _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
+from .helpers import _model_armature, _mesh_type_allows, _ensure_cloth_remaps, validate_flex_expression, validate_corrective_components, _count_flex_rule_errors, build_flex_rule_context, flex_rule_name_error, _bone_is_hidden
 from .operators import (
     SMD_OT_AssignBoneRotExportOffset,
     SMD_OT_AddFlexController,
@@ -85,20 +87,9 @@ class SMD_PT_ViewportSimulation(Panel):
         box2.prop(vs, 'preview_export_pose')
         box2.prop(vs, 'preview_jigglebone_constraints')
         box2.prop(vs, 'preview_proc_bones')
-        box2.prop(vs, 'preview_edgeline')
         box2.prop(vs, 'preview_hitboxes')
+        box2.prop(vs, 'preview_physics_shapes')
         box2.prop(vs, 'preview_attachment_mesh')
-        if vs.preview_edgeline:
-            if vs.jiggle_sim_enabled:
-                row = box2.row()
-                row.alert = True
-                row.label(text=get_id('warn_edgeline_jiggle_sim'), icon='PAUSE')
-            else:
-                row = box2.row()
-                row.alert = True
-                row.label(text=get_id('warn_edgeline_expensive'), icon='ERROR')
-                box2.label(text=get_id('warn_edgeline_approximate'), icon='INFO')
-                box2.label(text=get_id('warn_edgeline_smudging'))
 
 
 class SMD_PT_Scene(Panel):
@@ -143,20 +134,16 @@ class SMD_PT_Scene(Panel):
             # prop_enum draws one button per identifier, so only the ones this engine
             # allows appear - export_format's own item list stays static/unfiltered
             # (see props/scene.py on_export_format_changed for why).
-            for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX', 'FBX')):
+            for _fmt_id in export_formats_by_engine.get(scene.vs.engine, ('SMD', 'DMX')):
                 sub.prop_enum(scene.vs, "export_format", _fmt_id)
 
-        # FBX writes a companion DMX holding the skeleton, flex controllers and embedded
-        # prefabs, so it needs a datamodel version too.
-        if scene.vs.export_format in ('DMX', 'FBX'):
+        if scene.vs.export_format == 'DMX':
             if scene.vs.game == 'CUSTOM':
                 row = l.split(factor=0.33)
                 row.label(text=get_id("exportpanel_dmxver"))
                 sub = row.row(align=True)
                 sub.prop(scene.vs, "dmx_encoding", text="")
                 sub.prop(scene.vs, "dmx_format", text="")
-            if scene.vs.export_format == 'FBX':
-                l.label(text=get_id("exportpanel_fbx_companion"), icon='INFO')
         # smd_format (Source/GoldSrc SMD byte layout) is driven entirely by Engine now -
         # no separate control needed here.
 
@@ -194,8 +181,7 @@ class SMD_PT_SceneEncodingOptions(Panel):
 
     @classmethod
     def poll(cls, context):
-        return State.compiler == Compiler.STUDIOMDL or State.exportFormat in (
-            ExportFormat.DMX, ExportFormat.FBX)
+        return State.compiler == Compiler.STUDIOMDL or State.exportFormat == ExportFormat.DMX
 
     def draw(self, context) -> None:
         scene = context.scene
@@ -204,12 +190,14 @@ class SMD_PT_SceneEncodingOptions(Panel):
         dme_active = False
         # The DMX model format decides Source 1 vs 2, not scene.vs.engine.
         is_source1 = State.compiler == Compiler.STUDIOMDL
-        if State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX):
+        if State.exportFormat == ExportFormat.DMX:
             row = l.row().split(factor=0.33)
             row.label(text=get_id("prefab_export_mode", True) + ":")
-            if is_source1:
+            if is_source1 and State.datamodelFormat == 22:
                 row.row().prop(scene.vs, "prefab_export_mode", expand=True)
                 dme_active = scene.vs.prefab_export_mode == 'DME'
+            elif is_source1:
+                row.label(text=get_id("prefab_export_mode_model22_only"), icon='CHECKMARK')
             else:
                 # Source 2 is hand-authored in ModelDoc/vmdl - no embedding target exists.
                 row.label(text=get_id("prefab_export_mode_source2_forced"), icon='CHECKMARK')
@@ -297,6 +285,34 @@ class SMD_PT_Exportables(Panel):
     def is_collection(cls, item):
         return isinstance(item, Collection)
 
+    def _draw_anim_settings(self, layout, scene, arm) -> None:
+        avs = arm.data.vs
+        box = layout.box()
+        col = box.column()
+        col.row().prop(avs, "action_selection", expand=True)
+        if any(e.proc_type == 'TRIGGER' and e.action for e in avs.proc_bones):
+            col.prop(avs, "export_proc_bone_actions")
+        if embedded_anim_allowed(scene):
+            col.prop(avs, "export_anims_separately")
+        if avs.action_selection != 'CURRENT':
+            is_slot_filter = avs.action_selection == 'FILTERED'
+            col.prop(arm.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
+            col.prop(avs, "reset_pose_per_anim")
+
+            col.separator(factor=0.5)
+            col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
+                      icon='ACTION')
+            if is_slot_filter:
+                ad = arm.animation_data
+                if ad:
+                    col.template_list("SMD_UL_ActionExport", "", ad, "action_suitable_slots",
+                                      avs, "action_preview_index", rows=3, maxrows=6)
+                else:
+                    col.label(text=get_id("action_preview_none_slots"), icon='INFO')
+            else:
+                col.template_list("SMD_UL_ActionExport", "", bpy.data, "actions",
+                                  avs, "action_preview_index", rows=3, maxrows=6)
+
     def draw(self, context) -> None:
         layout = self.layout
         active_object = context.object
@@ -323,8 +339,12 @@ class SMD_PT_Exportables(Panel):
                     layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_jigglebone_entries",
                                          armvs, "arm_jigglebone_index", rows=3)
                 elif ptype == 'ATTACHMENTS':
-                    layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_attachment_entries",
-                                         armvs, "arm_attachment_index", rows=3)
+                    layout.template_list("SMD_UL_Attachments", "", armvs, "attachments",
+                                         armvs, "attachments_index", rows=3)
+                    if armvs.arm_attachment_entries:
+                        layout.label(text='Deprecated Empty Attachments', icon='INFO')
+                        layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_attachment_entries",
+                                             armvs, "arm_attachment_index", rows=3)
                 elif ptype == 'HITBOXES':
                     layout.template_list("SMD_UL_Hitboxes", "", armvs, "hitboxes",
                                          armvs, "hitboxes_index", rows=3)
@@ -333,34 +353,15 @@ class SMD_PT_Exportables(Panel):
                                          armvs, "proc_bones_index", rows=3)
             return
 
-        if item is not None and not self.is_collection(item) and not (active_exportable and active_exportable.is_prefab) and is_armature(item):
-            avs = item.data.vs
-            box = layout.box()
-            col = box.column()
-            col.row().prop(avs, "action_selection", expand=True)
-            if any(e.proc_type == 'TRIGGER' and e.action for e in avs.proc_bones):
-                col.prop(avs, "export_proc_bone_actions")
-            if avs.action_selection != 'CURRENT':
-                is_slot_filter = avs.action_selection == 'FILTERED'
-                col.prop(item.vs, "action_filter", text=get_id("slot_filter") if is_slot_filter else get_id("action_filter"))
-                col.prop(avs, "reset_pose_per_anim")
-                if scene.vs.export_format == 'FBX':
-                    col.prop(avs, "fbx_anim_layout")
-
-                col.separator(factor=0.5)
-                col.label(text=get_id("action_preview_slots" if is_slot_filter else "action_preview_actions"),
-                          icon='ACTION')
-                if is_slot_filter:
-                    ad = item.animation_data
-                    if ad:
-                        col.template_list("SMD_UL_ActionExport", "", ad, "action_suitable_slots",
-                                          avs, "action_preview_index", rows=3, maxrows=6)
-                    else:
-                        col.label(text=get_id("action_preview_none_slots"), icon='INFO')
-                else:
-                    col.template_list("SMD_UL_ActionExport", "", bpy.data, "actions",
-                                      avs, "action_preview_index", rows=3, maxrows=6)
+        if item is not None and not self.is_collection(item) and is_armature(item):
+            self._draw_anim_settings(layout, scene, item)
             return
+
+        # Embedded clips ride in the model DMX, so its rig's animation settings show here too.
+        if item is not None and embedded_anim_allowed(scene):
+            arm = _model_armature(item)
+            if arm:
+                self._draw_anim_settings(layout, scene, arm)
 
         if not item or not self.is_collection(item): return
 
@@ -501,6 +502,77 @@ class SMD_PT_Hitboxes(Properties_Panel):
         row.prop(scvs, 'hitbox_sync_propagate', toggle=True, icon='CONSTRAINT_BONE')
 
 
+class SMD_PT_PhysicsShapes(Properties_Panel):
+    bl_label = ''
+    bl_parent_id = 'SMD_PT_Armature'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    @classmethod
+    def poll(cls, context):
+        return bool(get_armature(context.object))
+
+    def draw_header(self, context):
+        arm_ob = get_armature(context.object)
+        count = len(arm_ob.data.vs.physics_shapes) if arm_ob else 0
+        self.layout.label(text='{} ({})'.format(get_id('panel_physshapes', True), count), icon='PHYSICS')
+
+    def draw(self, context):
+        layout = self.layout
+        arm_data = get_armature(context.object).data
+        avs = arm_data.vs
+
+        if not prefab_mode_is_dme(context.scene):
+            layout.label(text=get_id('label_physshape_embedded_only'), icon='INFO')
+
+        row = layout.row()
+        row.template_list("SMD_UL_PhysicsShapes", "", avs, "physics_shapes",
+                          avs, "physics_shapes_index", rows=3)
+        col = row.column(align=True)
+        col.operator("smd.physshape_add", icon='META_CAPSULE', text='').shape_type = 'CAPSULE'
+        col.operator("smd.physshape_add", icon='MESH_CUBE',    text='').shape_type = 'BOX'
+        col.operator("smd.physshape_add", icon='SPHERE',       text='').shape_type = 'SPHERE'
+        col.operator("smd.physshape_remove", icon='REMOVE', text='')
+        col.separator()
+        col.operator("smd.physshape_from_bone", icon='BONE_DATA', text='')
+        col.operator("smd.physshape_duplicate", icon='DUPLICATE', text='')
+
+        layout.prop(context.scene.vs, 'physics_shape_sync_pose', toggle=True, icon='BONE_DATA')
+
+        idx = avs.physics_shapes_index
+        if not 0 <= idx < len(avs.physics_shapes):
+            return
+        entry = avs.physics_shapes[idx]
+        is_capsule = entry.shape_type == 'CAPSULE'
+        box = layout.box()
+        box.prop_search(entry, 'bone_name', arm_data, 'bones', text=get_id('prop_hitbox_bone'))
+        row = box.row()
+        row.prop(entry, 'shape_type', expand=True)
+        row.prop(entry, 'merge', toggle=True, icon='AUTOMERGE_ON' if entry.merge else 'AUTOMERGE_OFF')
+
+        if entry.shape_type == 'SPHERE':
+            box.prop(entry, 'vec_min', text='Position')
+            box.prop(entry, 'radius0', text='Radius')
+            box.prop(entry, 'segments')
+            return
+
+        split = box.split(factor=0.22, align=True)
+        split.label(text=get_id('prop_physshape_point0' if is_capsule else 'prop_hitbox_vec_min') + ":")
+        split.row(align=True).prop(entry, 'vec_min', text='')
+        split = box.split(factor=0.22, align=True)
+        split.label(text=get_id('prop_physshape_point1' if is_capsule else 'prop_hitbox_vec_max') + ":")
+        split.row(align=True).prop(entry, 'vec_max', text='')
+
+        if not is_capsule and any(entry.vec_min[i] > entry.vec_max[i] for i in range(3)):
+            box.label(text="Min > Max : inverted box, swap Min and Max", icon='ERROR')
+
+        box.prop(entry, 'rotation', text=get_id('prop_hitbox_rotation'))
+        if is_capsule:
+            row = box.row(align=True)
+            row.prop(entry, 'radius0')
+            row.prop(entry, 'radius1')
+            box.prop(entry, 'segments')
+
+
 class SMD_PT_ProcBones(Properties_Panel):
     bl_label = ''
     bl_parent_id = 'SMD_PT_Armature'
@@ -546,7 +618,8 @@ class SMD_PT_ProcBones(Properties_Panel):
                     box.prop_search(entry, 'action_slot_name', entry.action, 'slots',
                                     text=get_id('prop_proc_bone_slot'))
                 if entry.action:
-                    fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, arm_ob)
+                    sample_arm = entry.reference_armature or arm_ob
+                    fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, sample_arm)
                     if entry.use_manual_frame_range:
                         row = box.row(align=True)
                         row.prop(entry, 'trigger_frame_start', text=get_id('prop_proc_bone_frame_start'))
@@ -559,14 +632,32 @@ class SMD_PT_ProcBones(Properties_Panel):
                         else:
                             row.label(text=get_id('warn_no_trigger_frames'), icon='ERROR')
                     box.prop(entry, 'use_manual_frame_range', toggle=True)
-                    nav = box.row(align=True)
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='REW').direction    = 'FIRST'
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='PREV_KEYFRAME').direction = 'PREV'
-                    nav.prop(entry, 'trigger_preview_frame', text="")
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='NEXT_KEYFRAME').direction = 'NEXT'
-                    nav.operator("smd.proc_bone_navigate_frame", text="", icon='FF').direction     = 'LAST'
-                    nav.enabled = valid
-                    box.prop(entry, 'trigger_preview_tol')
+                    influence = box.box()
+                    influence.label(text="Trigger Influence", icon='DRIVER_DISTANCE')
+                    influence.prop(entry, 'influence_angle')
+                    influence.label(text="Smaller: isolated poses. Larger: wider blending.")
+                    row = influence.row(align=True)
+                    row.operator("smd.proc_bone_refresh_influences", icon='FILE_REFRESH')
+                    row.enabled = valid
+                    if entry.trigger_influences:
+                        sample_arm = entry.reference_armature or arm_ob
+                        fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, sample_arm)
+                        frames = [t.frame for t in entry.trigger_influences]
+                        current = valid and frames == list(range(fs, fe + 1))
+                        if not current:
+                            influence.label(text="Frame range changed. Refresh the trigger list.", icon='INFO')
+                        table = influence.column()
+                        table.enabled = current
+                        table.label(text="Check rows for bulk edits.")
+                        table.label(text="Enable Override to set a trigger's angle.")
+                        table.template_list("SMD_UL_ProcBoneInfluences", "", entry, "trigger_influences",
+                                            entry, "trigger_influence_index", rows=5)
+                        row = table.row(align=True)
+                        row.operator("smd.proc_bone_set_tolerance", text="Edit Selected").scope = 'SELECTED'
+                        row.operator("smd.proc_bone_set_tolerance", text="Edit All").scope = 'ALL'
+                        influence.label(text="Live blend percentages appear during simulation.")
+                    else:
+                        influence.label(text="Refresh to edit individual trigger angles.", icon='INFO')
             elif entry.proc_type == 'LOOKAT':
                 box.row().prop(entry, 'lookat_target_type', expand=True)
                 target_type = entry.lookat_target_type
@@ -700,11 +791,17 @@ class SMD_PT_Jigglebones(Properties_Panel):
         active_armature = get_armature(active_object)
         active_bone = context.active_bone
 
+        if bpy.app.version >= (5, 0, 0):
+            pose_bone = active_object.pose.bones.get(active_bone.name) if active_bone else None
+            bone_selected = bool(pose_bone and pose_bone.select)
+        else:
+            bone_selected = bool(active_bone and active_bone.select)
+
         box = layout.box()
-        if active_bone and active_bone.select and _bone_is_hidden(active_bone):
+        if bone_selected and _bone_is_hidden(active_bone):
             box = box.box()
             box.label(text=get_id('label_bone_hidden', format_string=True), icon='ERROR')
-        elif active_bone and active_bone.select:
+        elif bone_selected:
             self.draw_jigglebone_properties(box, active_bone)
         else:
             box = box.box()
@@ -946,9 +1043,14 @@ class SMD_PT_Mesh(Properties_Panel):
 
         if vs.mesh_type == 'DEFAULT':
             box = layout.box().column(align=True)
-            box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups')
+            if pulsemodel_vertex_data_enabled():
+                box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups', text='Cull Vertex Group')
+            else:
+                box.prop_search(vs, 'non_exportable_vgroup', active_object, 'vertex_groups')
             box.separator(factor=0.5)
-            box.prop(vs, 'non_exportable_vgroup_tolerance')
+            threshold = box.column(align=True)
+            threshold.enabled = not pulsemodel_compiler_enabled()
+            threshold.prop(vs, 'non_exportable_vgroup_tolerance')
 
 
 class SMD_PT_Shapekey(Properties_Panel):
@@ -1016,8 +1118,7 @@ class SMD_PT_Shapekey(Properties_Panel):
             row.operator("wm.url_open",text=get_id("exportables_flex_help", True),icon='HELP').url = "http://developer.valvesoftware.com/wiki/Blender_SMD_Tools_Help#Flex_properties"
 
         elif active_object.vs.flex_controller_mode == 'DME':
-            # FBX carries the controllers in its companion DMX, so only SMD drops them.
-            if State.exportFormat not in (ExportFormat.DMX, ExportFormat.FBX):
+            if State.exportFormat != ExportFormat.DMX:
                 info_row = box.row()
                 info_row.label(text=get_id("warn_dme_dmx_only_panel"), icon='INFO')
 
@@ -1482,10 +1583,18 @@ class SMD_PT_ToonEdgeline(Properties_Panel):
 
         col = box.column(align=True)
         col.enabled = vs.use_toon_edgeline
+        if pulsemodel_vertex_data_enabled():
+            width = col.column(align=True)
+            width.enabled = False
+            width.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
+            col.prop_search(vs, 'toon_edgeline_vertexgroup', active_object, 'vertex_groups', text="Outline Width VertexGroup", icon='GROUP_VERTEX')
+            return
         col.prop(vs, 'edgeline_per_material')
         col.prop(vs, 'edgeline_weld')
         col.prop(vs, 'export_edgeline_separately', text="Export Edgeline Separately")
-        col.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
+        width = col.column(align=True)
+        width.enabled = not pulsemodel_compiler_enabled()
+        width.prop(vs, 'base_toon_edgeline_thickness', text='Thickness')
         col.prop_search(vs, 'toon_edgeline_vertexgroup', active_object, 'vertex_groups', text="Outline Width VertexGroup", icon='GROUP_VERTEX')
 
 
@@ -1495,7 +1604,7 @@ class SMD_PT_LOD(Properties_Panel):
 
     @classmethod
     def poll(cls, context):
-        return is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'lod')
+        return not pulsemodel_compiler_enabled() and is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'lod')
 
     def draw_header(self, context):
         active_object = context.object
@@ -1521,48 +1630,6 @@ class SMD_PT_LOD(Properties_Panel):
 
         col.prop(vs, 'lod_count', slider=True)
         col.prop(vs, 'decimate_factor', slider=True)
-
-
-class SMD_PT_MeshSplit(Properties_Panel):
-    bl_label = ''
-    bl_parent_id = 'SMD_PT_Mesh'
-
-    @classmethod
-    def poll(cls, context):
-        return is_mesh_compatible(context.object) and _mesh_type_allows(context.object, 'meshsplit')
-
-    def draw_header(self, context):
-        active_object = context.object
-        label = get_id("panel_mesh_split", True)
-        if is_mesh_compatible(active_object):
-            if active_object.vs.use_mesh_split:
-                max_n = min(active_object.vs.max_mesh_split, MAX_MESH_SPLIT)
-                count = sum(1 for vg in active_object.vertex_groups
-                            if (n := parse_order_vg_name(vg.name)) is not None and n < max_n)
-                label = '{} ({})'.format(label, count)
-            else:
-                label = '{} (False)'.format(label)
-        self.layout.label(text=label, icon='TEXTURE_DATA')
-
-    def draw(self, context):
-        layout = self.layout
-        active_object = context.object
-
-        if not is_mesh_compatible(active_object) or active_object.type not in modifier_compatible:
-            layout.label(text=get_id("panel_select_mesh"), icon='ERROR')
-            return
-
-        vs = active_object.vs
-
-        box = layout.box()
-        box.prop(vs, 'use_mesh_split', toggle=True)
-
-        col = box.column(align=True)
-        col.enabled = vs.use_mesh_split
-
-        col.prop(vs, 'export_mesh_split_separately')
-        col.prop(vs, 'max_mesh_split', slider=True)
-        col.prop(vs, 'mesh_split_threshold', slider=True)
 
 
 class SMD_PT_MeshBackface(Properties_Panel):
@@ -1597,7 +1664,9 @@ class SMD_PT_MeshBackface(Properties_Panel):
         col.enabled = vs.generate_backface
         col.prop_search(vs, 'backface_vgroup', active_object, 'vertex_groups')
         col.separator(factor=0.5)
-        col.prop(vs, 'backface_vgroup_tolerance')
+        threshold = col.column(align=True)
+        threshold.enabled = not pulsemodel_compiler_enabled()
+        threshold.prop(vs, 'backface_vgroup_tolerance')
 
 
 class SMD_PT_Material(Properties_Panel):
@@ -1609,14 +1678,17 @@ class SMD_PT_Material(Properties_Panel):
 
     def draw_header(self, context):
         active_object = context.object
-        active_material = active_object.active_material if is_mesh(active_object) else None
-        label = '{} ({})'.format(pgettext("Material"), active_material.name) if active_material else pgettext("Material")
+        label = '{} ({})'.format(pgettext("Materials"), len(active_object.material_slots))
         self.layout.label(text=label, icon='MATERIAL_DATA')
 
     def draw(self, context):
         layout = self.layout
         active_object = context.object
         active_material = active_object.active_material
+
+        if active_object.material_slots:
+            layout.template_list("SMD_UL_MeshMaterials", "", active_object, "material_slots",
+                                 active_object, "active_material_index", rows=3, maxrows=6)
 
         if not active_material:
             layout.label(text=get_id("panel_select_mesh_mat"), icon='ERROR')
@@ -1661,6 +1733,8 @@ class SMD_PT_Empty(Properties_Panel):
             col.alert = False
 
         if vs_ob.dmx_attachment:
+            col.label(text='Empty attachments are deprecated', icon='INFO')
+            col.operator('smd.convert_attachments', icon='ARMATURE_DATA')
             col.separator()
             col.label(text="Display Meshes", icon='MESH_DATA')
             row = col.row()

@@ -7,8 +7,11 @@ __all__ = [
     'VertexAnimation',
     'ArmatureItemEntry',
     'HitboxEntry',
+    'PhysicsShapeEntry',
+    'ProcBoneTriggerInfluence',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
+    'AttachmentEntry',
     'BoneNamePrefixItem',
     'MaterialPathItem',
 ]
@@ -16,7 +19,7 @@ __all__ = [
 import bpy, re, math as _math
 from mathutils import Matrix, Vector
 from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
-                       FloatProperty, FloatVectorProperty, PointerProperty)
+                       FloatProperty, FloatVectorProperty, PointerProperty, CollectionProperty)
 from ..utils import get_id, hitbox_group, sanitize_string_for_delta
 from .. import procbones_sim as _procbones_sim
 
@@ -45,6 +48,19 @@ class ValveSource_FloatMapRemap(bpy.types.PropertyGroup):
     group : StringProperty(name="Group name", description=get_id("prop_float_map_group_tip"), default="")
     min : FloatProperty(name="Min", description="Maps to 0.0", default=0.0)
     max : FloatProperty(name="Max", description="Maps to 1.0", default=1.0)
+
+
+class AttachmentEntry(bpy.types.PropertyGroup):
+    name: StringProperty(name='Name', default='attachment')
+    bone_name: StringProperty(name='Bone')
+    location: FloatVectorProperty(name='Location', size=3, subtype='TRANSLATION')
+    rotation: FloatVectorProperty(name='Rotation', size=3, subtype='EULER')
+    preview_object: PointerProperty(type=bpy.types.Object, name='Preview Object',
+                                    poll=lambda self, ob: ob.type == 'MESH')
+    color: FloatVectorProperty(name='Object Color', size=4, subtype='COLOR_GAMMA',
+                               default=(0.3, 0.9, 1.0, 0.45), min=0, max=1)
+    preview_scale: FloatVectorProperty(name='Preview Scale', size=3, default=(1, 1, 1))
+    show_preview: BoolProperty(name='Show Preview', default=True)
 
 
 class AttachmentDisplayMeshItem(bpy.types.PropertyGroup):
@@ -285,37 +301,36 @@ class HitboxEntry(bpy.types.PropertyGroup):
                               update=lambda s, c: _hb_propagate(s, c, 'scale',    False))
 
 
-def _get_preview_tol(self) -> float:
-    frame = self.trigger_preview_frame
-    if self.action and self.driver_bone:
-        fcurves = _procbones_sim._get_action_fcurves(self.action, self.action_slot_name)
-        dp = f'bones["{self.driver_bone}"].vs.proc_tolerance'
-        for fc in fcurves:
-            if fc.data_path == dp and fc.array_index == 0:
-                return fc.evaluate(frame)
-    arm_ob = bpy.context.object
-    if arm_ob and arm_ob.type != 'ARMATURE':
-        arm_ob = arm_ob.find_armature()
-    if arm_ob and arm_ob.type == 'ARMATURE' and self.driver_bone:
-        eb = arm_ob.data.bones.get(self.driver_bone)
-        if eb:
-            return eb.vs.proc_tolerance
-    return _math.pi / 2
+# ---- PhysicsShapeEntry ------------------------------------------------------
+
+class PhysicsShapeEntry(bpy.types.PropertyGroup):
+    bone_name  : StringProperty(name=get_id('prop_hitbox_bone'), description=get_id('prop_physshape_bone_tip'))
+    shape_type : EnumProperty(name=get_id('prop_physshape_type'), default='CAPSULE', items=[
+        ('CAPSULE', 'Capsule', '', 'META_CAPSULE', 0),
+        ('BOX',     'Box',     '', 'MESH_CUBE',    1),
+        ('SPHERE',  'Sphere',  '', 'SPHERE',       2),
+    ])
+    vec_min    : FloatVectorProperty(name=get_id('prop_hitbox_vec_min'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
+    vec_max    : FloatVectorProperty(name=get_id('prop_hitbox_vec_max'), size=3, default=(0.0, 0.0, 0.0), subtype='XYZ', precision=4)
+    rotation   : FloatVectorProperty(name=get_id('prop_hitbox_rotation'), description=get_id('prop_physshape_rotation_tip'), size=3, default=(0.0, 0.0, 0.0), subtype='EULER', unit='ROTATION', precision=4)
+    radius0    : FloatProperty(name=get_id('prop_physshape_radius0'), description=get_id('prop_physshape_radius0_tip'), default=1.0, min=0.0, precision=4)
+    radius1    : FloatProperty(name=get_id('prop_physshape_radius1'), description=get_id('prop_physshape_radius1_tip'), default=1.0, min=0.0, precision=4)
+    merge      : BoolProperty(name=get_id('prop_physshape_merge'), description=get_id('prop_physshape_merge_tip'), default=True)
+    segments   : IntProperty(name=get_id('prop_physshape_segments'), description=get_id('prop_physshape_segments_tip'), default=6, min=3, max=64)
 
 
-def _set_preview_tol(self, value: float) -> None:
-    if not self.driver_bone or not self.action:
-        return
-    dp = f'bones["{self.driver_bone}"].vs.proc_tolerance'
-    fc = _procbones_sim._get_or_create_proc_tol_fcurve(self, dp)
-    if fc is not None:
-        fc.keyframe_points.insert(self.trigger_preview_frame, value, options={'NEEDED', 'FAST'})
-        fc.update()
-    arm_ob = bpy.context.object
-    if arm_ob and arm_ob.type != 'ARMATURE':
-        arm_ob = arm_ob.find_armature()
-    if arm_ob:
-        _procbones_sim.invalidate_proc_cache(arm_ob.name)
+class ProcBoneTriggerInfluence(bpy.types.PropertyGroup):
+    frame : IntProperty(name="Trigger Frame")
+    selected : BoolProperty(name="Select", description="Include this trigger in bulk edits")
+    use_override : BoolProperty(
+        name="Override", description="Use this trigger's own influence angle",
+        update=_proc_entry_invalidate_cache,
+    )
+    angle : FloatProperty(
+        name="Influence Angle", description="Angular distance at which this trigger stops contributing",
+        default=_math.pi / 2, min=_math.radians(0.01), max=_math.pi, subtype='ANGLE', precision=2,
+        update=_proc_entry_invalidate_cache,
+    )
 
 
 class ProcBoneEntry(bpy.types.PropertyGroup):
@@ -357,18 +372,14 @@ class ProcBoneEntry(bpy.types.PropertyGroup):
         default=1,
         update=_proc_entry_invalidate_cache,
     )
-    trigger_preview_frame : IntProperty(
-        name=get_id('prop_proc_bone_preview_frame'),
-        description=get_id('prop_proc_bone_preview_frame_tip'),
-        default=0,
+    influence_angle : FloatProperty(
+        name="Default Influence Angle",
+        description="Influence angle for triggers without an override. Smaller angles isolate poses; larger angles blend more poses",
+        default=_math.pi / 2, min=_math.radians(0.01), max=_math.pi, subtype='ANGLE', precision=2,
+        update=_proc_entry_invalidate_cache,
     )
-    trigger_preview_tol : FloatProperty(
-        name=get_id('prop_pose_bone_proc_tolerance'),
-        description=get_id('prop_pose_bone_proc_tolerance_tip'),
-        default=_math.pi / 2, min=0.01, max=_math.pi, subtype='ANGLE', precision=2,
-        get=_get_preview_tol,
-        set=_set_preview_tol,
-    )
+    trigger_influences : CollectionProperty(type=ProcBoneTriggerInfluence)
+    trigger_influence_index : IntProperty(default=0)
     _lookat_axes = [
         ('+X', "+X", "Positive X",  1),
         ('+Y', "+Y", "Positive Y",  2),

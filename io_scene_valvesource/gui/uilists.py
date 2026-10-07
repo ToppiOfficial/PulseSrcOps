@@ -1,7 +1,9 @@
 import bpy
+from bpy.app.translations import pgettext
+from .. import procbones_sim as _procbones_sim
 from bpy.types import UIList, UILayout, Collection, Object, UI_UL_list
 from ..utils import State, get_armature, countShapes, MakeObjectIcon, sanitize_string_for_delta, get_id, get_jigglebones, get_hitboxes, get_attachments, hitbox_group, get_dme_delta_override_conflicts, get_dme_split_delta_conflicts, is_bypassed_into_parent, get_active_exportable, isProcBoneAnimSkipped, _procBoneSlotDisplayName
-from .helpers import build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
+from .helpers import _model_armature, build_flex_rule_context, flex_rule_has_error, flex_rule_name_error
 
 
 class SMD_UL_ExportItems(UIList):
@@ -77,7 +79,8 @@ class SMD_UL_GroupItems(UIList):
             return
         r = layout.row(align=True)
         r.prop(ob.vs,"export",text="",icon='CHECKBOX_HLT' if ob.vs.export else 'CHECKBOX_DEHLT',emboss=False)
-        r.label(text=ob.name,translate=False,icon=MakeObjectIcon(ob,suffix="_DATA"))
+        icon = 'MOD_PHYSICS' if getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'COLLISION' else MakeObjectIcon(ob, suffix="_DATA")
+        r.label(text=ob.name,translate=False,icon=icon)
 
     def filter_items(self, context, data, propname): # pyright: ignore
         # Entries (own objects plus those folded in from bypassed child groups)
@@ -117,7 +120,7 @@ class SMD_UL_ActionExport(UIList):
         from fnmatch import fnmatch
         items = getattr(data, propname)
         ae = get_active_exportable(context)
-        arm = ae.item if ae else None
+        arm = _model_armature(ae.item) if ae and ae.item else None
         filt = arm.vs.action_filter if arm else ""
 
         flags = []
@@ -300,6 +303,21 @@ class SMD_UL_Hitboxes(UIList):
             row.label(text='', icon='ERROR')
 
 
+class SMD_UL_PhysicsShapes(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        is_capsule = item.shape_type == 'CAPSULE'
+        row.label(text='', icon={'CAPSULE': 'META_CAPSULE', 'BOX': 'MESH_CUBE', 'SPHERE': 'SPHERE'}[item.shape_type])
+        row.label(text=item.bone_name if item.bone_name else '-', icon='BONE_DATA')
+        if is_capsule:
+            row.label(text=f"r={item.radius0:.2f}/{item.radius1:.2f}")
+        elif item.shape_type == 'SPHERE':
+            row.label(text=f"r={item.radius0:.2f}")
+        row.prop(item, 'merge', text='', emboss=False, icon='AUTOMERGE_ON' if item.merge else 'AUTOMERGE_OFF')
+        if item.shape_type == 'BOX' and any(item.vec_min[i] > item.vec_max[i] for i in range(3)):
+            row.label(text='', icon='ERROR')
+
+
 class SMD_UL_ArmatureItems(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         arm = get_armature(context.object)
@@ -322,6 +340,25 @@ class SMD_UL_ArmatureItems(UIList):
                     row.label(text=get_id('label_in_multiple_collection', format_string=True), icon='GROUP_BONE')
                 else:
                     row.label(text=get_id('label_not_in_collection', format_string=True), icon='GROUP_BONE')
+
+
+class SMD_UL_ProcBoneInfluences(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        row = layout.row(align=True)
+        row.prop(item, 'selected', text="")
+        row.label(text=f"Frame {item.frame}")
+        row.prop(item, 'use_override', text="Override")
+        if item.use_override:
+            row.prop(item, 'angle', text="")
+        else:
+            angle = row.row()
+            angle.enabled = False
+            angle.prop(data, 'influence_angle', text="Default")
+        arm_ob = get_armature(context.object)
+        if arm_ob:
+            weights = _procbones_sim.get_live_proc_influences(arm_ob, data)
+            if weights is not None:
+                row.label(text=f"{weights.get(item.frame, 0.0):.0%}")
 
 
 class SMD_UL_ProcBones(UIList):
@@ -354,6 +391,17 @@ class SMD_UL_BoneNamePrefixes(UIList):
         split.prop(item, "shortcut", text="", emboss=True, icon='SYNTAX_OFF')
 
 
+class SMD_UL_MeshMaterials(UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        material = item.material
+        if self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='MATERIAL' if material else 'MATERIAL_DATA')
+        else:
+            layout.label(text=material.name if material else pgettext("Empty"),
+                         icon='MATERIAL' if material else 'MATERIAL_DATA', translate=False)
+
+
 class SMD_UL_MaterialPaths(UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         row = layout.row(align=True)
@@ -371,4 +419,3 @@ class SMD_UL_AttachmentDisplayMeshes(UIList):
         cam_icon = 'RESTRICT_RENDER_OFF' if is_rendered else 'RESTRICT_RENDER_ON'
         op = row.operator('smd.set_attachment_mesh_render', text="", icon=cam_icon, emboss=False)
         op.index = index
-

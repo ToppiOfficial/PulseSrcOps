@@ -26,23 +26,14 @@ _data = {
         'en': "Action Selection",
         'ja': "アクション選択",
     },
-    'fbx_anim_layout': {
-        'en': "FBX Animation Layout",
+    'prop_export_anims_separately': {
+        'en': "Export Animations Separately",
     },
-    'fbx_anim_layout_tip': {
-        'en': "How exported animations are split across FBX files",
+    'prop_export_anims_separately_tip': {
+        'en': "Write one animation DMX per clip instead of embedding the clips into the model DMX (EMBEDDED prefab mode embeds them by default, named for $sequence blockname)",
     },
-    'fbx_anim_layout_per': {
-        'en': "One File Per Animation",
-    },
-    'fbx_anim_layout_per_tip': {
-        'en': "Write a separate FBX for each action slot / action",
-    },
-    'fbx_anim_layout_single': {
-        'en': "Single File",
-    },
-    'fbx_anim_layout_single_tip': {
-        'en': "Write one FBX holding every animation as a separate take",
+    'exporter_warn_anim_embedded': {
+        'en': "Skipped animation export for \"{0}\": its animations are embedded in the model DMX.",
     },
     'action_selection_mode_tip': {
         'en': "How actions are selected for export",
@@ -395,21 +386,6 @@ _data = {
         'en': "Could not create {0} file. Python reports: {1}.",
         'ja': "{0}ファイルを作成できませんでした。Pythonの報告: {1}",
     },
-    'exporter_err_fbx_addon': {
-        'en': "FBX export requires Blender's \"Import-Export: FBX format\" add-on, which could not be enabled.",
-    },
-    'exporter_warn_fbx_vca': {
-        'en': "\"{0}\" has vertex animations, which FBX export does not support - they were skipped.",
-    },
-    'importer_warn_fbx_companion': {
-        'en': "Could not read the companion DMX \"{0}\", so no flex controllers or prefab data were imported. Python reports: {1}.",
-    },
-    'exporter_warn_fbx_corrective': {
-        'en': "\"{0}\" has corrective shape keys. The companion DMX has no mesh, so it cannot declare them as correctives - export as DMX instead if you need them.",
-    },
-    'exporter_warn_fbx_shapeverts': {
-        'en': "Shape key \"{0}\" on \"{1}\" baked to a different vertex count to its base mesh - skipped.",
-    },
     'exporter_err_relativeunsaved': {
         'en': "Cannot export to a relative path until the blend file has been saved.",
         'ja': "blendファイルが保存されるまで相対パスにエクスポートできません",
@@ -533,10 +509,6 @@ _data = {
         'en': "Override the bone name written to exported files",
         'ja': "エクスポートされるファイルに書き込まれるボーン名を上書き",
     },
-    'exportpanel_fbx_companion': {
-        'en': "A .dmx is written beside each .fbx for the flex controllers (and prefabs when embedded).",
-        'ja': "フレックスコントローラー（埋め込み時はプレハブも）用に、各 .fbx の隣に .dmx が書き出されます。",
-    },
     'exportpanel_dmxver': {
         'en': "DMX Version:",
         'ja': "DMXのバージョン：",
@@ -624,24 +596,6 @@ _data = {
     'importmenu_title': {
         'en': "Source Engine",
         'ja': "Source Engine",
-    },
-    'import_menuitem_fbx': {
-        'en': "FBX (.fbx)",
-    },
-    'importer_fbx_title': {
-        'en': "Import FBX",
-    },
-    'importer_fbx_tip': {
-        'en': "Imports an FBX model, restoring any Source data an FBX export wrote into it",
-    },
-    'importer_fbx_scale': {
-        'en': "Scale",
-    },
-    'importer_fbx_scale_tip': {
-        'en': "Scale applied on import. Defaults to the inverse of the scene's world scale, undoing the conversion to engine units",
-    },
-    'importer_err_fbx': {
-        'en': "Could not import \"{0}\". Blender's FBX importer reports: {1}",
     },
     'import_menuitem_dmx': {
         'en': "DMX (.dmx)",
@@ -1255,20 +1209,20 @@ _data = {
         'ja': "頂点ウェイトの上限を手動で設定",
     },
     'op_proc_bone_copy_tolerance': {
-        'en': "Copy Tolerance",
-        'ja': "許容角度をコピー",
+        'en': "Copy Trigger Influence",
+        'ja': "トリガーの影響範囲をコピー",
     },
     'op_proc_bone_copy_tolerance_tip': {
-        'en': "Copy this entry's tolerance keyframes to the clipboard",
-        'ja': "このエントリの許容角度キーフレームをクリップボードにコピー",
+        'en': "Copy the default influence angle and per-trigger overrides to the clipboard",
+        'ja': "デフォルトの影響角度とトリガーごとの上書き設定をクリップボードにコピー",
     },
     'op_proc_bone_paste_tolerance': {
-        'en': "Paste Tolerance",
-        'ja': "許容角度を貼り付け",
+        'en': "Paste Trigger Influence",
+        'ja': "トリガーの影響範囲を貼り付け",
     },
     'op_proc_bone_paste_tolerance_tip': {
-        'en': "Paste tolerance keyframes from the clipboard into this entry's action",
-        'ja': "クリップボードの許容角度キーフレームをこのエントリのアクションに貼り付け",
+        'en': "Paste influence settings into this entry, matching overrides by trigger frame",
+        'ja': "影響範囲の設定をこのエントリに貼り付け、同じトリガーフレームの上書き設定を適用",
     },
     'op_proc_bone_copy_active': {
         'en': "Copy Active Entry",
@@ -1387,9 +1341,65 @@ _data = {
         'en': "Level Of Detail",
         'ja': "詳細度レベル",
     },
-    'panel_mesh_split': {
-        'en': "Mesh Split",
-        'ja': "メッシュ分割",
+    'panel_physshapes': {
+        'en': "Physics Shapes",
+    },
+    'label_physshape_embedded_only': {
+        'en': "Exported only with Embedded prefabs (PulseModel)",
+    },
+    'op_physshape_add': {
+        'en': "Add Physics Shape",
+    },
+    'op_physshape_remove': {
+        'en': "Remove Physics Shape",
+    },
+    'op_physshape_duplicate': {
+        'en': "Duplicate Physics Shape",
+    },
+    'prop_physshape_bone_tip': {
+        'en': "Bone this physics shape is attached to",
+    },
+    'prop_physshape_type': {
+        'en': "Shape",
+    },
+    'prop_physshape_rotation_tip': {
+        'en': "Rotation around the shape center in bone-local space. Capsules bake it into P0/P1 on export",
+    },
+    'prop_physshape_point0': {
+        'en': "P0",
+    },
+    'prop_physshape_point1': {
+        'en': "P1",
+    },
+    'prop_physshape_radius0': {
+        'en': "Radius P0",
+    },
+    'prop_physshape_radius0_tip': {
+        'en': "Capsule radius at P0",
+    },
+    'prop_physshape_radius1': {
+        'en': "Radius P1",
+    },
+    'prop_physshape_radius1_tip': {
+        'en': "Capsule radius at P1",
+    },
+    'prop_physshape_merge': {
+        'en': "Merge",
+    },
+    'prop_physshape_merge_tip': {
+        'en': "Compile into one collision piece with the other Merge-enabled shapes on the same bone. Off: this shape is its own piece",
+    },
+    'prop_physshape_segments': {
+        'en': "Segments",
+    },
+    'prop_physshape_segments_tip': {
+        'en': "Tessellation of the compiled capsule hull (3-64)",
+    },
+    'prop_preview_physshapes': {
+        'en': "Preview Physics Shapes",
+    },
+    'prop_preview_physshapes_tip': {
+        'en': "All: draw all physics shapes; Selected: draw only the list-selected entry; Pose: draw shapes for selected pose bones; None: hide preview",
     },
     'panel_hitboxes': {
         'en': "Hitboxes",
@@ -1432,20 +1442,24 @@ _data = {
         'ja': "プレハブモード",
     },
     'prefab_export_mode_tip': {
-        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead",
+        'en': "How jigglebones, attachments, hitboxes and procedural bones are exported. FILE writes them to .qci/.vrd/.vmdl prefab files; EMBEDDED encodes them into the model .dmx instead, along with the armature's animations (DMX only)",
         'ja': "ジグルボーン・アタッチメント・ヒットボックス・プロシージャルボーンのエクスポート方法。FILE は .qci/.vrd/.vmdl プレハブファイルに書き出し、EMBEDDED はそれらをモデルの .dmx に埋め込みます",
     },
     'prefab_export_mode_source2_forced': {
         'en': "FILE (Source 2 is hand-authored in ModelDoc/vmdl)",
         'ja': "FILE (Source 2 は ModelDoc/vmdl で手動作成)",
     },
+    'prefab_export_mode_model22_only': {
+        'en': "FILE (EMBEDDED needs Model 22 / PulseModel)",
+        'ja': "FILE (EMBEDDED は Model 22 / PulseModel が必要)",
+    },
     'prefab_export_mode_qci_tip': {
         'en': "Write jigglebones, attachments and hitboxes to separate .qci/.vmdl prefab files",
         'ja': "ジグルボーン・アタッチメント・ヒットボックスを個別の .qci/.vmdl プレハブファイルに書き出します",
     },
     'prefab_export_mode_dme_tip': {
-        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Requires a DME-capable compiler (PulseMDL / PulseModel)",
-        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。DME 対応のコンパイラ (PulseMDL / PulseModel) が必要です",
+        'en': "Encode jigglebones, hitboxes, attachments and procedural bones into the exported model .dmx (no .qci/.vrd/.vmdl is written). Model 22 (Source 1) only - a PulseModel feature",
+        'ja': "ジグルボーン・ヒットボックス・アタッチメント・プロシージャルボーンをエクスポートされるモデルの .dmx に埋め込みます (.qci/.vrd/.vmdl は書き出されません)。Model 22 (Source 1) 専用 - PulseModel の機能です",
     },
     'bone_naming_label': {
         'en': "Bone Naming",
@@ -1634,14 +1648,6 @@ _data = {
     'prop_edgeline_weld_tip': {
         'en': "Merge doubles (weld coincident verts) on the edgeline copy before solidifying. Disable to keep the mesh unwelded",
         'ja': "ソリッド化の前にエッジラインコピーの重複頂点を結合する。無効にするとメッシュを結合しない",
-    },
-    'prop_export_mesh_split_separately': {
-        'en': "Export Mesh Split Separately",
-        'ja': "メッシュ分割を別ファイルでエクスポート",
-    },
-    'prop_export_mesh_split_separately_tip': {
-        'en': "Write mesh split segments as separate DMX files",
-        'ja': "メッシュ分割セグメントを別個のDMXファイルとして書き出す",
     },
     'prop_eyelid': {
         'en': "Eyelid",
@@ -2327,22 +2333,6 @@ _data = {
         'en': "Number of LOD levels to generate beyond LOD0",
         'ja': "LOD0以降に生成するLODレベルの数",
     },
-    'prop_max_mesh_split': {
-        'en': "Max Order Number",
-        'ja': "最大順序番号",
-    },
-    'prop_max_mesh_split_tip': {
-        'en': "Maximum number of mesh split order segments to generate",
-        'ja': "生成するメッシュ分割の最大セグメント数",
-    },
-    'prop_mesh_split_threshold': {
-        'en': "Mesh Split Threshold",
-        'ja': "メッシュ分割しきい値",
-    },
-    'prop_mesh_split_threshold_tip': {
-        'en': "Weight threshold above which a vertex belongs to the split mesh",
-        'ja': "このしきい値を超える頂点は分割メッシュに属します",
-    },
     'prop_non_exportable_vgroup': {
         'en': "Export Cull Vertex Group",
         'ja': "エクスポートカリング頂点グループ",
@@ -2391,19 +2381,11 @@ _data = {
         'en': "Include this prefab when exporting the scene",
         'ja': "シーンのエクスポート時にこのプレハブを含める",
     },
-    'prop_preview_edgeline': {
-        'en': "Preview Edgeline",
-        'ja': "エッジラインをプレビュー",
-    },
-    'prop_preview_edgeline_tip': {
-        'en': "Draw edgeline shell in the viewport, approximating the exported result",
-        'ja': "エクスポート結果に近いエッジラインシェルをビューポートに描画",
-    },
     'prop_preview_attachment_mesh': {
         'en': "Attachment Mesh Preview",
     },
     'prop_preview_attachment_mesh_tip': {
-        'en': "Draw the assigned display mesh as a ghost at attachment empties",
+        'en': "Draw attachment previews for all attachments, selected objects, or selected pose bones",
     },
     'prop_attachment_display_mesh': {
         'en': "Display Mesh",
@@ -2420,22 +2402,6 @@ _data = {
     'warn_dme_dmx_only_panel': {
         'en': "DME mode is DMX-only - ignored for SMD export.",
         'ja': "DMEモードはDMX専用です — SMDエクスポートでは無視されます。",
-    },
-    'warn_edgeline_jiggle_sim': {
-        'en': "Inactive: paused while jiggle simulation runs",
-        'ja': "非アクティブ: ジグルシミュレーション中は停止",
-    },
-    'warn_edgeline_expensive': {
-        'en': "Expensive - may cause viewport lag",
-        'ja': "負荷が高い - ビューポートが重くなる場合があります",
-    },
-    'warn_edgeline_approximate': {
-        'en': "Preview is approximate - may show",
-        'ja': "プレビューは近似値です。エクスポートには",
-    },
-    'warn_edgeline_smudging': {
-        'en': "smudging not present in export",
-        'ja': "存在しないにじみが表示される場合があります",
     },
     'prop_preview_hitboxes': {
         'en': "Preview Hitboxes",
@@ -2722,14 +2688,6 @@ _data = {
     'prop_use_bone_length_for_jb_tip': {
         'en': "Use this bone's length as the jigglebone segment length",
         'ja': "このボーンの長さをジグルボーンセグメントの長さとして使用",
-    },
-    'prop_use_mesh_split': {
-        'en': "Separate Mesh Split",
-        'ja': "メッシュ分割",
-    },
-    'prop_use_mesh_split_tip': {
-        'en': "Split the mesh by vertex group weight for multi-part export",
-        'ja': "頂点グループのウェイトでメッシュを分割してマルチパートエクスポート",
     },
     'prop_use_toon_edgeline': {
         'en': "Use Toon Edge Line",

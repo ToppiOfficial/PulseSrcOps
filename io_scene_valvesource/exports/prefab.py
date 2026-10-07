@@ -1,4 +1,5 @@
 import bpy, os, math
+from mathutils import Matrix
 from math import *  # pyright: ignore
 
 from ..utils import *
@@ -286,7 +287,10 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         return result
 
     def _run_attachments(self, arm, fmt, export_path, context):
-        attachments = get_attachments(arm)
+        from ..attachments import resolve_attachments, legacy_rest_matrix
+        attachments = resolve_attachments(
+            arm, [(e, legacy_rest_matrix(e)) for e in get_attachments(arm)],
+            lambda message: self.report({'WARNING'}, message))
 
         is_qc = (fmt == 'QC') or (self.to_clipboard and State.compiler == Compiler.STUDIOMDL)
         lookat_attachments = self._collect_lookat_attachments(arm) if is_qc else []
@@ -307,17 +311,16 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
     def _attachments_qc(self, arm, attachments, lookat_attachments=()):
         lines = []
-        for empty in attachments:
-            if not empty.parent_bone:
-                continue
+        for empty, world_matrix in attachments:
             bone = arm.data.bones.get(empty.parent_bone)
             if not bone:
+                self.report({'WARNING'}, f"Attachment '{empty.name}' needs a parent bone for QC export. Skipping.")
                 continue
             pose_bone = arm.pose.bones.get(empty.parent_bone)
             if not pose_bone:
                 continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
-            relMat = pmat.inverted() @ empty.matrix_world
+            pmat = arm.matrix_world @ get_bone_matrix(pose_bone, rest_space=True)
+            relMat = pmat.inverted() @ world_matrix
             position = relMat.to_translation()
             rotation = relMat.to_quaternion().to_euler('XYZ')
             lines.append(f'$attachment "{empty.name}" "{get_bone_exportname(bone)}" {position.x:.2f} {position.y:.2f} {position.z:.2f} rotate {math.degrees(rotation.y):.0f} {math.degrees(rotation.z):.0f} {math.degrees(rotation.x):.0f}')
@@ -330,23 +333,20 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
     def _attachments_vmdl(self, arm, attachments, export_path):
         nodes = []
-        for empty in attachments:
-            if not empty.parent_bone:
-                continue
+        for empty, world_matrix in attachments:
             bone = arm.data.bones.get(empty.parent_bone)
-            if not bone:
+            if empty.parent_bone and not bone:
                 continue
             pose_bone = arm.pose.bones.get(empty.parent_bone)
-            if not pose_bone:
-                continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
-            relMat = pmat.inverted() @ empty.matrix_world
+            pmat = arm.matrix_world @ (get_bone_matrix(pose_bone, rest_space=True)
+                                       if pose_bone else Matrix.Identity(4))
+            relMat = pmat.inverted() @ world_matrix
             position = relMat.translation
-            rotation = relMat.to_euler('YZX')
+            rotation = relMat.to_euler('XYZ')
             nodes.append(KVNode(
                 _class="Attachment",
                 name=empty.name,
-                parent_bone=_s2_prefab_bonename(bone),
+                parent_bone=_s2_prefab_bonename(bone) if bone else '',
                 relative_origin=KVVector3(position.x, position.y, position.z),
                 relative_angles=KVVector3(math.degrees(rotation.y), math.degrees(rotation.z), math.degrees(rotation.x)),
                 weight=1.0,
@@ -519,7 +519,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         # name as a prefix and strips it ("ValveBiped.Bip01" -> "Bip01"). That is
         # intended for real prefixes like "ValveBiped.", but an accidental dot in a
         # bone name silently drops part of the name. Only the Source 1 .vrd path is
-        # affected - DME prefab, Source 2 and newer studiomdl/PulseMDL don't strip.
+        # affected - DME prefab, Source 2 and newer studiomdl/PulseModel don't strip.
         preserved = tuple(p.lower() for p in get_preserved_bone_prefixes())
         warned_dotnames: set[str] = set()
         for entry in entries:
@@ -540,6 +540,8 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 )
 
         lines: list[str] = []
+        from .. import procbones_sim as _pbsim
+        _pbsim.prefetch_proc_triggers(arm, list(enumerate(entries)), scene)
 
         for entry_idx, entry in enumerate(entries):
             proc_type   = getattr(entry, 'proc_type', 'TRIGGER')
@@ -566,7 +568,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             if proc_type == 'TRIGGER':
                 drv_parent_vrd = _driver_parent_vrd(driver_name)
                 lines.append(f'<helper>  {helper_vrd}  {parent_vrd}  {drv_parent_vrd}  {driver_vrd}')
-                lines.append(f'<basepos>  {bx:.6f} {by:.6f} {bz:.6f}')
+                lines.append(f'<basepos>  {bx:.4f} {by:.4f} {bz:.4f}')
 
                 if not entry.action:
                     self.report({'WARNING'}, f"Procedural entry '{helper_name}' has no action; skipping triggers")
@@ -619,7 +621,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                     hpz = h_pos.z * scale
                     hrx, hry, hrz = degrees(h_euler.x), degrees(h_euler.y), degrees(h_euler.z)
 
-                    lines.append(f'<trigger>  {tol_deg:.4f}  {drx:.6f} {dry:.6f} {drz:.6f}  {hrx:.6f} {hry:.6f} {hrz:.6f}  {hpx:.6f} {hpy:.6f} {hpz:.6f}')
+                    lines.append(f'<trigger>  {tol_deg:.4f}  {drx:.4f} {dry:.4f} {drz:.4f}  {hrx:.4f} {hry:.4f} {hrz:.4f}  {hpx:.4f} {hpy:.4f} {hpz:.4f}')
 
                 lines.append('')
 
@@ -637,6 +639,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
                 lines.append(f'<upvector>  {up[0]:.6f} {up[1]:.6f} {up[2]:.6f}')
                 lines.append('')
 
+        _pbsim.clear_proc_trigger_prefetch()
         return '\n'.join(lines)
 
 # -----------------------------------------------------------------------------

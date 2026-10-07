@@ -18,7 +18,7 @@ from mathutils import Matrix, Euler, Vector
 from .. import keyvalues3
 from ..utils import (REF, ANIM, KeyFrame, SmdInfo, State, printTimeMessage,
                      import_jigglebones_from_kv3, import_hitboxes_from_kv3)
-from .build import truncate_id_name, create_armature, apply_frames, build_attachment_empty
+from .build import truncate_id_name, create_armature, apply_frames, build_attachment
 from .prefab import wants_prefab
 
 
@@ -356,7 +356,7 @@ def read_attachments(ctx, coll, arm, root_node, filename) -> int:
                 continue
         origin = att.properties.get("relative_origin", [0.0, 0.0, 0.0])
         angles_deg = att.properties.get("relative_angles", [0.0, 0.0, 0.0])
-        build_attachment_empty(ctx, coll, arm, att_name, resolved_bone,
+        build_attachment(ctx, coll, arm, att_name, resolved_bone,
                                local_matrix(origin, angles_deg))
         imported_att += 1
     if imported_att:

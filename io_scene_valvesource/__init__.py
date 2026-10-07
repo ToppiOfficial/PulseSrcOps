@@ -47,6 +47,10 @@ from . import datamodel, imports, exports, flex, procbones_sim, updater, icons
 from . import gui as GUI
 from .utils import *
 from .props import *
+from .attachments import CLASSES as attachment_classes
+from .physics_gizmos import (SMD_OT_PhysicsShapeDrag, SMD_GT_PhysicsRadiusRing,
+                             SMD_GT_PhysicsEndpointLink, SMD_GT_PhysicsMovePlane,
+                             SMD_GT_PhysicsMoveArrow, SMD_GGT_PhysicsShape, SMD_GGT_Hitbox)
 
 def menu_func_import(self, context):
     self.layout.menu("SMD_MT_ImportChoice", text=get_id("importmenu_title"))
@@ -100,11 +104,16 @@ class ValveSource_AddonPreferences(bpy.types.AddonPreferences):
         name=get_id("updater_title"),
         default=False)
     dev_build_date : StringProperty(options={'HIDDEN'})
+    print_export_timings : BoolProperty(
+        name="Print export timings",
+        description="Print a per-phase time breakdown of each export to the system console",
+        default=False)
 
     def draw(self, context):
         layout = self.layout
 
         updater.draw_prefs(layout, self)
+        layout.prop(self, "print_export_timings")
 
         header = layout.row(align=True)
         header.prop(self, "show_bone_name_prefixes",
@@ -151,11 +160,14 @@ _classes = (
     DmeFlexRuleItem,
     DmeDeltaNameOverride,
     VertexAnimation,
+    ProcBoneTriggerInfluence,
     ProcBoneEntry,
     HitboxEntry,
+    PhysicsShapeEntry,
     ArmatureItemEntry,
     PrefabItem,
     AttachmentDisplayMeshItem,
+    AttachmentEntry,
     BoneNamePrefixItem,
     MaterialPathItem,
 
@@ -189,6 +201,7 @@ _classes = (
     GUI.SMD_UL_GroupItems,
     GUI.SMD_UL_ActionExport,
     GUI.SMD_UL_MaterialPaths,
+    GUI.SMD_UL_MeshMaterials,
     GUI.SMD_OT_MaterialPathAdd,
     GUI.SMD_OT_MaterialPathRemove,
     GUI.SMD_PT_SceneMaterialPaths,
@@ -214,13 +227,14 @@ _classes = (
     GUI.SMD_PT_Vertexanimations,
     GUI.SMD_PT_ToonEdgeline,
     GUI.SMD_PT_MeshBackface,
-    GUI.SMD_PT_MeshSplit,
     GUI.SMD_PT_LOD,
     GUI.SMD_PT_Empty,
     GUI.SMD_PT_Curve,
     GUI.SMD_UL_ArmatureItems,
     GUI.SMD_UL_Hitboxes,
+    GUI.SMD_UL_PhysicsShapes,
     GUI.SMD_UL_ProcBones,
+    GUI.SMD_UL_ProcBoneInfluences,
     GUI.SMD_MT_HitboxSpecials,
     GUI.SMD_MT_ProcBoneSpecials,
     GUI.SMD_OT_HitboxAdd,
@@ -233,13 +247,24 @@ _classes = (
     GUI.SMD_OT_HitboxPasteValues,
     GUI.SMD_OT_HitboxCopyToArmature,
     GUI.SMD_OT_HitboxMirror,
+    GUI.SMD_OT_PhysShapeAdd,
+    GUI.SMD_OT_PhysShapeRemove,
+    GUI.SMD_OT_PhysShapeFromBone,
+    GUI.SMD_OT_PhysShapeDuplicate,
+    SMD_OT_PhysicsShapeDrag,
+    SMD_GT_PhysicsRadiusRing,
+    SMD_GT_PhysicsEndpointLink,
+    SMD_GT_PhysicsMovePlane,
+    SMD_GT_PhysicsMoveArrow,
+    SMD_GGT_PhysicsShape,
+    SMD_GGT_Hitbox,
     GUI.SMD_OT_ProcBoneAdd,
     GUI.SMD_OT_ProcBoneAddFromSelected,
     GUI.SMD_OT_ProcBoneAddLookAt,
     GUI.SMD_OT_ProcBoneDuplicate,
     GUI.SMD_OT_ProcBoneRemove,
     GUI.SMD_OT_ProcBoneSetTolerance,
-    GUI.SMD_OT_ProcBoneNavigateFrame,
+    GUI.SMD_OT_ProcBoneRefreshInfluences,
     GUI.SMD_OT_ProcBoneCopyTolerance,
     GUI.SMD_OT_ProcBonePasteTolerance,
     GUI.SMD_OT_ProcBoneCopyActive,
@@ -247,6 +272,7 @@ _classes = (
     GUI.SMD_OT_ProcBoneCopyAll,
     GUI.SMD_OT_ProcBonePasteEntries,
     GUI.SMD_PT_Hitboxes,
+    GUI.SMD_PT_PhysicsShapes,
     GUI.SMD_PT_ProcBones,
 GUI.SMD_PT_Jigglebones,
 
@@ -311,7 +337,6 @@ GUI.SMD_PT_Jigglebones,
     imports.ImportSMD,
     imports.ImportQC,
     imports.ImportVMDL,
-    imports.ImportFBX,
     imports.ImportPrefab,
 
     # Updater
@@ -320,7 +345,16 @@ GUI.SMD_PT_Jigglebones,
 
     # Add-on preferences
     ValveSource_AddonPreferences,
-)
+) + attachment_classes
+
+def _register_translations():
+    from . import translations
+    try:
+        bpy.app.translations.unregister(__name__)
+    except Exception:
+        pass
+    bpy.app.translations.register(__name__, translations.translations)
+
 
 def register():
     icons.register()
@@ -328,12 +362,11 @@ def register():
     for cls in _classes:
         bpy.utils.register_class(cls)
 
-    from . import translations
-    try:
-        bpy.app.translations.unregister(__name__)
-    except Exception:
-        pass
-    bpy.app.translations.register(__name__, translations.translations)
+    # Translation updates notify file browsers after their interface initializes.
+    if bpy.app.background:
+        _register_translations()
+    elif not bpy.app.timers.is_registered(_register_translations):
+        bpy.app.timers.register(_register_translations, first_interval=0.0)
 
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
@@ -381,6 +414,8 @@ def register():
     bpy.app.timers.register(updater._startup_check, first_interval=5.0)
 
 def unregister():
+    if bpy.app.timers.is_registered(_register_translations):
+        bpy.app.timers.unregister(_register_translations)
     if bpy.app.timers.is_registered(updater._startup_check):
         bpy.app.timers.unregister(updater._startup_check)
 
@@ -410,7 +445,10 @@ def unregister():
     bpy.types.VIEW3D_MT_bone_options_toggle.remove(draw_copy_bone_props)
     bpy.types.VIEW3D_MT_pose_context_menu.remove(GUI._draw_proc_bone_context_menu)
 
-    bpy.app.translations.unregister(__name__)
+    try:
+        bpy.app.translations.unregister(__name__)
+    except ValueError:
+        pass
 
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)

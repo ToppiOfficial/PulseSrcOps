@@ -6,7 +6,7 @@ from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
 from bpy.app.handlers import persistent
 from mathutils import Vector, Matrix
 from ..utils import get_id
-from .items import ProcBoneEntry, ArmatureItemEntry, HitboxEntry, PrefabItem, _proc_entry_invalidate_cache, refresh_hitbox_snapshot
+from .items import ProcBoneEntry, ArmatureItemEntry, HitboxEntry, PhysicsShapeEntry, AttachmentEntry, PrefabItem, _proc_entry_invalidate_cache, refresh_hitbox_snapshot
 from .mixins import JiggleBoneProps
 
 _propagation_active: set = set()
@@ -191,13 +191,6 @@ class ValveSource_BoneProps(JiggleBoneProps, bpy.types.PropertyGroup):
     export_location_offset_arm_y : FloatProperty(name=get_id('prop_location_arm_y'), description=get_id('prop_location_arm_y_tip'), default=0, precision=4, update=_sync_arm_to_local)
     export_location_offset_arm_z : FloatProperty(name=get_id('prop_location_arm_z'), description=get_id('prop_location_arm_z_tip'), default=0, precision=4, update=_sync_arm_to_local)
 
-    proc_tolerance : FloatProperty(
-        name=get_id('prop_pose_bone_proc_tolerance'),
-        description=get_id('prop_pose_bone_proc_tolerance_tip'),
-        default=math.pi / 2, min=0.01, max=math.pi, subtype='ANGLE', precision=2,
-        update=_proc_entry_invalidate_cache,
-    )
-
 
 class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     implicit_zero_bone : BoolProperty(name=get_id("dummy_bone"), default=False, description=get_id("dummy_bone_tip"))
@@ -214,14 +207,15 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     action_selection : EnumProperty(name=get_id("action_selection_mode"), items=arm_modes, description=get_id("action_selection_mode_tip"), default='FILTERED')
     action_preview_index : IntProperty(default=-1)
 
-    fbx_anim_layout : EnumProperty(name=get_id("fbx_anim_layout"), description=get_id("fbx_anim_layout_tip"), default='PER_FILE', items=(
-        ('PER_FILE', get_id("fbx_anim_layout_per"), get_id("fbx_anim_layout_per_tip")),
-        ('SINGLE_FILE', get_id("fbx_anim_layout_single"), get_id("fbx_anim_layout_single_tip")),
-    ))
+    export_anims_separately : BoolProperty(name=get_id("prop_export_anims_separately"), description=get_id("prop_export_anims_separately_tip"), default=False)
 
     hitboxes       : CollectionProperty(type=HitboxEntry)
     hitboxes_index : IntProperty(default=-1, update=_on_hitboxes_index_changed)
     hboxset_name          : StringProperty(name=get_id('prop_hitbox_hboxset'), description=get_id('prop_hitbox_hboxset_tip'), default='')
+    physics_shapes        : CollectionProperty(type=PhysicsShapeEntry)
+    physics_shapes_index  : IntProperty(default=-1)
+    attachments: CollectionProperty(type=AttachmentEntry)
+    attachments_index: IntProperty(default=-1)
     arm_attachment_entries : CollectionProperty(type=ArmatureItemEntry)
     arm_attachment_index : IntProperty(default=-1)
     arm_jigglebone_entries : CollectionProperty(type=ArmatureItemEntry)

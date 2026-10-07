@@ -1,4 +1,5 @@
 import bpy, bmesh, collections, dataclasses, re, typing, os
+import numpy as np
 from bpy import ops
 from mathutils import Vector, Matrix, Euler
 from math import *  # pyright: ignore
@@ -6,8 +7,18 @@ from bpy.types import Collection
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _MeshPlan
 from .geometry import EdgelineBuilder
+
+
+def _select_only_quiet(ob):
+    # select_only without operators: every operator call re-evaluates the whole scene.
+    if bpy.context.mode != "OBJECT":
+        ops.object.mode_set(mode="OBJECT")
+    for other in bpy.context.selected_objects:
+        other.select_set(False)
+    bpy.context.view_layer.objects.active = ob
+    ob.select_set(True)
 
 
 class Baker:
@@ -35,13 +46,17 @@ class Baker:
         result.src = ob
         self._cache[uid] = result
 
+        # visible_get matches the mode_set poll that select_only used to trip on hidden objects.
         try:
-            select_only(ob)
+            if not ob.visible_get():
+                raise RuntimeError
+            _select_only_quiet(ob)
         except RuntimeError:
             self._exporter.warning(get_id("exporter_err_hidden", True).format(ob.name))
             return None
 
         should_tri = State.exportFormat == ExportFormat.SMD or ob.vs.triangulate
+        bench = BenchMarker(2)
 
         # -- realize instances ------------------------------------------------
         duplis = None
@@ -70,19 +85,24 @@ class Baker:
         if ob.data:
             ob.data = ob.data.copy()
 
-        if bpy.context.active_object:
-            ops.object.mode_set(mode="OBJECT")
-        select_only(ob)
+        # The copy's first evaluation is deferred to the mesh bake unless it is animated.
+        _select_only_quiet(ob)
+        driven = bool(ob.animation_data) or any(not c.mute for c in ob.constraints)
+        if driven:
+            bpy.context.view_layer.update()
 
         if hasShapes(ob):
             ob.active_shape_key_index = 0
 
+        bench.report("copy")
+
         # -- envelope / armature detection ------------------------------------
         self._setup_envelope(ob, result, top_parent)
+        bench.report("envelope")
 
         # -- per-type pre-bake mesh ops ---------------------------------------
         if ob.type == "MESH":
-            self._pre_bake_mesh_ops(ob)
+            self._pre_bake_mesh_ops(ob, bench)
 
         # A constraint-driven rig's motion is already baked into its actions by now, so its
         # bone constraints are redundant - and harmful: they resolve their targets in world
@@ -93,7 +113,18 @@ class Baker:
                     con.mute = True
 
         # -- coordinate transform ---------------------------------------------
-        ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+        if driven:
+            ops.object.parent_clear(type="CLEAR_KEEP_TRANSFORM")
+            world = ob.matrix_world
+        elif ob.parent:
+            # Same result as parent_clear plus its re-evaluation, which drops any shear.
+            world = ob.matrix_world.copy()
+            ob.parent = None
+            ob.matrix_parent_inverse.identity()
+            ob.matrix_world = world
+            world = ob.matrix_basis
+        else:
+            world = ob.matrix_world
         # Subtract the top parent's origin in Blender space, right of the scale/axis
         # conversion, so it gets scaled and rotated like everything else.
         ob.matrix_world = (
@@ -102,8 +133,10 @@ class Baker:
             @ getUpAxisOffsetMat(bpy.context.scene.vs.up_axis, bpy.context.scene.vs.up_axis_offset)
             @ Matrix.Scale(bpy.context.scene.vs.world_scale, 4)
             @ Matrix.Translation(top_parent.location).inverted()
-            @ ob.matrix_world
+            @ world
         )
+
+        bench.report("transform")
 
         if ob.type == "ARMATURE":
             for pb in ob.pose.bones:
@@ -130,7 +163,7 @@ class Baker:
                 else:
                     result.armature = self.bake(mod.object)
                     result.envelope = mod
-                    select_only(ob)
+                    _select_only_quiet(ob)
                 mod.show_viewport = False
             elif mod.type == "SOLIDIFY" and solidify_fill_rim is None:
                 solidify_fill_rim = mod.use_rim
@@ -138,20 +171,26 @@ class Baker:
                 self._exporter.error(get_id("exporter_err_shapes_decimate", True).format(ob.name, mod.decimate_type))
                 shapes_invalid = True
 
-        ops.object.mode_set(mode="OBJECT")
+        if bpy.context.mode != "OBJECT":
+            ops.object.mode_set(mode="OBJECT")
+        bench.report("modifier scan")
 
         # -- bake mesh --------------------------------------------------------
         if ob.type in exportable_types:
             depsgraph = bpy.context.evaluated_depsgraph_get()
+            bench.report("eval: depsgraph")
             data = bpy.data.meshes.new_from_object(
                 ob.evaluated_get(depsgraph), preserve_all_data_layers=True, depsgraph=depsgraph
             )
             data.name = ob.name + "_baked"
+            bench.report("eval: new_from_object")
             baked = self._put_in_object(ob, data, solidify_fill_rim)
+            bench.report("eval: put in object")
             if should_tri:
                 bpy.context.view_layer.objects.active = baked
                 select_only(baked)
                 self._triangulate()
+                bench.report("eval: triangulate")
         else:
             baked = None
 
@@ -187,6 +226,8 @@ class Baker:
                 for sk, v in saved_values:
                     sk.value = v
 
+        bench.report("zero-state normals")
+
         if duplis:
             if not ob.type in exportable_types:
                 ob.select_set(False)
@@ -216,15 +257,21 @@ class Baker:
         # -- shape key baking -------------------------------------------------
         if not shapes_invalid and hasShapes(ob) and getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'DEFAULT':
             self._bake_shapes(ob, result, solidify_fill_rim)
+            bench.report(f"shape keys ({len(result.shapes)})")
 
         for mod in ob.modifiers:
             mod.show_viewport = False
+
+        # The working copy is spent; leaving it linked makes every later depsgraph rebuild bigger.
+        if ob is not result.src and ob.name in bpy.context.scene.collection.objects:
+            bpy.context.scene.collection.objects.unlink(ob)
 
         bpy.context.view_layer.objects.active = baked
         baked.select_set(True)
 
         self._generate_uvs_if_needed(baked, result)
         self._check_vertex_limit(baked, result)
+        bench.report("uv + vertex count")
 
         return result
 
@@ -261,7 +308,7 @@ class Baker:
                 break
             cur = cur.parent
 
-    def _pre_bake_mesh_ops(self, ob: bpy.types.Object) -> None:
+    def _pre_bake_mesh_ops(self, ob: bpy.types.Object, bench: BenchMarker) -> None:
         scene_vs = bpy.context.scene.vs
         mt = getattr(ob.vs, 'mesh_type', 'DEFAULT')
         limit_mode = getattr(scene_vs, 'vertex_influence_limit_mode', 'AUTO')
@@ -278,13 +325,9 @@ class Baker:
 
         if not hasShapes(ob):
             VertexGroupNormalizer(ob, vgroup_limit=vgroup_limit, clean_tolerance=scene_vs.weightlink_threshold).run()
-            ops.object.mode_set(mode="EDIT")
-            ops.mesh.reveal()
-            if ob.matrix_world.is_negative:
-                ops.mesh.select_all(action="SELECT")
-                ops.mesh.flip_normals()
-            ops.mesh.select_all(action="DESELECT")
-            ops.object.mode_set(mode="OBJECT")
+            bench.report("weight normalize")
+            self._reveal_and_deselect(ob)
+            bench.report("reveal / flip")
             return
 
         # Shape key normalization
@@ -296,53 +339,76 @@ class Baker:
             # Normalization is evaluation-preserving, so it only matters for the deltas
             # that get exported - collision/cloth proxies discard theirs.
             self._normalize_shapekeys(ob)
+        bench.report("shape key normalize")
 
         VertexGroupNormalizer(ob, vgroup_limit=vgroup_limit, clean_tolerance=scene_vs.weightlink_threshold).run()
+        bench.report("weight normalize")
 
-        ops.object.mode_set(mode="EDIT")
-        ops.mesh.reveal()
+        self._reveal_and_deselect(ob)
+        bench.report("reveal / flip")
+
+    def _reveal_and_deselect(self, ob: bpy.types.Object) -> None:
         if ob.matrix_world.is_negative:
+            # flip_normals also flips custom split normals, so it keeps the operator path.
+            ops.object.mode_set(mode="EDIT")
+            ops.mesh.reveal()
             ops.mesh.select_all(action="SELECT")
             ops.mesh.flip_normals()
-        ops.mesh.select_all(action="DESELECT")
-        ops.object.mode_set(mode="OBJECT")
+            ops.mesh.select_all(action="DESELECT")
+            ops.object.mode_set(mode="OBJECT")
+            return
+        me = ob.data
+        for elems in (me.vertices, me.edges, me.polygons):
+            off = [False] * len(elems)
+            elems.foreach_set("hide", off)
+            elems.foreach_set("select", off)
+        me.update()
 
     def _normalize_shapekeys(self, ob: bpy.types.Object) -> None:
         print("- Normalizing Basis and Keys (Reference-Based)")
         blocks = ob.data.shape_keys.key_blocks
         base_key = blocks[0]
-        orig_coords = [v.co.copy() for v in base_key.data]
+        count = len(base_key.data) * 3
+
+        # float32 throughout, one op at a time, to match the mathutils arithmetic exactly.
+        def read(key):
+            buf = np.empty(count, dtype=np.float32)
+            key.data.foreach_get("co", buf)
+            return buf
+
+        orig_coords = read(base_key)
+        new_basis = orig_coords.copy()
+        key_coords = {key.name: read(key) for key in blocks[1:]}
 
         for key in blocks[1:]:
             if key.slider_min == 0.0:
                 continue
-            for i, b_v in enumerate(base_key.data):
-                b_v.co += (key.data[i].co - orig_coords[i]) * key.slider_min
-
-        new_basis = [v.co.copy() for v in base_key.data]
+            new_basis += (key_coords[key.name] - orig_coords) * np.float32(key.slider_min)
+        base_key.data.foreach_set("co", new_basis)
 
         for key in blocks[1:]:
             s_min, s_max = key.slider_min, key.slider_max
             old_val = key.value
             rng = s_max - s_min
-            for i, k_v in enumerate(key.data):
-                delta = k_v.co - orig_coords[i]
-                k_v.co = new_basis[i] + (delta * s_max - delta * s_min)
+            delta = key_coords[key.name] - orig_coords
+            key.data.foreach_set("co", new_basis + (delta * np.float32(s_max) - delta * np.float32(s_min)))
             key.slider_min = 0.0
             key.slider_max = 1.0
             key.value = (old_val - s_min) / rng if rng != 0 else 0.0
 
     def _put_in_object(self, source_ob: bpy.types.Object, data, solidify_fill_rim, quiet=False) -> bpy.types.Object:
-        if bpy.context.view_layer.objects.active:
-            ops.object.mode_set(mode="OBJECT")
-
         ob = bpy.data.objects.new(name=source_ob.name, object_data=data)
         ob.matrix_world = source_ob.matrix_world
         bpy.context.scene.collection.objects.link(ob)
-        select_only(ob)
+        _select_only_quiet(ob)
 
-        exporting_smd = State.exportFormat == ExportFormat.SMD
-        ops.object.transform_apply(scale=True, location=exporting_smd, rotation=exporting_smd)
+        # Same BKE_mesh_transform call transform_apply makes, without the operator's scene update.
+        if State.exportFormat == ExportFormat.SMD:
+            data.transform(ob.matrix_basis)
+            ob.matrix_basis.identity()
+        else:
+            data.transform(Matrix.Diagonal(ob.scale).to_4x4())
+            ob.scale = (1.0, 1.0, 1.0)
 
         if hasCurves(source_ob):
             ops.object.mode_set(mode="EDIT")
@@ -357,17 +423,15 @@ class Baker:
 
         self._delete_filtered_faces(ob.data, source_ob, quiet=quiet)
 
-        # Not the way I hope to fix it but too bad.
-        # if source_ob.vs.use_toon_edgeline and not source_ob.vs.edgeline_per_material:
-        # oh ffs.
-        #
-        if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
+        if not pulsemodel_vertex_data_enabled() and (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
             self._collapse_edgeline_materials(ob.data)
 
         return ob
 
     def _delete_filtered_faces(self, me: bpy.types.Mesh, vg_source: bpy.types.Object, quiet: bool = False) -> None:
         if not getattr(vg_source, "vs", None):
+            return
+        if pulsemodel_vertex_data_enabled():
             return
 
         # Non-exportable vgroup: base faces (and their edgeline shell counterparts)
@@ -533,7 +597,7 @@ class Baker:
 
         self._delete_filtered_faces(data, source_ob, quiet=True)
 
-        if (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
+        if not pulsemodel_vertex_data_enabled() and (source_ob.vs.use_toon_edgeline or source_ob.get("is_edgeline_only")) and not source_ob.vs.edgeline_per_material:
             self._collapse_edgeline_materials(data)
 
         # Must stay after the face filter: the base mesh triangulates last too, and filtering

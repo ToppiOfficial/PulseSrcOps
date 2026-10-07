@@ -3,7 +3,7 @@
 Converts between the armature's ``vs.hitboxes`` collection entries and:
 
 * **QC text** - ``$hbox`` lines (Source 1 / studiomdl)
-* **DME** - ``DmeHitbox`` element attributes (model-DMX / PulseMDL)
+* **DME** - ``DmeHitbox`` element attributes (model-DMX / PulseModel)
 * **KV3** - ``HitboxCapsule`` KVNodes (Source 2 / ModelDoc .vmdl)
 
 A hitbox entry stores ``vec_min`` / ``vec_max`` (bone-local box), ``rotation``
@@ -36,7 +36,7 @@ def _capsule_points(entry):
 
 
 # -----------------------------------------------------------------------------
-# DME (model-DMX / PulseMDL)
+# DME (model-DMX / PulseModel)
 # -----------------------------------------------------------------------------
 
 def write_dme_attrs(hb, entry, bone_export: str) -> None:
@@ -57,7 +57,7 @@ def write_dme_attrs(hb, entry, bone_export: str) -> None:
     # radius: <= 0 = OBB box, > 0 = capsule radius (matches flCapsuleRadius).
     hb["radius"]     = float(entry.scale) if entry.scale >= 0.0 else -1.0
     # Euler degrees (pitch, yaw, roll). Vector3 not Angle, to avoid the
-    # "angle"/"qangle" DMX type-name mismatch with PulseMDL.
+    # "angle"/"qangle" DMX type-name mismatch with PulseModel.
     hb["orientation"] = datamodel.Vector3(rot)
 
 

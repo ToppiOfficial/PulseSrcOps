@@ -18,7 +18,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, os
+import bpy, gc, os
 from bpy import ops
 from bpy.app.translations import pgettext
 from bpy.props import StringProperty, CollectionProperty, BoolProperty, EnumProperty, FloatProperty
@@ -26,7 +26,6 @@ from ..utils import *
 from .. import datamodel, keyvalues3
 from . import anim as _anim, build as _build, dmx as _dmx
 from . import prefab as _prefab, qc as _qc, smd as _smd, vmdl as _vmdl
-from . import fbx as _fbx
 
 from ..utils import PULSE_ATTACHMENT_COLL as _PULSE_ATTACHMENT_COLL, ensure_pulse_collection_at_top as _ensure_pulse_collection_at_top
 from .flexdata import populate_dme_flex_from_dmx
@@ -71,6 +70,8 @@ class ImporterBase(bpy.types.Operator, Logger):
 
     # Options every format honours
     createCollections: BoolProperty(name=get_id("importer_use_collections"), description=get_id("importer_use_collections_tip"), default=True)
+    legacyAttachments: BoolProperty(name='Use Legacy Empty Attachments',
+                                    description='Import attachments as deprecated Empty objects', default=False)
     append: EnumProperty(
         name=get_id("importer_bones_mode"),
         description=get_id("importer_bones_mode_desc"),
@@ -101,6 +102,19 @@ class ImporterBase(bpy.types.Operator, Logger):
         Logger.__init__(self)
 
     def execute(self, context):
+        # Imports allocate millions of short-lived objects; cyclic GC passes over them only
+        # add pauses, as on export.
+        gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            return self._execute(context)
+        finally:
+            if gc_was_enabled:
+                gc.enable()
+
+    def _execute(self, context):
+        # The instance is created when the file browser opens; time the import, not the browsing.
+        self.startTime = time.time()
         pre_obs = set(bpy.context.scene.objects)
         pre_eem = context.preferences.edit.use_enter_edit_mode
         pre_append = self.append
@@ -202,6 +216,9 @@ class ImporterBase(bpy.types.Operator, Logger):
         col.use_property_split = False
         col.label(text=get_id("importer_prefabdata"))
         col.prop(self.properties, "prefabData", expand=True)
+        row = col.row()
+        row.enabled = 'ATTACHMENTS' in self.prefabData
+        row.prop(self.properties, 'legacyAttachments')
 
     def read_file(self, filepath: str) -> int | None:
         raise NotImplementedError
@@ -302,16 +319,21 @@ class ImporterBase(bpy.types.Operator, Logger):
 
         # Order is forced by the format: the node block must be built into an armature
         # before triangle weights can resolve, so this stays a single pass over the file.
+        bench = BenchMarker(1, "SMD")
         for line in file:
             if line == "nodes\n":
                 _build.build_smd_skeleton(self, smd, _smd.read_nodes(smd, self.qc))
+                bench.report("nodes")
             if line == "skeleton\n":
                 _anim.build_smd_anim(self, smd, _smd.read_frames(self, smd, self.qc))
+                bench.report("skeleton")
             if line == "triangles\n":
                 group_names = [b.name for b in smd.a.data.bones] if smd.a else []
                 imesh = _smd.read_polys(self, smd, group_names, self.qc)
+                bench.report("parse triangles")
                 if imesh:
                     ob = _build.build_mesh(self, smd, imesh)
+                    bench.report("build mesh")
                     if smd.jobType == REF and self.qc:
                         self.qc.ref_mesh = ob
                         self.qc.ref_meshes.append(ob)
@@ -325,6 +347,7 @@ class ImporterBase(bpy.types.Operator, Logger):
                         poly.select = True
             if line == "vertexanimation\n":
                 _smd.read_shapes(self, smd)
+                bench.report("vertex animation")
 
         file.close()
         printTimeMessage(smd.startTime, smd.jobName, "import")
@@ -371,6 +394,7 @@ class ImporterBase(bpy.types.Operator, Logger):
             self.ensureAnimationBonesValidated()
 
             ifile = _dmx.read_file(parsed)
+            bench.report("Parse")
             for version in parsed.version_bumps:
                 self._ensureSceneDmxVersion(version)
             for message in parsed.warnings:
@@ -380,14 +404,16 @@ class ImporterBase(bpy.types.Operator, Logger):
                 self, smd, ifile.skeleton, target_arm,
                 parsed.DmeModel.name or smd.jobName)
             _build.apply_rest_pose(self, smd, bone_matrices)
+            bench.report("Skeleton")
 
             if smd.a and smd.jobType != ANIM:
                 _prefab.apply_dmx_prefab_data(self, smd, parsed, ifile.skeleton)
+                bench.report("Prefab data")
 
-            imported_meshes = [
-                _build.build_mesh(self, smd, imesh, parsed.corrective_separator)
-                for imesh in ifile.meshes
-            ]
+            imported_meshes = []
+            for imesh in ifile.meshes:
+                imported_meshes.append(_build.build_mesh(self, smd, imesh, parsed.corrective_separator))
+                bench.report(f"Mesh {imesh.name}")
 
             # Flex controllers are global model data: apply them to every imported mesh
             # with shape keys, not just the last one parsed. When called from readQC,
@@ -408,15 +434,18 @@ class ImporterBase(bpy.types.Operator, Logger):
                 elif _combo_op:
                     for m in (flex_meshes or [smd.m]):
                         self._populate_dme_flex_from_dmx(m, _combo_op)
+                bench.report("Flex setup")
 
             if smd.jobType == ANIM:
                 _anim.build_anim(self, smd, ifile.anim)
+                bench.report("Animation")
 
         except datamodel.AttributeError as e:
             e.args = [f"Invalid DMX file: {e.args[0] if e.args else 'Unknown error'}"]
             raise
 
-        bench.report("DMX imported in")
+        if not bench.quiet:
+            print(f"- DMX import took {bench.total():.4f}s")
         return 1
 
     @classmethod
@@ -686,83 +715,6 @@ class ImportVMDL(ImporterBase):
         if self.qc and self.qc.a:
             bpy.context.view_layer.objects.active = self.qc.a
         return count
-
-
-class ImportFBX(ImporterBase):
-    """Blender's FBX importer, plus the Source data exports/fbx.py wrote alongside it.
-
-    The native importer owns the skeleton, axes and mesh, so none of ImporterBase's build
-    options apply - only scale and the prefab toggles are drawn.
-    """
-    bl_idname = "import_scene.kst_fbx"
-    bl_label = get_id("importer_fbx_title")
-    bl_description = get_id("importer_fbx_tip")
-
-    filter_glob: StringProperty(default="*.fbx", options={'HIDDEN'})
-
-    importScale: FloatProperty(
-        name=get_id("importer_fbx_scale"), description=get_id("importer_fbx_scale_tip"),
-        default=1.0, min=0.0001, soft_max=100.0, precision=4)
-    # All four kinds ride in the companion DMX, attachments included.
-    prefabData: prefabDataProperty('JIGGLEBONES', 'HITBOXES', 'PROCEDURAL', 'ATTACHMENTS')
-
-    def invoke(self, context, event):
-        # Our FBX carries engine units, so undo world_scale to land back at authored size.
-        world_scale = context.scene.vs.world_scale
-        self.properties.importScale = 1.0 / world_scale if world_scale else 1.0
-        bpy.context.window_manager.fileselect_add(self)
-        return {'RUNNING_MODAL'}
-
-    def draw(self, context):
-        self.layout.use_property_split = True
-        self.layout.use_property_decorate = False
-        self.layout.prop(self.properties, "importScale")
-        self.draw_prefab_data(self.layout)
-
-    def read_file(self, filepath: str) -> int | None:
-        if not filepath.lower().endswith('.fbx'):
-            self.report_unreadable(filepath)
-            return None
-        if not hasattr(bpy.ops.import_scene, "fbx"):
-            self.error(get_id("exporter_err_fbx_addon", True))
-            return None
-
-        # Blender always divides by UnitScaleFactor/100, but Source FBX declares 1 with the
-        # numbers already in engine units. Undo it so importScale means what it says.
-        units = bpy.context.scene.unit_settings
-        unit_factor = 100.0 if units.system == 'NONE' else 100.0 * units.scale_length
-
-        pre = set(bpy.context.scene.objects)
-        try:
-            bpy.ops.import_scene.fbx(
-                filepath=filepath,
-                global_scale=self.properties.importScale * unit_factor,
-                use_custom_props=True,
-                use_custom_props_enum_as_string=True,
-                # Take the bone axes from the file: automatic_bone_orientation re-aims each
-                # bone at its child, discarding any authored export offset. Axes mirror the
-                # export.
-                automatic_bone_orientation=False,
-                primary_bone_axis='Y',
-                secondary_bone_axis='X',
-                # The exporter writes add_leaf_bones=False, so every chain ends in a real bone.
-                ignore_leaf_bones=False,
-                # Keep the file's own frame numbering instead of Blender's default +1 shift.
-                anim_offset=0.0,
-            )
-        except RuntimeError as err:
-            self.error(get_id("importer_err_fbx", True).format(os.path.basename(filepath), err))
-            return None
-
-        new_obs = [ob for ob in bpy.context.scene.objects if ob not in pre]
-        companion = _fbx.companion_path(filepath)
-        if companion:
-            jb, hb, pb, at = _fbx.apply_companion_dmx(self, companion, new_obs)
-            self.imported_jigglebones += jb
-            self.imported_hitboxes += hb
-            self.imported_procbones += pb
-            self.imported_attachments += at
-        return self.num_files_imported + 1
 
 
 class ImportDMX(ImporterBase):

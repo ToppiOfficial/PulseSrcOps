@@ -1,18 +1,40 @@
 import bpy, bmesh, collections, re, os
+import numpy as np
+from array import array
 from mathutils import Vector, Matrix
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
-from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone
+from ..prefab_io import jigglebone as _jigglebone, hitbox as _hitbox, proceduralbone as _proceduralbone, physicsshape as _physicsshape
 
 from .records import BakeResult, ExportTask, is_proxy_only
+
+
+def _read_floats(collection, attr, width):
+    buf = array('f', bytes(4 * width * len(collection)))
+    collection.foreach_get(attr, buf)
+    return buf
+
+def _read_ints(collection, attr):
+    buf = array('i', bytes(4 * len(collection)))
+    collection.foreach_get(attr, buf)
+    return buf
+
+def _rows(buf, width):
+    return np.frombuffer(buf, dtype=np.float32).reshape(-1, width).tolist()
+
+def _dedup_pairs(flat):
+    # Same first-seen order and indices OrderedSet.add would give, without a Vector2 per loop.
+    seen = {}
+    indices = [seen.setdefault(k, len(seen)) for k in zip(flat[0::2], flat[1::2])]
+    return list(seen), indices
 
 
 class DmxWriter:
     def __init__(self, reporter, datablock, bake_results, name, dir_path, *,
                  armature, armature_src, exportable_bones, exportable_boneNames,
                  exportable_empties, all_bake_results, flex_mode, flex_source,
-                 skeleton_only=False):
+                 anim_jobs=None):
         self.r = reporter
         self.datablock = datablock
         self.bake_results = bake_results
@@ -26,9 +48,8 @@ class DmxWriter:
         self.all_bake_results = all_bake_results
         self.flex_controller_mode = flex_mode
         self.flex_controller_source = flex_source
-        # FBX companion: skeleton + flex controllers + prefabs, no DmeMesh. The mesh, its
-        # morphs and its materials ship in the .fbx instead.
-        self.skeleton_only = skeleton_only
+        # (name, action, slot) clips embedded into a model DMX; see embedded_anim_allowed.
+        self.anim_jobs = anim_jobs
         self.bone_ids: dict[str, int] = {}
 
     # -- reporting -----------------------------------------------------------
@@ -83,13 +104,11 @@ class DmxWriter:
 
         if self.armature:
             self.armature.data.pose_position = "POSE" if self.is_anim else "REST"
-            if self.armature.data.vs.reset_pose_per_anim:
-                if self.is_anim:
-                    self.r.warnUnkeyframedPose(self.name)
+            if self.is_anim:
+                self._prepare_anim_pose(self.name)
+            elif self.armature.data.vs.reset_pose_per_anim:
                 for pb in self.armature.pose.bones:
                     pb.matrix_basis.identity()
-            elif self.is_anim:
-                self.r.applyUnkeyframedSourcePose()
             bpy.context.view_layer.update()
 
         root["skeleton"] = DmeModel
@@ -109,23 +128,24 @@ class DmxWriter:
         self._build_skeleton(bench)
         self._write_attachments(bench)
         self._write_procedural_bones()
+        bench.report("Procedural bones")
         self._write_hitboxes(bench)
-        if not self.skeleton_only:
-            self._write_vca_bones()
+        self._write_physics_shapes(bench)
+        self._write_vca_bones()
 
         combination_operator = self._setup_flex(bench)
-        if not combination_operator and not self.skeleton_only and self.bake_results and self.bake_results[0].vertex_animations:
+        if not combination_operator and self.bake_results and self.bake_results[0].vertex_animations:
             combination_operator = flex.DmxWriteFlexControllers.make_controllers(self.datablock).root["combinationOperator"]
         if combination_operator:
             root["combinationOperator"] = combination_operator
 
-        if self.skeleton_only:
-            root["model"] = self.DmeModel
-        else:
-            self._write_meshes(combination_operator, bench)
+        self._write_meshes(combination_operator, bench)
 
         if self.is_anim:
-            self._write_animation(bench)
+            ad = self.armature.animation_data
+            self._write_animation_list([self._write_clip(self.name, "", ad, bench)])
+        elif self.anim_jobs and self.armature:
+            self._write_embedded_animations(bench)
 
         return self._write_out(bench)
 
@@ -231,7 +251,7 @@ class DmxWriter:
         item = next((p for p in avs.prefab_items if p.prefab_type == prefab_type), None)
         return item.export if item is not None else True
 
-    def _write_attach(self, name, relMat, boneelem):
+    def _write_attach(self, name, relMat, boneelem, *, model_root=False):
         dm = self.dm
         dag = dm.add_element(name, "DmeDag", id=name)
         att = dm.add_element(name, "DmeAttachment", id="attachment" + name)
@@ -248,10 +268,12 @@ class DmxWriter:
         if "children" not in boneelem:
             boneelem["children"] = datamodel.make_array([], datamodel.Element)
 
-        trfm = self._make_transform(name, relMat, name)
-        trfm_base = self._make_transform(name, relMat, "empty_base" + name)
+        scale_divisor = self.armature_scale if model_root else None
+        trfm = self._make_transform(name, relMat, name, scale_divisor)
+        trfm_base = self._make_transform(name, relMat, "empty_base" + name, scale_divisor)
 
-        self._scale_translation(trfm["position"], self.armature_scale)
+        if not model_root:
+            self._scale_translation(trfm["position"], self.armature_scale)
         trfm_base["position"] = trfm["position"]
 
         dag["transform"] = trfm
@@ -263,6 +285,9 @@ class DmxWriter:
         return dag
 
     def _write_attachment(self, empty, empty_matrix):
+        if not empty.parent_bone:
+            matrix = self.armature.matrix_world @ self.armature_src.matrix_world.inverted_safe() @ empty_matrix
+            return self._write_attach(empty.name, matrix, self.DmeModel, model_root=True)
         current_bone = self.armature.data.bones.get(empty.parent_bone)
         exportable_parent = None
         while current_bone:
@@ -275,7 +300,7 @@ class DmxWriter:
             self._warning(f"Attachment '{empty.name}' has no exportable parent bone. Skipping.")
             return None
 
-        pmat = get_bone_matrix(exportable_parent, rest_space=True)
+        pmat = self.armature_src.matrix_world @ get_bone_matrix(exportable_parent, rest_space=True)
         relMat = pmat.inverted() @ empty_matrix
         return self._write_attach(empty.name, relMat, self.bone_elements[exportable_parent.name])
 
@@ -322,9 +347,21 @@ class DmxWriter:
                 lookat_name_map[(dn, off)] = attach_name
                 self._write_attach(attach_name, Matrix.Translation(Vector(off)), bone_elements[dn])
 
+        from .. import procbones_sim as _pbsim
+        _pbsim.prefetch_proc_triggers(
+            self.armature_src,
+            [(i, e) for i, e in enumerate(proc_bones_list) if e.helper_bone in bone_elements],
+            bpy.context.scene)
+        try:
+            self._promote_procedural_joints(proc_bones_list, lookat_name_map)
+        finally:
+            _pbsim.clear_proc_trigger_prefetch()
+
+    def _promote_procedural_joints(self, proc_bones_list, lookat_name_map):
         # Promote each helper's joint to DmeQuatInterpBone (TRIGGER) or DmeAimAtBone (LOOKAT).
         # On failure the element stays a plain DmeJoint. armature_src is used so the real
         # drivers/constraints/action are live, matching the VRD path.
+        bone_elements = self.bone_elements
         seen_helpers: set[str] = set()
         for entry_idx, entry in enumerate(proc_bones_list):
             helper_name = entry.helper_bone
@@ -406,8 +443,46 @@ class DmxWriter:
         self.root["hitboxSetList"] = hbox_set_list
         bench.report("Hitboxes")
 
+    def _write_physics_shapes(self, bench):
+        if not (self.dme_mode and not self.is_anim and self.armature and self.armature_src) or self.proxy_only:
+            return
+        dm = self.dm
+        arm_data = self.armature_src.data
+        avs = getattr(arm_data, 'vs', None)
+        entries = [e for e in (getattr(avs, 'physics_shapes', []) if avs else [])
+                   if e.bone_name and arm_data.bones.get(e.bone_name)]
+        if not entries:
+            return
+
+        empty = [e.bone_name for e in entries
+                 if (e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)
+                 or (e.shape_type == 'SPHERE' and e.radius0 <= 0.0)]
+        if empty:
+            self._warning(f"Skipping {len(empty)} physics capsule/sphere(s) with zero radius: {', '.join(empty)}")
+            entries = [e for e in entries if not ((e.shape_type == 'CAPSULE' and e.radius0 <= 0.0 and e.radius1 <= 0.0)
+                                                or (e.shape_type == 'SPHERE' and e.radius0 <= 0.0))]
+            if not entries:
+                return
+        inverted = [e.bone_name for e in entries
+                    if e.shape_type == 'BOX' and any(e.vec_min[i] > e.vec_max[i] for i in range(3))]
+        if inverted:
+            self._warning(f"Physics box min/max are inverted on: {', '.join(inverted)}")
+
+        prim_list = dm.add_element("physicsPrimitiveList", "DmePhysicsPrimitiveList", id="physicsPrimitiveList")
+        prim_list["primitives"] = datamodel.make_array([], datamodel.Element)
+        for pi, e in enumerate(entries):
+            bone_export = self.exportable_boneNames.get(e.bone_name, get_bone_exportname(arm_data.bones[e.bone_name]))
+            el = dm.add_element(bone_export, _physicsshape.element_class(e), id=f"physprim_{pi}_{e.bone_name}")
+            _physicsshape.write_dme_attrs(el, e, bone_export)
+            prim_list["primitives"].append(el)
+
+        self.root["physicsPrimitiveList"] = prim_list
+        bench.report("Physics shapes")
+
     # -- flex controller setup ----------------------------------------------
     def _setup_flex(self, bench):
+        self.corrective_separator = getCorrectiveShapeSeparator()
+        self.raw_control_names = set()
         if not any(b.shapes for b in self.bake_results):
             return None
 
@@ -426,8 +501,25 @@ class DmxWriter:
                     print("- Loading flex controllers from " + path_fc)
                     self.controller_dm = datamodel.load(path=path_fc, element_path=element_path)
                 combination_operator = self.controller_dm.root["combinationOperator"]
+                self.raw_control_names = {
+                    name for ctrl in combination_operator["controls"]
+                    for name in ctrl["rawControlNames"]
+                }
                 for elem in [e for e in combination_operator["targets"] if e.type != "DmeFlexRules"]:
                     combination_operator["targets"].remove(elem)
+                shape_names = {name for bake in self.bake_results for name in bake.shapes}
+                component_names = shape_names | self.raw_control_names
+                for separator in ('__', '_'):
+                    if any(separator in delta.name and delta.name not in self.raw_control_names
+                           and all(part in component_names for part in delta.name.split(separator))
+                           for rules in combination_operator["targets"] for delta in rules["deltaStates"]):
+                        self.corrective_separator = separator
+                        break
+                for rules in combination_operator["targets"]:
+                    rules["target"] = None
+                # Controller elements transfer to the export without importing its mesh into the source.
+                for elem in self.controller_dm.elements:
+                    elem._datamodels.discard(self.controller_dm)
             except Exception as err:
                 self._error(get_id("exporter_err_flexctrl_loadfail", True).format(err))
                 return None
@@ -466,20 +558,30 @@ class DmxWriter:
         exportable_bones_list = [pb for pb in amod_ob.pose.bones if pb in self.exportable_bones] \
             if amod.use_bone_envelopes else []
 
+        use_groups = amod.use_vertex_groups
+        use_envelopes = amod.use_bone_envelopes
+        amod_vg_index = amod_vg.index if amod_vg else -1
+        wm = bpy.context.window_manager
+
         for v in ob.data.vertices:
             weights = []
             total_weight = 0
+            amod_vg_weight = 0
             if len(out) % progress_step == 0:
-                bpy.context.window_manager.progress_update(len(out) / num_verts)
+                wm.progress_update(len(out) / num_verts)
 
-            if amod.use_vertex_groups:
+            if use_groups or amod_vg_index >= 0:
                 for v_group in v.groups:
-                    bone_id = vg_to_bone_id.get(v_group.group)
-                    if bone_id is not None:
-                        weights.append([bone_id, v_group.weight])
-                        total_weight += v_group.weight
+                    group, weight = v_group.group, v_group.weight
+                    if use_groups:
+                        bone_id = vg_to_bone_id.get(group)
+                        if bone_id is not None:
+                            weights.append([bone_id, weight])
+                            total_weight += weight
+                    if group == amod_vg_index:
+                        amod_vg_weight = weight
 
-            if amod.use_bone_envelopes and total_weight == 0:
+            if use_envelopes and total_weight == 0:
                 for pb in exportable_bones_list:
                     weight = pb.bone.envelope_weight * pb.evaluate_envelope(model_mat @ v.co)
                     if weight:
@@ -491,11 +593,6 @@ class DmxWriter:
                     link[1] *= 1 / total_weight
 
             if amod_vg and total_weight > 0:
-                amod_vg_weight = 0
-                for v_group in v.groups:
-                    if v_group.group == amod_vg.index:
-                        amod_vg_weight = v_group.weight
-                        break
                 if amod.invert_vertex_group:
                     amod_vg_weight = 1 - amod_vg_weight
                 for link in weights:
@@ -530,8 +627,13 @@ class DmxWriter:
             ob = bake.object
             assert isinstance(ob.data, bpy.types.Mesh)
 
+            _src_mt = getattr(bake.src.vs, 'mesh_type', 'DEFAULT') if bake.src else 'DEFAULT'
+            # DME mode embeds collision in the model DMX as DmePhysicsShape, which
+            # $rendermesh skips and $datamodelphysics reads.
+            shape_class = "DmePhysicsShape" if (self.dme_mode and not self.proxy_only
+                                                and _src_mt == 'COLLISION') else "DmeMesh"
             vertex_data = dm.add_element("bind", "DmeVertexData", id=bake.name + "verts")
-            DmeMesh = dm.add_element(bake.name, "DmeMesh", id=bake.name + "mesh")
+            DmeMesh = dm.add_element(bake.name, shape_class, id=bake.name + "mesh")
             DmeMesh["visible"] = True
             DmeMesh["bindState"] = vertex_data
             DmeMesh["currentState"] = vertex_data
@@ -557,7 +659,6 @@ class DmxWriter:
             self.DmeModel_transforms.append(self._make_transform(bake.name, trfm_mat, "ob_base" + bake.name))
 
             _limit_mode = getattr(bpy.context.scene.vs, 'vertex_influence_limit_mode', 'AUTO')
-            _src_mt = getattr(bake.src.vs, 'mesh_type', 'DEFAULT') if bake.src else 'DEFAULT'
             if _src_mt == 'COLLISION':
                 weight_link_limit = 1
             elif _src_mt == 'CLOTHPROXY':
@@ -592,16 +693,12 @@ class DmxWriter:
             vertex_data["jointCount"] = jointCount
 
             num_verts = len(ob.data.vertices)
-            num_loops = len(ob.data.loops)
-            norms = [None] * num_loops
-            texco = ordered_set.OrderedSet()
+
             face_sets = collections.OrderedDict()
-            texcoIndices = [None] * num_loops
             jointWeights = []
             jointIndices = []
             balance = bake.stereo_balance(ob, self._warning)
             cloth_weights = {}
-            Indices = [-1] * num_loops
 
             if cloth_groups:
                 for vgroup in cloth_groups:
@@ -614,28 +711,26 @@ class DmxWriter:
 
             bench.report("object setup")
 
-            for v in ob.data.vertices:
-                v.select = False
-                if cloth_groups:
-                    for vgroup in cloth_groups:
+            if cloth_groups:
+                for vgroup in cloth_groups:
+                    remap_entry = next((r for r in ob.vs.vertex_map_remaps if r.group == vgroup.name), None)
+                    weights = cloth_weights[vgroup.name]
+                    for vi in range(num_verts):
                         try:
-                            w = vgroup.weight(v.index)
-                            for r in ob.vs.vertex_map_remaps:
-                                if r.group == vgroup.name:
-                                    w = remap(w, 0.0, 1.0, r.min, r.max)
-                                    break
-                            cloth_weights[vgroup.name][v.index] = w
+                            w = vgroup.weight(vi)
+                            if remap_entry:
+                                w = remap(w, 0.0, 1.0, remap_entry.min, remap_entry.max)
+                            weights[vi] = w
                         except RuntimeError:
-                            for r in ob.vs.vertex_map_remaps:
-                                if r.group == vgroup.name:
-                                    cloth_weights[vgroup.name][v.index] = r.min
-                                    break
+                            if remap_entry:
+                                weights[vi] = remap_entry.min
 
-                if have_weightmap:
+            if have_weightmap:
+                for links in ob_weights:
                     weights_row = [0.0] * jointCount
                     indices_row = [0] * jointCount
                     total = 0
-                    for i, link in enumerate(ob_weights[v.index]):
+                    for i, link in enumerate(links):
                         indices_row[i] = link[0]
                         weights_row[i] = link[1]
                         total += link[1]
@@ -644,33 +739,43 @@ class DmxWriter:
                     jointWeights.extend(weights_row)
                     jointIndices.extend(indices_row)
 
-                if v.index % 50 == 0:
-                    bpy.context.window_manager.progress_update(v.index / num_verts)
-
             bench.report("verts")
 
-            for loop in [ob.data.loops[i] for poly in ob.data.polygons for i in poly.loop_indices]:
-                texcoIndices[loop.index] = texco.add(datamodel.Vector2(uv_layer[loop.index].uv))  # pyright: ignore
-                norms[loop.index] = datamodel.Vector3(loop.normal)
-                Indices[loop.index] = loop.vertex_index
+            # Mesh loops are stored polygon by polygon, so loop index order is face order.
+            mesh = ob.data
+            Indices = _read_ints(mesh.loops, "vertex_index").tolist()
+            if hasattr(mesh, "corner_normals"):
+                nrm = _read_floats(mesh.corner_normals, "vector", 3)
+            else:
+                nrm = _read_floats(mesh.loops, "normal", 3)
+            norms = _rows(nrm, 3)
+            texco, texcoIndices = _dedup_pairs(_read_floats(uv_layer, "uv", 2))
+            positions = _read_floats(mesh.vertices, "co", 3)
+            uv_flat = {uv.name: _read_floats(uv.data, "uv", 2) for uv in mesh.uv_layers}
+            poly_data = (_read_ints(mesh.polygons, "loop_start"), _read_ints(mesh.polygons, "loop_total"),
+                         _read_ints(mesh.polygons, "material_index"))
 
             bench.report("loops")
 
-            bpy.context.view_layer.objects.active = ob
-            bpy.ops.object.mode_set(mode="EDIT")
-            bm = bmesh.from_edit_mesh(ob.data)
-            bm.verts.ensure_lookup_table()
-            bm.faces.ensure_lookup_table()
+            # Only $N vertex groups and string layers still need BMesh; built on demand.
+            bm = None
+            def get_bm():
+                nonlocal bm
+                if bm is None:
+                    bm = bmesh.new()
+                    bm.from_mesh(ob.data)
+                    bm.verts.ensure_lookup_table()
+                return bm
 
-            vertex_data[keywords["pos"]] = datamodel.make_array((v.co for v in bm.verts), datamodel.Vector3)
-            vertex_data[keywords["pos"] + "Indices"] = datamodel.make_array((l.vert.index for f in bm.faces for l in f.loops), int)
+            vertex_data[keywords["pos"]] = datamodel.make_vector_array(_rows(positions, 3), datamodel.Vector3)
+            vertex_data[keywords["pos"] + "Indices"] = datamodel.make_array(Indices, int)
 
             if source2 and src_mt != 'COLLISION':
-                self._write_source2_layers(vertex_data, fmt, bm, ob, bake)
+                self._write_source2_layers(vertex_data, fmt, get_bm, ob, bake, uv_flat)
                 bench.report("Source 2 vertex data")
             else:
                 fmt.append("textureCoordinates")
-                vertex_data["textureCoordinates"] = datamodel.make_array(texco, datamodel.Vector2)
+                vertex_data["textureCoordinates"] = datamodel.make_vector_array(texco, datamodel.Vector2)
                 vertex_data["textureCoordinatesIndices"] = datamodel.make_array(texcoIndices, int)
 
             if have_weightmap:
@@ -678,10 +783,21 @@ class DmxWriter:
                 vertex_data[keywords["weight_indices"]] = datamodel.make_array(jointIndices, int)
                 fmt.extend([keywords["weight"], keywords["weight_indices"]])
 
-            deform_layer = bm.verts.layers.deform.active
+            pulse_streams = {}
+            if pulsemodel_vertex_data_enabled() and src_mt == 'DEFAULT':
+                if ob.vs.use_toon_edgeline:
+                    pulse_streams['toonoutline$0'] = (ob.vs.toon_edgeline_vertexgroup, True)
+                if ob.vs.non_exportable_vgroup:
+                    pulse_streams['cullvertex$0'] = (ob.vs.non_exportable_vgroup, False)
+                if ob.vs.generate_backface:
+                    pulse_streams['backface$0'] = (ob.vs.backface_vgroup, False)
+
+            # Configured PulseModel streams take precedence over groups with the same name.
+            stream_groups = [g for g in ob.vertex_groups
+                             if re.fullmatch(r".+\$[0-9]+", g.name) and g.name not in pulse_streams]
+            deform_layer = get_bm().verts.layers.deform.active if stream_groups else None
             if deform_layer:
-                # Any group named "<name>$<N>" is written as a per-vertex float stream
-                for vgroup in (g for g in ob.vertex_groups if re.fullmatch(r".+\$[0-9]+", g.name)):
+                for vgroup in stream_groups:
                     fmt.append(vgroup.name)
                     values = [v[deform_layer].get(vgroup.index, 0) for v in bm.verts]
                     value_set = ordered_set.OrderedSet(values)
@@ -689,6 +805,20 @@ class DmxWriter:
                     vertex_data[vgroup.name + "Indices"] = datamodel.make_array(
                         (value_set.index(values[i]) for i in Indices), int
                     )
+
+            for stream_name, (group_name, invert) in pulse_streams.items():
+                group = ob.vertex_groups.get(group_name) if group_name else None
+                if group_name and group is None:
+                    self._warning(f"Vertex group '{group_name}' not found on '{bake.name}' for {stream_name}; using default weights.")
+                values = [0.0] * num_verts
+                if group is not None:
+                    for vertex in ob.data.vertices:
+                        values[vertex.index] = next((g.weight for g in vertex.groups if g.group == group.index), 0.0)
+                if invert:
+                    values = [1.0 - weight for weight in values]
+                fmt.append(stream_name)
+                vertex_data[stream_name] = datamodel.make_array(values, float)
+                vertex_data[stream_name + 'Indices'] = datamodel.make_array(Indices, int)
 
             if bake.shapes and bake.balance_vg:
                 vertex_data[keywords["balance"]] = datamodel.make_array(balance, float)
@@ -699,7 +829,7 @@ class DmxWriter:
                 for vgroup in cloth_groups:
                     fmt.append(vgroup.name + "$0")
 
-            vertex_data[keywords["norm"]] = datamodel.make_array(norms, datamodel.Vector3)
+            vertex_data[keywords["norm"]] = datamodel.make_vector_array(norms, datamodel.Vector3)
             vertex_data[keywords["norm"] + "Indices"] = datamodel.make_array(range(len(norms)), int)
 
             if cloth_groups:
@@ -709,72 +839,62 @@ class DmxWriter:
 
             bench.report("insert")
 
-            self._write_facesets(DmeMesh, bm, ob, bake, src_mt, face_sets, bench)
+            self._write_facesets(DmeMesh, poly_data, ob, bake, src_mt, face_sets, bench)
 
-            bpy.ops.object.mode_set(mode="OBJECT")
-            del bm
+            if bm is not None:
+                bm.free()
 
             self._write_shapes(DmeMesh, ob, bake, balance, texcoIndices, num_verts, combination_operator, bench)
 
-    def _write_source2_layers(self, vertex_data, fmt, bm, ob, bake):
-        dm = self.dm
-        loops = [loop for face in bm.faces for loop in face.loops]
-        loop_indices = datamodel.make_array([loop.index for loop in loops], int)
-        layerGroups = bm.loops.layers
+    def _write_source2_layers(self, vertex_data, fmt, get_bm, ob, bake, uv_flat):
+        mesh = ob.data
+        loop_indices = datamodel.make_array(range(len(mesh.loops)), int)
+        export_suffix = re.compile(r".*\$[0-9]+")
 
-        class exportLayer:
-            def __init__(self, layer, exportName=None):
-                self._layer = layer
-                self.name = exportName or layer.name
-            def data_for(self, loop):
-                return loop[self._layer]
-
-        def get_bmesh_layers(group):
-            return [exportLayer(l) for l in group if re.match(r".*\$[0-9]+", l.name)]
-
+        # (blender name, dmx name)
         defaultUvLayer = "texcoord$0"
-        uv_layers_to_export = list(get_bmesh_layers(layerGroups.uv))
-        if defaultUvLayer not in [l.name for l in uv_layers_to_export]:
-            uv_render = next((l.name for l in ob.data.uv_layers if l.active_render and l not in uv_layers_to_export), None)
+        uv_layers_to_export = [(uv.name, uv.name) for uv in mesh.uv_layers if export_suffix.match(uv.name)]
+        if defaultUvLayer not in [d for _, d in uv_layers_to_export]:
+            uv_render = next((l.name for l in mesh.uv_layers if l.active_render), None)
             if uv_render:
-                uv_layers_to_export.append(exportLayer(layerGroups.uv[uv_render], defaultUvLayer))
+                uv_layers_to_export.append((uv_render, defaultUvLayer))
                 print(f"- Exporting '{uv_render}' as {defaultUvLayer}")
             else:
                 self._warning(f"'{bake.name}' has no UV map named {defaultUvLayer} and no fallback was found.")
 
         _second_uv_dmx = "texcoord$1"
-        if _second_uv_dmx not in [l.name for l in uv_layers_to_export]:
-            _exported_uv_blender_names = {l._layer.name for l in uv_layers_to_export}
+        if _second_uv_dmx not in [d for _, d in uv_layers_to_export]:
+            _exported_uv_blender_names = {b for b, _ in uv_layers_to_export}
             _second_uv = next(
-                (uv for uv in ob.data.uv_layers if uv.name not in _exported_uv_blender_names),
+                (uv for uv in mesh.uv_layers if uv.name not in _exported_uv_blender_names),
                 None
             )
             if _second_uv is not None:
-                uv_layers_to_export.append(exportLayer(layerGroups.uv[_second_uv.name], _second_uv_dmx))
+                uv_layers_to_export.append((_second_uv.name, _second_uv_dmx))
                 print(f"- Exporting '{_second_uv.name}' as {_second_uv_dmx}")
 
-        for layer in uv_layers_to_export:
-            uv_set = ordered_set.OrderedSet()
-            uv_indices = []
-            for uv in (layer.data_for(loop).uv for loop in loops):
-                uv_indices.append(uv_set.add(datamodel.Vector2(uv)))
-            vertex_data[layer.name] = datamodel.make_array(uv_set, datamodel.Vector2)
-            vertex_data[layer.name + "Indices"] = datamodel.make_array(uv_indices, int)
-            fmt.append(layer.name)
+        for blender_name, dmx_name in uv_layers_to_export:
+            uv_set, uv_indices = _dedup_pairs(uv_flat[blender_name])
+            vertex_data[dmx_name] = datamodel.make_vector_array(uv_set, datamodel.Vector2)
+            vertex_data[dmx_name + "Indices"] = datamodel.make_array(uv_indices, int)
+            fmt.append(dmx_name)
 
-        def make_vertex_layer(layer, array_type):
-            vertex_data[layer.name] = datamodel.make_array([layer.data_for(l) for l in loops], array_type)
-            vertex_data[layer.name + "Indices"] = loop_indices
-            fmt.append(layer.name)
+        def make_vertex_layer(name, values, array_type):
+            make = datamodel.make_vector_array if array_type is datamodel.Vector4 else datamodel.make_array
+            vertex_data[name] = make(values, array_type)
+            vertex_data[name + "Indices"] = loop_indices
+            fmt.append(name)
 
-        _color_groups = [layerGroups.color]
-        if hasattr(layerGroups, "float_color"):
-            _color_groups.append(layerGroups.float_color)
+        def corner_attrs(data_type):
+            return [a for a in mesh.attributes if a.domain == 'CORNER' and a.data_type == data_type]
 
+        # color_srgb gives byte colors as c / 255; BMesh gives c * (1 / 255) in float32,
+        # which can differ by an ulp, so the byte is recovered and re-scaled the BMesh way.
+        _byte_scale = np.float32(1.0) / np.float32(255.0)
         _seen_color_dmx = set()
-        for _color_group in _color_groups:
-            for _color_layer in _color_group:
-                _blender_name = _color_layer.name
+        for data_type, prop in (('BYTE_COLOR', "color_srgb"), ('FLOAT_COLOR', "color")):
+            for attr in corner_attrs(data_type):
+                _blender_name = attr.name
                 if _blender_name in vertex_maps:
                     _export_name = vertex_maps[_blender_name].lower()
                 elif _blender_name.lower() == "color":
@@ -784,35 +904,47 @@ class DmxWriter:
                 if _export_name in _seen_color_dmx:
                     continue
                 _seen_color_dmx.add(_export_name)
-                make_vertex_layer(exportLayer(_color_layer, _export_name), datamodel.Vector4)
+                rgba = np.frombuffer(_read_floats(attr.data, prop, 4), dtype=np.float32)
+                if data_type == 'BYTE_COLOR':
+                    rgba = np.rint(rgba * 255.0).astype(np.float32) * _byte_scale
+                make_vertex_layer(_export_name, rgba.reshape(-1, 4).tolist(), datamodel.Vector4)
 
-        for layer in get_bmesh_layers(layerGroups.float):
-            make_vertex_layer(layer, float)
-        for layer in get_bmesh_layers(layerGroups.int):
-            make_vertex_layer(layer, int)
-        for layer in get_bmesh_layers(layerGroups.string):
-            make_vertex_layer(layer, str)
+        for attr in corner_attrs('FLOAT'):
+            if export_suffix.match(attr.name):
+                make_vertex_layer(attr.name, _read_floats(attr.data, "value", 1).tolist(), float)
+        for attr in corner_attrs('INT'):
+            if export_suffix.match(attr.name):
+                make_vertex_layer(attr.name, _read_ints(attr.data, "value").tolist(), int)
+        string_layers = [a.name for a in corner_attrs('STRING') if export_suffix.match(a.name)]
+        if string_layers:
+            bm = get_bm()
+            loops = [loop for face in bm.faces for loop in face.loops]
+            for name in string_layers:
+                layer = bm.loops.layers.string[name]
+                make_vertex_layer(name, [loop[layer] for loop in loops], str)
 
-    def _write_facesets(self, DmeMesh, bm, ob, bake, src_mt, face_sets, bench):
+    def _write_facesets(self, DmeMesh, poly_data, ob, bake, src_mt, face_sets, bench):
         dm = self.dm
         materials = self.materials
         bad_face_mats = 0
-        num_polys = len(bm.faces)
-        two_percent = int(num_polys / 50)
-        print("Polygons: ", debug_only=True, newline=False)
+        loop_starts, loop_totals, mat_indices = poly_data
 
+        resolved = {}
         bm_face_sets = collections.defaultdict(list)
-        for p, face in enumerate(bm.faces):
-            if src_mt in ('COLLISION', 'CLOTHPROXY'):
-                mat_name, mat_ok = "no_material", True
-            else:
-                mat_name, mat_ok = self.resolve_material(ob, face.material_index)
+        for start, total, mat_index in zip(loop_starts, loop_totals, mat_indices):
+            res = resolved.get(mat_index)
+            if res is None:
+                if src_mt in ('COLLISION', 'CLOTHPROXY'):
+                    res = ("no_material", True)
+                else:
+                    res = self.resolve_material(ob, mat_index)
+                resolved[mat_index] = res
+            mat_name, mat_ok = res
             if not mat_ok:
                 bad_face_mats += 1
-            bm_face_sets[mat_name].extend((*(l.index for l in face.loops), -1))
-            if two_percent and p % two_percent == 0:
-                print(".", debug_only=True, newline=False)
-                bpy.context.window_manager.progress_update(p / num_polys)
+            face_list = bm_face_sets[mat_name]
+            face_list.extend(range(start, start + total))
+            face_list.append(-1)
 
         for mat_name, indices in bm_face_sets.items():
             material_elem = materials.get(mat_name)
@@ -827,7 +959,6 @@ class DmxWriter:
             face_set["material"] = material_elem
             face_set["faces"] = datamodel.make_array(indices, int)
 
-        print(debug_only=True)
         DmeMesh["faceSets"] = datamodel.make_array(list(face_sets.values()), datamodel.Element)
 
         if bad_face_mats:
@@ -835,6 +966,17 @@ class DmxWriter:
         bench.report("polys")
 
     # -- shapes --------------------------------------------------------------
+    @staticmethod
+    def _shape_candidates(shape, base_co, base_nrm, short_nrm, preserve_basis_normals):
+        s_co = np.frombuffer(_read_floats(shape.vertices, "co", 3), dtype=np.float32).reshape(-1, 3)
+        v_cand = np.flatnonzero(np.any(s_co != base_co, axis=1))
+        if preserve_basis_normals:
+            l_cand = short_nrm
+        else:
+            s_nrm = np.frombuffer(_read_floats(shape.loops, "normal", 3), dtype=np.float32).reshape(-1, 3)
+            l_cand = np.union1d(np.flatnonzero(np.any(s_nrm != base_nrm, axis=1)), short_nrm)
+        return v_cand.tolist(), l_cand.tolist()
+
     def _write_shapes(self, DmeMesh, ob, bake, balance, texcoIndices, num_verts, combination_operator, bench):
         dm = self.dm
         keywords = self.keywords
@@ -849,6 +991,8 @@ class DmxWriter:
             num_correctives = num_wrinkles = 0
 
             bake_flex_mode = getattr(getattr(bake.src, 'vs', None), 'flex_controller_mode', 'DME')
+            if self.flex_controller_mode == 'ADVANCED':
+                bake_flex_mode = 'ADVANCED'
             dme_corrective_names = get_dme_corrective_delta_names(bake.src) if bake_flex_mode == 'DME' else None
             dme_delta_map = get_dme_delta_name_map(bake.src) if bake_flex_mode == 'DME' else None
             dme_split_map = get_dme_split_delta_map(bake.src) if bake_flex_mode == 'DME' else {}
@@ -857,6 +1001,12 @@ class DmxWriter:
             for _idx in get_dme_split_delta_conflicts(bake.src) if bake_flex_mode == 'DME' else ():
                 _ov = bake.src.vs.dme_delta_overrides[_idx]
                 self._warning(get_id("exporter_warn_dme_split_on_controller", True).format(bake.name, _ov.shapekey))
+
+            base_co = np.frombuffer(_read_floats(ob.data.vertices, "co", 3), dtype=np.float32).reshape(-1, 3)
+            base_nrm = np.frombuffer(_read_floats(ob.data.loops, "normal", 3), dtype=np.float32).reshape(-1, 3)
+            # An unchanged normal still fails the dot test below when shorter than 0.999,
+            # so those loops are always candidates.
+            short_nrm = np.flatnonzero(np.einsum('ij,ij->i', base_nrm, base_nrm) < 0.9981)
 
             for shape_name, shape in bake.shapes.items():
                 wrinkle_scale = 0
@@ -870,11 +1020,13 @@ class DmxWriter:
                     shape_name, _extra_delta_names, _split_base = resolve_dme_delta_names(
                         shape_name, dme_corrective_names, dme_delta_map, dme_split_map)
                 else:
-                    corrective = getCorrectiveShapeSeparator() in shape_name
+                    separator = self.corrective_separator
+                    corrective = separator in shape_name and not (
+                        bake_flex_mode == 'ADVANCED' and shape_name in self.raw_control_names)
 
                     if corrective:
                         driver_targets = ordered_set.OrderedSet(flex.getCorrectiveShapeKeyDrivers(bake.src.data.shape_keys.key_blocks[shape_name]) or [])
-                        name_targets = ordered_set.OrderedSet(shape_name.split(getCorrectiveShapeSeparator()))
+                        name_targets = ordered_set.OrderedSet(shape_name.split(separator))
                         corrective_targets = driver_targets or name_targets
                         corrective_targets.source = shape_name
 
@@ -884,8 +1036,8 @@ class DmxWriter:
                             continue
                         corrective_shapes_seen.append(corrective_targets)
 
-                        if driver_targets and driver_targets != name_targets:
-                            generated = getCorrectiveShapeSeparator().join(driver_targets)
+                        if bake_flex_mode != 'ADVANCED' and driver_targets and driver_targets != name_targets:
+                            generated = separator.join(driver_targets)
                             print(f"- Renamed shape key '{shape_name}' to '{generated}' to match corrective drivers.")
                             shape_name = generated
                         num_correctives += 1
@@ -928,7 +1080,18 @@ class DmxWriter:
                         else:
                             self._warning(get_id("exporter_err_missing_corrective_target", format_string=True).format(shape_name, ct_name))
 
-                for ob_vert in ob.data.vertices:
+                # Only elements that differ at all can pass the checks below, so the
+                # per-element mathutils code runs on those alone.
+                fast = not corrective and not wrinkle_scale
+                if fast:
+                    v_cand, l_cand = self._shape_candidates(shape, base_co, base_nrm, short_nrm,
+                                                            bake.src.data.vs.bake_shapekey_as_basis_normals)
+                    verts_iter = (ob.data.vertices[i] for i in v_cand)
+                    loops_iter = (ob.data.loops[i] for i in l_cand)
+                else:
+                    verts_iter, loops_iter = ob.data.vertices, ob.data.loops
+
+                for ob_vert in verts_iter:
                     sv = shape.vertices[ob_vert.index]
                     if ob_vert.co != sv.co:
                         delta = sv.co - ob_vert.co
@@ -940,7 +1103,7 @@ class DmxWriter:
                             shape_posIdx.append(ob_vert.index)
 
                 preserve_basis_normals = bake.src.data.vs.bake_shapekey_as_basis_normals
-                for ob_loop in ob.data.loops:
+                for ob_loop in loops_iter:
                     sl = shape.loops[ob_loop.index]
                     norm = ob_loop.normal if preserve_basis_normals else sl.normal
                     if corrective:
@@ -1036,8 +1199,7 @@ class DmxWriter:
             if not combination_operator:
                 raise RuntimeError("Internal error: shapes exist but no DmeCombinationOperator was created.")
             targets = combination_operator["targets"]
-            # Match any delta rule, allowing missing targets to bind to this mesh.
-            # Preserve resolved targets so each rule set drives only one mesh.
+            # Each rule set binds once, and multiple sets can drive the same mesh.
             added = False
             for elem in targets:
                 if elem.type != "DmeFlexRules":
@@ -1048,7 +1210,6 @@ class DmxWriter:
                 if any(d.name in shape_names for d in elem["deltaStates"]):
                     elem["target"] = DmeMesh
                     added = True
-                    break
             if not added:
                 targets.append(DmeMesh)
 
@@ -1140,21 +1301,60 @@ class DmxWriter:
         assert isinstance(evaluated, bpy.types.Object) and evaluated.pose
         return [evaluated.pose.bones[b.name] for b in self.exportable_bones]
 
-    def _write_animation(self, bench):
-        dm = self.dm
+    def _prepare_anim_pose(self, anim_name):
+        if self.armature.data.vs.reset_pose_per_anim:
+            self.r.warnUnkeyframedPose(anim_name)
+            for pb in self.armature.pose.bones:
+                pb.matrix_basis.identity()
+        else:
+            self.r.applyUnkeyframedSourcePose()
+
+    def _write_animation_list(self, clips):
         armature_name = self.armature_src.name if self.armature_src else self.name
-        ad = self.armature.animation_data
+        DmeAnimationList = self.dm.add_element(armature_name, "DmeAnimationList", id=armature_name + "list")
+        DmeAnimationList["animations"] = datamodel.make_array(clips, datamodel.Element)
+        self.root["animationList"] = DmeAnimationList
+
+    def _write_embedded_animations(self, bench):
+        # Meshes are already written at REST; sample every clip in POSE, then put the
+        # shared baked armature back as later tasks of this export id expect it.
+        scene = bpy.context.scene
+        arm_data = self.armature.data
+        ad = self.armature.animation_data or self.armature.animation_data_create()
+        saved_action, saved_slot = ad.action, ad.action_slot
+        saved_pose, saved_frame = arm_data.pose_position, scene.frame_current
+        clips = []
+        try:
+            arm_data.pose_position = "POSE"
+            for name, action, slot in self.anim_jobs:
+                ad.action = action
+                if slot is not None:
+                    ad.action_slot = slot
+                print(f"- Embedding animation \"{name}\"")
+                self._prepare_anim_pose(name)
+                # Element ids must stay unique with several clips in one datamodel.
+                clips.append(self._write_clip(name, name + ":", ad, bench))
+        finally:
+            ad.action = saved_action
+            if saved_action is not None and saved_slot is not None:
+                ad.action_slot = saved_slot
+            for pb in self.armature.pose.bones:
+                pb.matrix_basis.identity()
+            arm_data.pose_position = saved_pose
+            scene.frame_set(saved_frame)
+        if clips:
+            self._write_animation_list(clips)
+
+    def _write_clip(self, name, id_prefix, ad, bench):
+        dm = self.dm
         # first_frame offsets sampling so actions that don't start on frame 0 export their real
         # motion; the DmeChannelsClip timeline stays 0-based. See animationFrameRange.
         first_frame, anim_len = animationFrameRange(ad) if ad else (0, 0)
         fps = bpy.context.scene.render.fps * bpy.context.scene.render.fps_base
 
-        DmeChannelsClip = dm.add_element(self.name, "DmeChannelsClip", id=self.name + "clip")
-        DmeAnimationList = dm.add_element(armature_name, "DmeAnimationList", id=armature_name + "list")
-        DmeAnimationList["animations"] = datamodel.make_array([DmeChannelsClip], datamodel.Element)
-        self.root["animationList"] = DmeAnimationList
+        DmeChannelsClip = dm.add_element(name, "DmeChannelsClip", id=name + "clip")
 
-        DmeTimeFrame = dm.add_element("timeframe", "DmeTimeFrame", id=self.name + "time")
+        DmeTimeFrame = dm.add_element("timeframe", "DmeTimeFrame", id=name + "time")
         duration = anim_len / fps
         if dm.format_ver >= 11:
             DmeTimeFrame["duration"] = datamodel.Time(duration)
@@ -1162,6 +1362,7 @@ class DmxWriter:
             DmeTimeFrame["durationTime"] = int(duration * 10000)
         DmeTimeFrame["scale"] = 1.0
         DmeChannelsClip["timeFrame"] = DmeTimeFrame
+        # Model 22 and newer support a float frameRate.
         DmeChannelsClip["frameRate"] = fps if self.source2 else int(fps)
 
         channels = DmeChannelsClip["channels"] = datamodel.make_array([], datamodel.Element)
@@ -1179,7 +1380,8 @@ class DmxWriter:
             bone_channels[bone.name] = []
             for suffix, attr, type_name, dm_type in channel_template:
                 ch_name = export_name + suffix
-                cur = dm.add_element(ch_name, "DmeChannel", id=bone.name + suffix)
+                ch_id = id_prefix + ch_name
+                cur = dm.add_element(ch_name, "DmeChannel", id=id_prefix + bone.name + suffix)
                 cur["toAttribute"] = attr
                 cur["toElement"] = (self.bone_elements[bone.name] if bone else self.DmeModel)["transform"]
                 cur["mode"] = 1
@@ -1187,8 +1389,8 @@ class DmxWriter:
                     # scale is a single float on the transform, not an indexed vector component
                     cur["fromIndex"] = 0
                     cur["toIndex"] = 0
-                layer = dm.add_element(type_name + " log", f"Dme{type_name}LogLayer", ch_name + "loglayer")
-                cur["log"] = dm.add_element(type_name + " log", f"Dme{type_name}Log", ch_name + "log")
+                layer = dm.add_element(type_name + " log", f"Dme{type_name}LogLayer", ch_id + "loglayer")
+                cur["log"] = dm.add_element(type_name + " log", f"Dme{type_name}Log", ch_id + "log")
                 cur["log"]["layers"] = datamodel.make_array([layer], datamodel.Element)
                 layer["times"] = datamodel.make_array([], datamodel.Time if dm.format_ver > 11 else int)
                 layer["values"] = datamodel.make_array([], dm_type)
@@ -1239,6 +1441,7 @@ class DmxWriter:
                 print(".", debug_only=True, newline=False)
 
         print(debug_only=True)
+        return DmeChannelsClip
 
     # -- write-out -----------------------------------------------------------
     def _write_out(self, bench) -> int:

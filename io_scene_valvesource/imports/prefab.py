@@ -10,7 +10,7 @@ boneIDs map that only exists while a skeleton is being built.
 """
 
 from ..utils import (import_jigglebones_from_dmx_elements, import_hitboxes_from_dmx_root,
-                     import_proc_bones_from_dmx_elements)
+                     import_proc_bones_from_dmx_elements, bone_exportname_cache_scope)
 
 import bpy
 
@@ -35,6 +35,11 @@ def read_dmx_prefab(ctx, filepath: str, arm, parsed=None) -> tuple[int, int, int
 
     Returns (jigglebones, hitboxes, procbones, attachments).
     """
+    with bone_exportname_cache_scope():
+        return _read_dmx_prefab(ctx, filepath, arm, parsed)
+
+
+def _read_dmx_prefab(ctx, filepath: str, arm, parsed) -> tuple[int, int, int, int]:
     from .dmx import load_dmx, read_skeleton
 
     parsed = parsed or load_dmx(filepath)
@@ -82,7 +87,7 @@ def read_dmx_prefab(ctx, filepath: str, arm, parsed=None) -> tuple[int, int, int
 def _build_dmx_attachments(ctx, skel, arm) -> int:
     """Unlike the model-import path, bones are resolved by name - there is no boneIDs map
     when the armature was not built from this file."""
-    from .build import build_attachment_empty
+    from .build import build_attachment
 
     bone_lower = {b.name.lower(): b.name for b in arm.data.bones}
     coll = bpy.context.scene.collection
@@ -98,7 +103,7 @@ def _build_dmx_attachments(ctx, skel, arm) -> int:
         if not resolved:
             missing.append(dmx_bone)
             continue
-        build_attachment_empty(ctx, coll, arm, att.name, resolved, att.matrix)
+        build_attachment(ctx, coll, arm, att.name, resolved, att.matrix)
         created += 1
     if missing:
         ctx.warning(f"DMX attachments: {len(missing)} skipped, bone(s) not found on "
@@ -107,6 +112,12 @@ def _build_dmx_attachments(ctx, skel, arm) -> int:
 
 
 def apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
+    # Each reader maps every bone by export name; uncached that is quadratic in bone count.
+    with bone_exportname_cache_scope():
+        _apply_dmx_prefab_data(ctx, smd, parsed, skel)
+
+
+def _apply_dmx_prefab_data(ctx, smd, parsed, skel) -> None:
     jiggle_elems = [
         (b.element, smd.boneIDs.get(b.source_id))
         for b in skel.bones if b.element is not None and b.element.type == "DmeJiggleBone"

@@ -18,7 +18,7 @@
 #
 # ##### END GPL LICENSE BLOCK #####
 
-import bpy, struct, time, collections, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
+import bpy, struct, time, collections, contextlib, os, sys, builtins, itertools, dataclasses, typing, mathutils, re, math
 from typing import Optional
 # NB: `math` and `Optional` above are re-exported to every `from .utils import *`
 # consumer in exports/ - they are used there without a local import.
@@ -52,7 +52,6 @@ PHYS = 0x3 # $collisionmesh, $collisionjoints
 ANIM = 0x4 # $sequence, $animation
 FLEX = 0x6 # $model VTA
 
-MAX_MESH_SPLIT = 16
 
 mesh_compatible = ('MESH', 'TEXT', 'FONT', 'SURFACE', 'META', 'CURVE')
 modifier_compatible = {'MESH', 'CURVE', 'SURFACE', 'FONT', 'LATTICE'}
@@ -99,18 +98,17 @@ hitbox_group = [
 class ExportFormat:
     SMD = 1
     DMX = 2
-    FBX = 3
 
 # Engine only separates GoldSrc from Source - which Source engine a DMX targets is
 # carried by dmx_format's compiler suffix, not by a second engine setting.
 export_formats_by_engine = {
     'GOLDSRC': ('SMD',),
-    'SOURCE': ('SMD', 'DMX', 'FBX'),
+    'SOURCE': ('SMD', 'DMX'),
 }
 
 class Compiler:
     UNKNOWN = 0
-    STUDIOMDL = 1 # Source 1 (studiomdl / PulseMDL / PulseModel)
+    STUDIOMDL = 1 # Source 1 (studiomdl / PulseModel)
     RESOURCECOMPILER = 2 # Source 2 pre-Alyx (Dota 2)
     MODELDOC = 3 # Source 2 post-Alyx (Alyx / CS2 / Deadlock)
 
@@ -119,6 +117,15 @@ class Compiler:
 # are Source 2. This suffix is the single source of truth for State.compiler.
 compiler_suffixes = {'': Compiler.STUDIOMDL, 'resourcecompiler': Compiler.RESOURCECOMPILER, 'modeldoc': Compiler.MODELDOC}
 compiler_to_suffix = {v: (f"_{k}" if k else "") for k, v in compiler_suffixes.items()}
+
+
+def pulsemodel_compiler_enabled():
+    vs = bpy.context.scene.vs
+    return vs.engine == 'SOURCE' and vs.dmx_format == '22'
+
+
+def pulsemodel_vertex_data_enabled():
+    return pulsemodel_compiler_enabled() and bpy.context.scene.vs.export_format == 'DMX'
 
 @dataclasses.dataclass(frozen = True)
 class dmx_version:
@@ -152,29 +159,26 @@ game_presets = {
 }
 
 def getAllDataNameTranslations(string : str) -> set[str]:
+    """Read data-name translations without changing Blender's language."""
+    import gettext
+
     if not bpy.app.translations.locales:
-        return { string } # Blender was compiled without translations
-    
-    translations = set()
-        
-    view_prefs = bpy.context.preferences.view
-    user_language = view_prefs.language
-    user_dataname_translate = view_prefs.use_translate_new_dataname
-        
-    try:
-        view_prefs.use_translate_new_dataname = True
-        for language in bpy.app.translations.locales:
-            if language == "hr_HR" and bpy.app.version < (4,5,3):
-                continue # enabling Croatian generates a C error message in the console, and it's very sparsely translated anyway
-            try:
-                view_prefs.language = language
-                translations.add(bpy.app.translations.pgettext_data(string))
-            except:
-                pass
-    finally:
-        view_prefs.language = user_language
-        view_prefs.use_translate_new_dataname = user_dataname_translate
-    
+        return {string}
+
+    translations = {string, bpy.app.translations.pgettext_data(string)}
+    locale_dir = bpy.utils.system_resource('DATAFILES', path='locale')
+    if not locale_dir:
+        return translations
+
+    for language in os.listdir(locale_dir):
+        catalog_path = os.path.join(locale_dir, language, 'LC_MESSAGES', 'blender.mo')
+        try:
+            with open(catalog_path, 'rb') as catalog_file:
+                catalog = gettext.GNUTranslations(catalog_file)
+            translations.add(catalog.gettext(string))
+        except (OSError, EOFError, ValueError, struct.error):
+            continue
+
     return translations
 
 class _StateMeta(type): # class properties are not supported below Python 3.9, so we use a metaclass instead
@@ -204,7 +208,6 @@ class _StateMeta(type): # class properties are not supported below Python 3.9, s
     @property
     def exportFormat(cls):
         fmt = bpy.context.scene.vs.export_format
-        if fmt == 'FBX': return ExportFormat.FBX
         return ExportFormat.DMX if fmt == 'DMX' and cls.datamodelEncoding != 0 else ExportFormat.SMD
 
     @property
@@ -261,13 +264,13 @@ class State(metaclass=_StateMeta):
 
     @classmethod
     def hook_events(cls):
-        if not cls.update_scene in depsgraph_update_post:
+        if cls._onDepsgraphUpdate not in depsgraph_update_post:
             depsgraph_update_post.append(cls._onDepsgraphUpdate)
             load_post.append(cls._onLoad)
 
     @classmethod
     def unhook_events(cls):
-        if cls.update_scene in depsgraph_update_post:
+        if cls._onDepsgraphUpdate in depsgraph_update_post:
             depsgraph_update_post.remove(cls._onDepsgraphUpdate)
             load_post.remove(cls._onLoad)
 
@@ -334,31 +337,34 @@ def find_or_add_material_path(scene, path: str) -> int:
     return len(scene.vs.material_paths) - 1
 
 
+def export_timings_enabled() -> bool:
+    prefs = get_addon_prefs()
+    return bpy.app.debug_value > 0 or bool(prefs and getattr(prefs, "print_export_timings", False))
+
 class BenchMarker:
     def __init__(self,indent = 0, prefix = None):
         self._indent = indent * 4
         self._prefix = "{}{}".format(" " * self._indent,prefix if prefix else "")
-        self.quiet = bpy.app.debug_value <= 0
+        self.quiet = not export_timings_enabled()
         self.reset()
 
     def reset(self):
-        self._last = self._start = time.time()
-        
+        self._last = self._start = time.perf_counter()
+
     def report(self,label = None, threshold = 0.0):
-        now = time.time()
+        now = time.perf_counter()
         elapsed = now - self._last
         if threshold and elapsed < threshold: return
 
         if not self.quiet:
             prefix = "{} {}:".format(self._prefix, label if label else "")
-            pad = max(0, 10 - len(prefix) + self._indent)
-            print("{}{}{:.4f}".format(prefix," " * pad, now - self._last))
+            print("{}{:.4f}s".format(prefix.ljust(32 + self._indent), elapsed))
         self._last = now
 
     def current(self):
-        return time.time() - self._last
+        return time.perf_counter() - self._last
     def total(self):
-        return time.time() - self._start
+        return time.perf_counter() - self._start
 
 def smdBreak(line):
     line = line.rstrip('\n')
@@ -503,8 +509,6 @@ def animationFrameRange(ad : bpy.types.AnimData):
 
 def getFileExt(flex=False, anim=False):
     fmt = bpy.context.scene.vs.export_format
-    if fmt == 'FBX':
-        return ".fbx"
     if State.datamodelEncoding != 0 and fmt == 'DMX':
         return ".dmx"
     else:
@@ -811,14 +815,27 @@ def is_bypassed_into_parent(col) -> bool:
     fold it into. Top-level bypassed collections behave as normal groups."""
     return col.vs.bypass and get_collection_parent_collection(col) is not None
 
+def _collection_own_export_objects(col) -> list[bpy.types.Object]:
+    result = list(col.objects)
+    for child in col.children:
+        if child.vs.bypass:
+            result.extend(_collection_own_export_objects(child))
+    return result
+
 def get_collection_export_objects(col) -> list[bpy.types.Object]:
     """The objects that belong to `col` for export purposes: its own objects
     plus, recursively, the objects of any child collections marked 'bypass'
     (those fold into this group instead of exporting separately)."""
-    result = list(col.objects)
-    for child in col.children:
-        if child.vs.bypass:
-            result.extend(get_collection_export_objects(child))
+    result = _collection_own_export_objects(col)
+    # Embedded mode writes collision as DmePhysicsShape in the model DMX, so COLLISION
+    # meshes rigged to this group's armature join it wherever they are collected.
+    arms = {ob for ob in result if ob.type == 'ARMATURE'}
+    if arms and prefab_mode_is_dme(bpy.context.scene):
+        members = set(result)
+        result.extend(ob for ob in bpy.context.scene.objects
+                      if ob.type == 'MESH' and ob not in members
+                      and getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'COLLISION'
+                      and get_armature(ob) in arms)
     return result
 
 def hasFlexControllerSource(source):
@@ -916,14 +933,22 @@ def make_export_list(scene: bpy.types.Scene):
     # Collections
     ungrouped_object_ids = State.exportableObjects.copy()
 
-    scene_groups = []
+    group_members = {}
+    absorbed = set()  # collision meshes another group pulls in (Embedded mode)
     for group in sorted(bpy.data.collections, key=lambda g: g.name.lower()):
-        valid = False
-        for obj in [obj for obj in get_collection_export_objects(group) if obj.session_uid in State.exportableObjects]:
+        members = [obj for obj in get_collection_export_objects(group) if obj.session_uid in State.exportableObjects]
+        group_members[group] = members
+        if shouldExportGroup(group):
+            own = set(_collection_own_export_objects(group))
+            absorbed.update(obj.session_uid for obj in members if obj not in own)
+
+    scene_groups = []
+    for group, members in group_members.items():
+        for obj in members:
             if not group.vs.mute and obj.type != 'ARMATURE' and obj.session_uid in ungrouped_object_ids:
                 ungrouped_object_ids.remove(obj.session_uid)
-            valid = True
-        if valid:
+        meshes = [obj for obj in members if obj.type != 'ARMATURE']
+        if members and not (meshes and all(obj.session_uid in absorbed for obj in meshes)):
             scene_groups.append(group)
 
     for g in scene_groups:
@@ -1268,62 +1293,47 @@ class VertexGroupNormalizer:
     def run(self):
         if not self.arm:
             return
+        self.deform_idx = {i for i, vg in enumerate(self.ob.vertex_groups) if vg.name in self.bone_names}
+        if not self.deform_idx:
+            return
         self._clean_weights()
         self._limit_influence()
         self._normalize_weights()
 
+    def _remove(self, to_remove: dict[int, list[int]]):
+        # One C-API call per group instead of one per vertex.
+        for group_idx, vert_indices in to_remove.items():
+            self.ob.vertex_groups[group_idx].remove(vert_indices)
+
     def _clean_weights(self):
-        # Collect all vertices to remove per group, then batch-remove in one call per group
-        # instead of one Blender C-API call per vertex.
+        deform_idx, tol = self.deform_idx, self.clean_tolerance
         to_remove: dict[int, list[int]] = collections.defaultdict(list)
         for v in self.ob.data.vertices:
             for g in v.groups:
-                if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names:
-                    if g.weight < self.clean_tolerance:
-                        to_remove[g.group].append(v.index)
-
-        for group_idx, vert_indices in to_remove.items():
-            if group_idx < len(self.ob.vertex_groups):
-                self.ob.vertex_groups[group_idx].remove(vert_indices)
+                if g.group in deform_idx and g.weight < tol:
+                    to_remove[g.group].append(v.index)
+        self._remove(to_remove)
 
     def _limit_influence(self):
+        deform_idx, limit = self.deform_idx, self.vgroup_limit
         to_remove: dict[int, list[int]] = collections.defaultdict(list)
-
         for v in self.ob.data.vertices:
-            groups = sorted(
-                (g for g in v.groups if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names),
-                key=lambda g: -g.weight
-            )
-            for g in groups[self.vgroup_limit:]:
-                to_remove[g.group].append(v.index)
-
-        for group_idx, vert_indices in to_remove.items():
-            if group_idx < len(self.ob.vertex_groups):
-                self.ob.vertex_groups[group_idx].remove(vert_indices)
+            groups = [(g.group, g.weight) for g in v.groups if g.group in deform_idx]
+            if len(groups) <= limit:
+                continue
+            groups.sort(key=lambda gw: -gw[1])
+            for group_idx, _ in groups[limit:]:
+                to_remove[group_idx].append(v.index)
+        self._remove(to_remove)
 
     def _normalize_weights(self):
+        deform_idx = self.deform_idx
         for v in self.ob.data.vertices:
-            groups = [
-                (self.ob.vertex_groups[g.group], g.weight)
-                for g in v.groups
-                if g.group < len(self.ob.vertex_groups) and self.ob.vertex_groups[g.group].name in self.bone_names
-            ]
-            total = sum(w for _, w in groups)
-            if total > 0:
-                for vg, w in groups:
-                    vg.add([v.index], w / total, 'REPLACE')
-
-_ORDER_VG_RE = re.compile(r"^mesh split (\d+)$", re.IGNORECASE)
- 
-def parse_order_vg_name(name: str) -> int | None:
-    """Return the integer n for a 'mesh split {n}' vgroup name, or None."""
-    m = _ORDER_VG_RE.match(name.strip())
-    if m is None:
-        return None
-    n = int(m.group(1))
-    if n < 0:
-        return None
-    return n
+            groups = [g for g in v.groups if g.group in deform_idx]
+            total = sum(g.weight for g in groups)
+            if total > 0 and total != 1.0:
+                for g in groups:
+                    g.weight = g.weight / total
 
 #
 #   GET
@@ -1384,15 +1394,23 @@ prefab_type_info = {
 
 def prefab_mode_is_dme(scene) -> bool:
     """True when prefabs are encoded into the model file rather than written to
-    .qci/.vmdl files. Embedding is Source 1 only (PulseMDL / PulseModel) - Source 2
-    models are hand-authored in ModelDoc/vmdl, which crashes on embedded joints, so
-    GoldSrc and Source 2 always use file mode regardless of format. Within Source 1,
-    DMX and FBX honour the user's prefab_export_mode (FBX embeds into its companion
-    DMX). SMD has no embedding, so it always uses file mode."""
-    if getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL:
+    .qci/.vmdl files. Embedding is a PulseModel feature, so it needs Source 1 Model 22;
+    DMX honours prefab_export_mode; other formats use file mode."""
+    if (getattr(scene.vs, 'engine', 'SOURCE') != 'SOURCE' or State.compiler != Compiler.STUDIOMDL
+            or State.datamodelFormat != 22):
         return False
-    return (State.exportFormat in (ExportFormat.DMX, ExportFormat.FBX)
+    return (State.exportFormat == ExportFormat.DMX
             and getattr(scene.vs, 'prefab_export_mode', 'QCI') == 'DME')
+
+
+def embedded_anim_allowed(scene) -> bool:
+    """True when model DMXs carry their armature's animations: EMBEDDED prefab mode, DMX only."""
+    return prefab_mode_is_dme(scene) and State.exportFormat == ExportFormat.DMX
+
+
+def embeds_animations(scene, arm) -> bool:
+    return (getattr(arm, 'type', None) == 'ARMATURE' and not arm.data.vs.export_anims_separately
+            and embedded_anim_allowed(scene))
 
 
 def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str, int]]:
@@ -1433,8 +1451,10 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
             if dme and not e.aim_needs_attachment:
                 continue
             lookat_pairs.add((dn, e.aim_offset))
-    if attachments or lookat_pairs:
-        result.append(('ATTACHMENTS', len(attachments) + len(lookat_pairs)))
+    attachment_names = {e.name for e in getattr(avs, 'attachments', [])}
+    attachment_names.update(e.name for e in attachments)
+    if attachment_names or lookat_pairs:
+        result.append(('ATTACHMENTS', len(attachment_names) + len(lookat_pairs)))
 
     hitboxes = get_hitboxes(arm)
     if hitboxes:
@@ -2003,6 +2023,13 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         bone_x = b.matrix_local.to_translation().x
         return (arm_prop.bone_direction_naming_right if bone_x < 0
                 else arm_prop.bone_direction_naming_left)
+    cache_key = None
+    if _bone_exportname_cache is not None:
+        cache_key = (armature.data.as_pointer(), mode, tuple(armature.data.bones.keys()))
+        cached = _bone_exportname_cache.get(cache_key)
+        if cached is not None:
+            return cached[data_bone.name]
+
     prefix_shortcuts = get_prefix_shortcut_map()
 
     ordered_bones = sort_bone_by_hierarchy(armature.data.bones)
@@ -2027,7 +2054,32 @@ def get_bone_exportname(bone: bpy.types.Bone | bpy.types.PoseBone | None, for_wr
         final_name = sanitize_string(final_name, force_source2=force_s2, no_sanitize=no_san)
         export_names[b.name] = final_name
 
+    if cache_key is not None:
+        _bone_exportname_cache[cache_key] = export_names
     return export_names[data_bone.name]
+
+# Set only while an export or a prefab import runs; bone props can't change during
+# either, so the per-armature name map is safe to reuse there but not in the UI.
+_bone_exportname_cache: dict | None = None
+
+def begin_bone_exportname_cache() -> None:
+    global _bone_exportname_cache
+    _bone_exportname_cache = {}
+
+def end_bone_exportname_cache() -> None:
+    global _bone_exportname_cache
+    _bone_exportname_cache = None
+
+@contextlib.contextmanager
+def bone_exportname_cache_scope():
+    if _bone_exportname_cache is not None:
+        yield
+        return
+    begin_bone_exportname_cache()
+    try:
+        yield
+    finally:
+        end_bone_exportname_cache()
 
 def get_bone_matrix(data: bpy.types.PoseBone | mathutils.Matrix, bone: bpy.types.PoseBone | None = None,
                     rest_space : bool = False) -> mathutils.Matrix:

@@ -5,7 +5,7 @@ from ..utils import (get_id, get_armature, is_mesh, is_armature, vertex_maps, ve
                      get_bone_exportname, getFileExt, get_valid_vertexanimation_object, sanitize_string_for_delta,
                      get_addon_prefs)
 from .. import procbones_sim as _procbones_sim
-from .helpers import _get_or_create_proc_tol_fcurve, _get_entry_proc_tol, _guess_flex_group
+from .helpers import _guess_flex_group
 
 
 SMD_OT_CreateVertexMap_idname : str = "smd.vertex_map_create_"
@@ -1215,7 +1215,8 @@ class SMD_OT_AssignBoneRotExportOffset(Operator):
         selected_arms = [ob for ob in context.selected_objects if is_armature(ob)]
         if not selected_arms or context.mode in {'EDIT', 'EDIT_ARMATURE', 'OBJECT'}:
             return False
-        return any(b.select for arm in selected_arms for b in arm.data.bones if not b.hide_select)
+        return any(pb.id_data in selected_arms and not pb.bone.hide_select
+                   for pb in (context.selected_pose_bones or []))
 
     def invoke(self, context, event):
         return context.window_manager.invoke_props_dialog(self)
@@ -1238,7 +1239,8 @@ class SMD_OT_AssignBoneRotExportOffset(Operator):
             if self.only_active_bone:
                 selected_bones = [arm.data.bones.active] if arm.data.bones.active else []
             else:
-                selected_bones = [b for b in arm.data.bones if not b.hide_select and b.select]
+                selected_bones = [pb.bone for pb in (context.selected_pose_bones or [])
+                                  if pb.id_data == arm and not pb.bone.hide_select]
 
             if not selected_bones:
                 continue
@@ -1328,6 +1330,102 @@ class SMD_OT_HitboxFromBone(Operator):
             entry = avs.hitboxes.add()
             entry.bone_name = pb.name
         avs.hitboxes_index = len(avs.hitboxes) - 1
+        return {'FINISHED'}
+
+
+_PHYSSHAPE_TYPES = [('CAPSULE', 'Capsule', ''), ('BOX', 'Box', ''), ('SPHERE', 'Sphere', '')]
+
+
+class SMD_OT_PhysShapeAdd(Operator):
+    bl_idname  = "smd.physshape_add"
+    bl_label   = get_id('op_physshape_add')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    shape_type : EnumProperty(items=_PHYSSHAPE_TYPES, default='CAPSULE')
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        entry = avs.physics_shapes.add()
+        entry.shape_type = self.shape_type
+        if self.shape_type == 'CAPSULE':
+            entry.vec_max = (1.0, 0.0, 0.0)
+        elif self.shape_type == 'BOX':
+            entry.vec_min = (-1.0, -1.0, -1.0)
+            entry.vec_max = (1.0, 1.0, 1.0)
+        if context.active_pose_bone:
+            entry.bone_name = context.active_pose_bone.name
+        avs.physics_shapes_index = len(avs.physics_shapes) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeRemove(Operator):
+    bl_idname  = "smd.physshape_remove"
+    bl_label   = get_id('op_physshape_remove')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        idx = avs.physics_shapes_index
+        if 0 <= idx < len(avs.physics_shapes):
+            avs.physics_shapes.remove(idx)
+            avs.physics_shapes_index = max(0, min(idx, len(avs.physics_shapes) - 1))
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeFromBone(Operator):
+    bl_idname  = "smd.physshape_from_bone"
+    bl_label   = get_id('op_hitbox_from_bone')
+    bl_options = {'UNDO'}
+
+    shape_type : EnumProperty(items=_PHYSSHAPE_TYPES, default='CAPSULE')
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'POSE' and context.selected_pose_bones
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        for pb in context.selected_pose_bones:
+            entry = avs.physics_shapes.add()
+            entry.bone_name = pb.name
+            entry.shape_type = self.shape_type
+            if self.shape_type == 'CAPSULE':
+                entry.vec_max = (1.0, 0.0, 0.0)
+            elif self.shape_type == 'BOX':
+                entry.vec_min = (-1.0, -1.0, -1.0)
+                entry.vec_max = (1.0, 1.0, 1.0)
+        avs.physics_shapes_index = len(avs.physics_shapes) - 1
+        return {'FINISHED'}
+
+
+class SMD_OT_PhysShapeDuplicate(Operator):
+    bl_idname  = "smd.physshape_duplicate"
+    bl_label   = get_id('op_physshape_duplicate')
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    def execute(self, context) -> set:
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        idx = avs.physics_shapes_index
+        if not 0 <= idx < len(avs.physics_shapes):
+            return {'CANCELLED'}
+        src = avs.physics_shapes[idx]
+        dst = avs.physics_shapes.add()
+        for key in ('bone_name', 'shape_type', 'vec_min', 'vec_max', 'rotation', 'radius0', 'radius1', 'merge', 'segments'):
+            setattr(dst, key, getattr(src, key))
+        avs.physics_shapes.move(len(avs.physics_shapes) - 1, idx + 1)
+        avs.physics_shapes_index = idx + 1
         return {'FINISHED'}
 
 
@@ -1835,6 +1933,15 @@ class SMD_OT_ProcBoneDuplicate(Operator):
         dst.reference_armature = src.reference_armature
         dst.action             = src.action
         dst.action_slot_name   = src.action_slot_name
+        dst.use_manual_frame_range = src.use_manual_frame_range
+        dst.trigger_frame_start = src.trigger_frame_start
+        dst.trigger_frame_end = src.trigger_frame_end
+        dst.influence_angle = src.influence_angle
+        for trigger in src.trigger_influences:
+            item = dst.trigger_influences.add()
+            item.frame = trigger.frame
+            item.angle = trigger.angle
+            item.use_override = trigger.use_override
         dst.lookat_aim_axis  = src.lookat_aim_axis
         dst.lookat_up_axis   = src.lookat_up_axis
         dst.lookat_offset[:] = src.lookat_offset[:]
@@ -1865,16 +1972,57 @@ class SMD_OT_ProcBoneRemove(Operator):
         return {'FINISHED'}
 
 
+def _refresh_proc_influences(entry, arm_ob):
+    sample_arm = entry.reference_armature or arm_ob
+    fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, sample_arm)
+    if not valid:
+        return False
+    saved = {t.frame: (t.angle, t.use_override, t.selected) for t in entry.trigger_influences}
+    entry.trigger_influences.clear()
+    for frame in range(fs, fe + 1):
+        item = entry.trigger_influences.add()
+        item.frame = frame
+        item.angle, item.use_override, item.selected = saved.get(frame, (entry.influence_angle, False, False))
+    entry.trigger_influence_index = max(0, min(entry.trigger_influence_index, fe - fs))
+    _procbones_sim.invalidate_proc_cache(arm_ob.name)
+    return True
+
+
+class SMD_OT_ProcBoneRefreshInfluences(Operator):
+    bl_idname = "smd.proc_bone_refresh_influences"
+    bl_label = "Refresh Trigger List"
+    bl_description = "List every trigger frame in the action range, keeping overrides for matching frames"
+    bl_options = {'UNDO'}
+
+    def execute(self, context):
+        arm_ob = get_armature(context.object)
+        if not arm_ob:
+            return {'CANCELLED'}
+        avs = arm_ob.data.vs
+        if not (0 <= avs.proc_bones_index < len(avs.proc_bones)):
+            return {'CANCELLED'}
+        entry = avs.proc_bones[avs.proc_bones_index]
+        if not entry.action or not _refresh_proc_influences(entry, arm_ob):
+            self.report({'WARNING'}, "No valid trigger frame range")
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
 class SMD_OT_ProcBoneSetTolerance(Operator):
     bl_idname  = "smd.proc_bone_set_tolerance"
-    bl_label   = "Set Proc Bone Tolerance"
+    bl_label   = "Edit Trigger Influence"
     bl_options = {'REGISTER', 'UNDO'}
 
     value: FloatProperty(
-        name=get_id('prop_pose_bone_proc_tolerance'),
-        description=get_id('prop_pose_bone_proc_tolerance_tip'),
-        default=math.pi / 2, min=0.01, max=math.pi, subtype='ANGLE', precision=2,
+        name="Influence Angle",
+        description="Angular distance at which a trigger stops contributing",
+        default=math.pi / 2, min=math.radians(0.01), max=math.pi, subtype='ANGLE', precision=2,
     )
+    scope: EnumProperty(name="Triggers", items=[
+        ('SELECTED', "Selected", "Apply to checked trigger rows"),
+        ('ALL', "All", "Apply to every trigger in the current range"),
+    ], default='SELECTED')
+    reset: BoolProperty(name="Use Default", description="Remove overrides and use the default influence angle")
 
     def invoke(self, context, event):
         arm_ob = get_armature(context.object)
@@ -1885,11 +2033,15 @@ class SMD_OT_ProcBoneSetTolerance(Operator):
         if not (0 <= idx < len(avs.proc_bones)):
             return {'CANCELLED'}
         entry = avs.proc_bones[idx]
-        self.value = _get_entry_proc_tol(entry, context.scene.frame_current, arm_ob)
+        self.value = entry.influence_angle
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, context):
-        self.layout.prop(self, 'value')
+        self.layout.prop(self, 'scope')
+        self.layout.prop(self, 'reset')
+        row = self.layout.row()
+        row.enabled = not self.reset
+        row.prop(self, 'value')
 
     def execute(self, context):
         arm_ob = get_armature(context.object)
@@ -1903,57 +2055,24 @@ class SMD_OT_ProcBoneSetTolerance(Operator):
         if not entry.action or not entry.driver_bone:
             return {'CANCELLED'}
 
-        # Paths on bpy.types.Bone are relative to the Armature data-block.
-        dp    = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-        frame = context.scene.frame_current
-        fc    = _get_or_create_proc_tol_fcurve(entry, dp)
-        if fc is None:
+        if self.scope == 'SELECTED' and not any(t.selected for t in entry.trigger_influences):
+            self.report({'WARNING'}, "Check the trigger rows to edit")
             return {'CANCELLED'}
-
-        fc.keyframe_points.insert(frame, self.value, options={'NEEDED', 'FAST'})
-        fc.update()
+        if not _refresh_proc_influences(entry, arm_ob):
+            return {'CANCELLED'}
+        targets = [t for t in entry.trigger_influences if self.scope == 'ALL' or t.selected]
+        if not targets:
+            self.report({'WARNING'}, "Check the trigger rows to edit")
+            return {'CANCELLED'}
+        for trigger in targets:
+            if not self.reset:
+                trigger.angle = self.value
+            trigger.use_override = not self.reset
         _procbones_sim.invalidate_proc_cache(arm_ob.name)
         return {'FINISHED'}
 
 
-class SMD_OT_ProcBoneNavigateFrame(Operator):
-    bl_idname  = "smd.proc_bone_navigate_frame"
-    bl_label   = "Navigate Proc Bone Frame"
-    bl_options = {'REGISTER', 'INTERNAL'}
-
-    direction: EnumProperty(items=[
-        ('FIRST', "First",    "Jump to the first frame of the trigger range"),
-        ('PREV',  "Previous", "Go one frame back"),
-        ('NEXT',  "Next",     "Go one frame forward"),
-        ('LAST',  "Last",     "Jump to the last frame of the trigger range"),
-    ], default='FIRST')
-
-    @classmethod
-    def poll(cls, context):
-        arm_ob = get_armature(context.object)
-        if not arm_ob:
-            return False
-        avs = arm_ob.data.vs
-        idx = avs.proc_bones_index
-        return 0 <= idx < len(avs.proc_bones)
-
-    def execute(self, context):
-        arm_ob = get_armature(context.object)
-        avs    = arm_ob.data.vs
-        entry  = avs.proc_bones[avs.proc_bones_index]
-        fs, fe, valid = _procbones_sim._get_proc_trigger_frame_range(entry, arm_ob)
-        if not valid:
-            return {'CANCELLED'}
-        pf = max(fs, min(fe, entry.trigger_preview_frame))
-        if   self.direction == 'FIRST': pf = fs
-        elif self.direction == 'PREV':  pf = max(fs, pf - 1)
-        elif self.direction == 'NEXT':  pf = min(fe, pf + 1)
-        elif self.direction == 'LAST':  pf = fe
-        entry.trigger_preview_frame = pf
-        return {'FINISHED'}
-
-
-_tolerance_clipboard: list[tuple[float, float]] | None = None
+_tolerance_clipboard: tuple[float, list[tuple[int, float, bool]]] | None = None
 
 
 class SMD_OT_ProcBoneCopyTolerance(Operator):
@@ -1980,14 +2099,9 @@ class SMD_OT_ProcBoneCopyTolerance(Operator):
         arm_ob = get_armature(context.object)
         avs = arm_ob.data.vs
         entry = avs.proc_bones[avs.proc_bones_index]
-        fcurves = _procbones_sim._get_action_fcurves(entry.action, entry.action_slot_name)
-        dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-        fc = next((f for f in fcurves if f.data_path == dp and f.array_index == 0), None)
-        if fc is None:
-            self.report({'WARNING'}, "No tolerance keyframes to copy")
-            return {'CANCELLED'}
-        _tolerance_clipboard = [(kp.co[0], kp.co[1]) for kp in fc.keyframe_points]
-        self.report({'INFO'}, f"Copied {len(_tolerance_clipboard)} tolerance keyframe(s)")
+        _tolerance_clipboard = (entry.influence_angle,
+                                [(t.frame, t.angle, t.use_override) for t in entry.trigger_influences])
+        self.report({'INFO'}, "Copied trigger influence settings")
         return {'FINISHED'}
 
 
@@ -2016,18 +2130,15 @@ class SMD_OT_ProcBonePasteTolerance(Operator):
         arm_ob = get_armature(context.object)
         avs = arm_ob.data.vs
         entry = avs.proc_bones[avs.proc_bones_index]
-        dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-        fc = _get_or_create_proc_tol_fcurve(entry, dp)
-        if fc is None:
-            self.report({'ERROR'}, "Could not access tolerance fcurve")
+        if not _refresh_proc_influences(entry, arm_ob):
             return {'CANCELLED'}
-        for i in range(len(fc.keyframe_points) - 1, -1, -1):
-            fc.keyframe_points.remove(fc.keyframe_points[i], fast=True)
-        for frame, value in _tolerance_clipboard:
-            fc.keyframe_points.insert(frame, value, options={'NEEDED', 'FAST'})
-        fc.update()
+        default, overrides = _tolerance_clipboard
+        entry.influence_angle = default
+        by_frame = {frame: (angle, enabled) for frame, angle, enabled in overrides}
+        for trigger in entry.trigger_influences:
+            trigger.angle, trigger.use_override = by_frame.get(trigger.frame, (default, False))
         _procbones_sim.invalidate_proc_cache(arm_ob.name)
-        self.report({'INFO'}, f"Pasted {len(_tolerance_clipboard)} tolerance keyframe(s)")
+        self.report({'INFO'}, "Pasted trigger influence settings for matching frames")
         return {'FINISHED'}
 
 
@@ -2042,6 +2153,11 @@ def _proc_entry_to_dict(entry) -> dict:
         'reference_armature': entry.reference_armature.name if entry.reference_armature else '',
         'action':             entry.action.name if entry.action else '',
         'action_slot_name':   entry.action_slot_name,
+        'use_manual_frame_range': entry.use_manual_frame_range,
+        'trigger_frame_start': entry.trigger_frame_start,
+        'trigger_frame_end': entry.trigger_frame_end,
+        'influence_angle': entry.influence_angle,
+        'trigger_influences': [(t.frame, t.angle, t.use_override) for t in entry.trigger_influences],
         'lookat_aim_axis':  set(entry.lookat_aim_axis),
         'lookat_up_axis':   set(entry.lookat_up_axis),
         'lookat_offset':    tuple(entry.lookat_offset),
@@ -2064,6 +2180,16 @@ def _proc_entry_from_dict(entry, d: dict):
     if action_name and action_name in bpy.data.actions:
         entry.action = bpy.data.actions[action_name]
     entry.action_slot_name = d['action_slot_name']
+    entry.use_manual_frame_range = d.get('use_manual_frame_range', False)
+    entry.trigger_frame_start = d.get('trigger_frame_start', 1)
+    entry.trigger_frame_end = d.get('trigger_frame_end', 1)
+    entry.influence_angle = d.get('influence_angle', math.pi / 2)
+    entry.trigger_influences.clear()
+    for frame, angle, enabled in d.get('trigger_influences', []):
+        trigger = entry.trigger_influences.add()
+        trigger.frame = frame
+        trigger.angle = angle
+        trigger.use_override = enabled
     entry.lookat_aim_axis  = d['lookat_aim_axis']
     entry.lookat_up_axis   = d['lookat_up_axis']
     entry.lookat_offset[:] = d['lookat_offset']
@@ -2578,7 +2704,8 @@ class SMD_OT_RefreshAttachmentMesh(Operator):
     @classmethod
     def poll(cls, context):
         ob = context.object
-        return ob is not None and ob.type == 'EMPTY' and ob.vs.dmx_attachment
+        return ob is not None and (ob.type == 'ARMATURE' or
+                                   (ob.type == 'EMPTY' and ob.vs.dmx_attachment))
 
     def execute(self, context):
         from .. import viewport_draw

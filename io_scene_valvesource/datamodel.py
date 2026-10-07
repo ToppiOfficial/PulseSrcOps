@@ -20,7 +20,7 @@
 #  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 #  THE SOFTWARE.
 
-import struct, array, io, binascii, collections, uuid
+import struct, array, io, binascii, collections, uuid, itertools
 from struct import unpack,calcsize
 
 header_format = "<!-- dmx encoding {:s} {:d} format {:s} {:d} -->"
@@ -277,6 +277,19 @@ def make_array(l,t):
 		raise TypeError("{} is not a valid datamodel attribute type".format(t))
 	at = _get_array_type(t)
 	return at(l)
+
+def make_vector_array(rows,t):
+	'''make_array for vector types without per-item validation; rows must already hold the right number of floats.'''
+	if not issubclass(t,_Vector):
+		raise TypeError("{} is not a vector type".format(t))
+	out = _get_array_type(t)()
+	new, extend = list.__new__, list.extend
+	def build(row):
+		v = new(t)
+		extend(v,row)
+		return v
+	extend(out,map(build,rows))
+	return out
 		
 class AttributeError(KeyError):
 	'''Raised when an attribute is not found on an element. Essentially a KeyError, but subclassed because it's normally an unrecoverable data issue.'''
@@ -706,7 +719,9 @@ class DataModel:
 			self._writeString(value, True if is_array else None)
 		elif t == Element:
 			self.out.write(bytes.join(b'',[item.tobytes() if item else struct.pack("i",-1) for item in value]))
-		elif issubclass(t,(_Vector,Matrix, Time)):
+		elif issubclass(t,_Vector):
+			self.out.write(array.array(t.type_str[0], itertools.chain.from_iterable(value)).tobytes())
+		elif issubclass(t,(Matrix, Time)):
 			self.out.write(bytes.join(b'',[item.tobytes() for item in value]))
 		
 		elif t == bool:
@@ -1086,6 +1101,35 @@ def load(path = None, in_file = None, element_path = None):
 				else:
 					raise TypeError("Cannot read attributes of type {}".format(attr_type))
 			
+			scalar_codes = {int: "i", float: "f", bool: "?", UInt8: "B", UInt64: "Q"}
+			vector_dims = {Vector2: 2, Vector3: 3, Angle: 3, Vector4: 4, Quaternion: 4}
+			new_list, extend_list = list.__new__, list.extend
+
+			def read_array(arr, item_type, length):
+				'''Bulk-reads fixed-size array items; returns False for types read item by item.'''
+				code = scalar_codes.get(item_type)
+				if code:
+					extend_list(arr, unpack("{}{}".format(length, code), in_file.read(calcsize(code) * length)))
+					return True
+				if item_type == Time:
+					extend_list(arr, (Time.from_int(i) for i in unpack("{}i".format(length), in_file.read(intsize * length))))
+					return True
+				dim = vector_dims.get(item_type)
+				if dim:
+					values = unpack("{}f".format(length * dim), in_file.read(floatsize * dim * length))
+				elif item_type == Color:
+					dim = 4
+					values = in_file.read(4 * length)
+				else:
+					return False
+				def build(row):
+					v = new_list(item_type)
+					extend_list(v, row)
+					return v
+				it = iter(values)
+				extend_list(arr, map(build, zip(*[it] * dim)))
+				return True
+
 			def read_element(elem, use_string_dict = True):
 				#print(elem.name,"@",in_file.tell())
 				num_attributes = get_int(in_file)
@@ -1100,8 +1144,9 @@ def load(path = None, in_file = None, element_path = None):
 						array_len = get_int(in_file)
 						arr = elem[name] = attr_type()
 						arr_item_type = _get_single_type(attr_type)
-						for _ in range(array_len):
-							arr.append( get_value(arr_item_type,from_array=True) )
+						if not read_array(arr, arr_item_type, array_len):
+							for _ in range(array_len):
+								arr.append( get_value(arr_item_type,from_array=True) )
 
 			# prefix attributes
 			if encoding_ver >= 9:

@@ -1,7 +1,15 @@
 import bpy, math
+from bpy.types import Collection
 from typing import NamedTuple
-from ..utils import get_armature, vertex_float_maps, validate_corrective_components, validate_flex_expression, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_renamed_delta_names
+from ..utils import get_armature, get_collection_export_objects, vertex_float_maps, validate_corrective_components, validate_flex_expression, _build_dme_ctrl_names, _build_stereo_delta_names, get_dme_renamed_delta_names
 from .. import procbones_sim as _procbones_sim
+
+
+def _model_armature(item):
+    """The rig a model exportable is skinned to, preferring one inside its collection."""
+    obs = list(get_collection_export_objects(item)) if isinstance(item, Collection) else [item]
+    own = next((ob for ob in obs if ob.type == 'ARMATURE'), None)
+    return own or next((arm for arm in map(get_armature, obs) if arm), None)
 
 
 def _bone_is_hidden(bone) -> bool:
@@ -139,27 +147,3 @@ def _count_flex_rule_errors(ob) -> int:
         return 0
     ctx = build_flex_rule_context(ob)
     return sum(flex_rule_has_error(rule, ctx) for rule in rules)
-
-
-_get_or_create_proc_tol_fcurve = _procbones_sim._get_or_create_proc_tol_fcurve
-
-
-def _get_entry_proc_tol(entry, frame: float, arm_ob=None) -> float:
-    """Return proc_tolerance from entry.action's fcurves at frame.
-    Falls back to the bone's static value, then to the 90° default."""
-    if not entry.action or not entry.driver_bone:
-        if arm_ob:
-            eb = arm_ob.data.bones.get(entry.driver_bone)
-            if eb:
-                return eb.vs.proc_tolerance
-        return math.pi / 2
-    fcurves = _procbones_sim._get_action_fcurves(entry.action, entry.action_slot_name)
-    dp = f'bones["{entry.driver_bone}"].vs.proc_tolerance'
-    for fc in fcurves:
-        if fc.data_path == dp and fc.array_index == 0:
-            return fc.evaluate(frame)
-    if arm_ob:
-        eb = arm_ob.data.bones.get(entry.driver_bone)
-        if eb:
-            return eb.vs.proc_tolerance
-    return math.pi / 2
