@@ -27,15 +27,34 @@ def attachment_matrix(arm, entry, rest=False):
 def legacy_rest_matrix(empty):
     arm = empty.parent
     pose = arm.data.pose_position
+    collections = set(empty.users_collection) | set(arm.users_collection)
+    excludes = []
+
+    def collection_paths(layer):
+        excludes.append((layer, 'exclude', layer.exclude))
+        children = [node for child in layer.children for node in collection_paths(child)]
+        return [layer, *children] if children or layer.collection in collections else []
+
+    settings = [(owner, prop) for layer in collection_paths(bpy.context.view_layer.layer_collection)
+                for owner, prop in ((layer, 'exclude'), (layer.collection, 'hide_viewport'))]
+    settings.extend((obj, 'hide_viewport') for obj in (arm, empty))
+    restores = excludes + [(owner, prop, getattr(owner, prop))
+                           for owner, prop in settings if prop != 'exclude']
     try:
+        for owner, prop in settings:
+            if getattr(owner, prop):
+                setattr(owner, prop, False)
         if pose != 'REST':
             arm.data.pose_position = 'REST'
-            bpy.context.view_layer.update()
+        bpy.context.view_layer.update()
         return empty.matrix_world.copy()
     finally:
         if pose != 'REST':
             arm.data.pose_position = pose
-            bpy.context.view_layer.update()
+        for owner, prop, value in restores:
+            if getattr(owner, prop) != value:
+                setattr(owner, prop, value)
+        bpy.context.view_layer.update()
 
 
 def resolve_attachments(arm, legacy, warning=None):
@@ -149,7 +168,7 @@ class SMD_OT_AttachmentDuplicate(bpy.types.Operator):
 class SMD_OT_ConvertAttachments(bpy.types.Operator):
     bl_idname = 'smd.convert_attachments'
     bl_label = 'Convert Empty Attachments'
-    bl_description = 'Convert attachment Empties to armature entries and disable their attachment flags'
+    bl_description = 'Convert attachment Empties to armature entries and delete the converted Empties'
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -172,15 +191,16 @@ class SMD_OT_ConvertAttachments(bpy.types.Operator):
             if any(e.name == empty.name for e in arm.data.vs.attachments):
                 self.report({'WARNING'}, f"Attachment '{empty.name}' already exists. Skipping conversion.")
                 continue
+            world = legacy_rest_matrix(empty)
             parent = arm.matrix_world @ (get_bone_matrix(bone, rest_space=True) if bone else Matrix.Identity(4))
-            matrix = parent.inverted_safe() @ legacy_rest_matrix(empty)
+            matrix = parent.inverted_safe() @ world
             entry = add_attachment(arm, empty.name, bone.name if bone else '', matrix)
             slots = empty.vs.attachment_display_meshes
             index = empty.vs.attachment_display_mesh_render_index
             if 0 <= index < len(slots):
                 entry.preview_object = slots[index].mesh
                 entry.color = slots[index].color
-            empty.vs.dmx_attachment = False
+            bpy.data.objects.remove(empty, do_unlink=True)
             count += 1
         self.report({'INFO'}, f'Converted {count} attachment(s)')
         return {'FINISHED'}
