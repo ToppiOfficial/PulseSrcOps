@@ -6,7 +6,7 @@ from bpy.props import (StringProperty, BoolProperty, EnumProperty, IntProperty,
 from bpy.app.handlers import persistent
 from mathutils import Vector, Matrix
 from ..utils import get_id
-from .items import ProcBoneEntry, ArmatureItemEntry, HitboxEntry, PhysicsShapeEntry, PrefabItem, _proc_entry_invalidate_cache, refresh_hitbox_snapshot
+from .items import ProcBoneEntry, ArmatureItemEntry, HitboxEntry, PhysicsShapeEntry, AttachmentEntry, PrefabItem, _proc_entry_invalidate_cache, refresh_hitbox_snapshot
 from .mixins import JiggleBoneProps
 
 _propagation_active: set = set()
@@ -214,6 +214,8 @@ class ValveSource_ArmatureProps(bpy.types.PropertyGroup):
     hboxset_name          : StringProperty(name=get_id('prop_hitbox_hboxset'), description=get_id('prop_hitbox_hboxset_tip'), default='')
     physics_shapes        : CollectionProperty(type=PhysicsShapeEntry)
     physics_shapes_index  : IntProperty(default=-1)
+    attachments: CollectionProperty(type=AttachmentEntry)
+    attachments_index: IntProperty(default=-1)
     arm_attachment_entries : CollectionProperty(type=ArmatureItemEntry)
     arm_attachment_index : IntProperty(default=-1)
     arm_jigglebone_entries : CollectionProperty(type=ArmatureItemEntry)

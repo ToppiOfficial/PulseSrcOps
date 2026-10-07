@@ -400,10 +400,11 @@ def build_skeleton(ctx, smd, skel, target_arm, model_name: str) -> dict:
     return bone_matrices
 
 
-def build_attachment_empty(ctx, coll, arm, name: str, bone_name, matrix):
-    """The attachment object every format produces: an ARROWS empty on its parent bone.
-    Whether a missing bone is an error is left to the caller - DMX requires one, a VMDL
-    attachment may sit on the model root."""
+def build_attachment(ctx, coll, arm, name: str, bone_name, matrix):
+    """Build a bone-relative entry or an optional legacy Empty."""
+    if not getattr(ctx.properties, 'legacyAttachments', False):
+        from ..attachments import add_attachment
+        return add_attachment(arm, name, bone_name, matrix)
     atch = bpy.data.objects.new(
         name=truncate_id_name(ctx, name, "Attachment"), object_data=None)
     coll.objects.link(atch)
@@ -427,7 +428,7 @@ def build_attachments(ctx, smd, skel, bone_names) -> None:
         if parent_name is None:
             ctx.warning(f"Attachment '{att.name}' has no parent bone - skipped")
             continue
-        smd.atch = build_attachment_empty(
+        smd.atch = build_attachment(
             ctx, coll, smd.a, att.name, parent_name, att.matrix)
 
 

@@ -679,6 +679,10 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
         else:
             self.exportable_empties = []
 
+        from ..attachments import resolve_attachments
+        self.exportable_empties = resolve_attachments(
+            self.armature_src, self.exportable_empties, self.warning)
+
         return True
 
     def _rest_math_safe(self, empty) -> bool:

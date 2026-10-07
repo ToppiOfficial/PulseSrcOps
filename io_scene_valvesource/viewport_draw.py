@@ -1266,6 +1266,36 @@ def _draw_attachment_mesh_preview():
 
     selected = {ob.session_uid for ob in context.selected_objects}
 
+    previews = []
+    from .attachments import attachment_matrix, attachment_pose_selected
+    for arm in context.scene.objects:
+        if arm.type != 'ARMATURE' or not arm.visible_get():
+            continue
+        if preview_mode == 'SELECTED' and arm.session_uid not in selected:
+            continue
+        for entry in arm.data.vs.attachments:
+            if entry.bone_name and entry.bone_name not in arm.pose.bones:
+                continue
+            if preview_mode == 'POSE' and not attachment_pose_selected(context, arm, entry.bone_name):
+                continue
+            matrix = attachment_matrix(arm, entry)
+            axes = [(0, 0, 0), (0.5, 0, 0), (0, 0, 0), (0, 0.5, 0),
+                    (0, 0, 0), (0, 0, 0.5)]
+            axis_batch = batch_for_shader(shader, 'LINES', {'pos': axes})
+            try:
+                gpu.state.blend_set('ALPHA')
+                gpu.state.depth_test_set('LESS_EQUAL')
+                shader.uniform_float('color', tuple(entry.color[:3]) + (1.0,))
+                with gpu.matrix.push_pop():
+                    gpu.matrix.multiply_matrix(matrix)
+                    axis_batch.draw(shader)
+            finally:
+                gpu.state.blend_set('NONE')
+                gpu.state.depth_test_set('NONE')
+            if entry.show_preview and entry.preview_object:
+                scaled = matrix @ Matrix.Diagonal((*entry.preview_scale, 1))
+                previews.append((scaled, entry.preview_object, entry.color))
+
     for ob in context.scene.objects:
         if preview_mode == 'SELECTED' and ob.session_uid not in selected:
             continue
@@ -1274,12 +1304,17 @@ def _draw_attachment_mesh_preview():
         vs_ob = ob.vs
         if not vs_ob.dmx_attachment:
             continue
+        if preview_mode == 'POSE' and (ob.parent_type != 'BONE' or
+                                       not attachment_pose_selected(context, ob.parent, ob.parent_bone)):
+            continue
         render_idx = vs_ob.attachment_display_mesh_render_index
         meshes = vs_ob.attachment_display_meshes
         if render_idx < 0 or render_idx >= len(meshes):
             continue
         item = meshes[render_idx]
-        mesh_ob = item.mesh
+        previews.append((ob.matrix_world, item.mesh, item.color))
+
+    for matrix, mesh_ob, color in previews:
         if mesh_ob is None or mesh_ob.type != 'MESH':
             continue
 
@@ -1299,7 +1334,6 @@ def _draw_attachment_mesh_preview():
         else:
             batch = cached[1]
 
-        color = item.color
         try:
             is_wireframe = False
             try:
@@ -1312,7 +1346,7 @@ def _draw_attachment_mesh_preview():
             gpu.state.face_culling_set('NONE')
             shader.uniform_float('color', (color[0], color[1], color[2], color[3]))
             with gpu.matrix.push_pop():
-                gpu.matrix.multiply_matrix(ob.matrix_world)
+                gpu.matrix.multiply_matrix(matrix)
                 batch.draw(shader)
         finally:
             gpu.state.blend_set('NONE')

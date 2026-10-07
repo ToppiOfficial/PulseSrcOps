@@ -251,7 +251,7 @@ class DmxWriter:
         item = next((p for p in avs.prefab_items if p.prefab_type == prefab_type), None)
         return item.export if item is not None else True
 
-    def _write_attach(self, name, relMat, boneelem):
+    def _write_attach(self, name, relMat, boneelem, *, model_root=False):
         dm = self.dm
         dag = dm.add_element(name, "DmeDag", id=name)
         att = dm.add_element(name, "DmeAttachment", id="attachment" + name)
@@ -268,10 +268,12 @@ class DmxWriter:
         if "children" not in boneelem:
             boneelem["children"] = datamodel.make_array([], datamodel.Element)
 
-        trfm = self._make_transform(name, relMat, name)
-        trfm_base = self._make_transform(name, relMat, "empty_base" + name)
+        scale_divisor = self.armature_scale if model_root else None
+        trfm = self._make_transform(name, relMat, name, scale_divisor)
+        trfm_base = self._make_transform(name, relMat, "empty_base" + name, scale_divisor)
 
-        self._scale_translation(trfm["position"], self.armature_scale)
+        if not model_root:
+            self._scale_translation(trfm["position"], self.armature_scale)
         trfm_base["position"] = trfm["position"]
 
         dag["transform"] = trfm
@@ -283,6 +285,9 @@ class DmxWriter:
         return dag
 
     def _write_attachment(self, empty, empty_matrix):
+        if not empty.parent_bone:
+            matrix = self.armature.matrix_world @ self.armature_src.matrix_world.inverted_safe() @ empty_matrix
+            return self._write_attach(empty.name, matrix, self.DmeModel, model_root=True)
         current_bone = self.armature.data.bones.get(empty.parent_bone)
         exportable_parent = None
         while current_bone:
@@ -295,7 +300,7 @@ class DmxWriter:
             self._warning(f"Attachment '{empty.name}' has no exportable parent bone. Skipping.")
             return None
 
-        pmat = get_bone_matrix(exportable_parent, rest_space=True)
+        pmat = self.armature_src.matrix_world @ get_bone_matrix(exportable_parent, rest_space=True)
         relMat = pmat.inverted() @ empty_matrix
         return self._write_attach(empty.name, relMat, self.bone_elements[exportable_parent.name])
 

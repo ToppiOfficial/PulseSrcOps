@@ -70,6 +70,8 @@ class ImporterBase(bpy.types.Operator, Logger):
 
     # Options every format honours
     createCollections: BoolProperty(name=get_id("importer_use_collections"), description=get_id("importer_use_collections_tip"), default=True)
+    legacyAttachments: BoolProperty(name='Use Legacy Empty Attachments',
+                                    description='Import attachments as deprecated Empty objects', default=False)
     append: EnumProperty(
         name=get_id("importer_bones_mode"),
         description=get_id("importer_bones_mode_desc"),
@@ -214,6 +216,9 @@ class ImporterBase(bpy.types.Operator, Logger):
         col.use_property_split = False
         col.label(text=get_id("importer_prefabdata"))
         col.prop(self.properties, "prefabData", expand=True)
+        row = col.row()
+        row.enabled = 'ATTACHMENTS' in self.prefabData
+        row.prop(self.properties, 'legacyAttachments')
 
     def read_file(self, filepath: str) -> int | None:
         raise NotImplementedError

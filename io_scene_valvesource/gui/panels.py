@@ -339,8 +339,12 @@ class SMD_PT_Exportables(Panel):
                     layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_jigglebone_entries",
                                          armvs, "arm_jigglebone_index", rows=3)
                 elif ptype == 'ATTACHMENTS':
-                    layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_attachment_entries",
-                                         armvs, "arm_attachment_index", rows=3)
+                    layout.template_list("SMD_UL_Attachments", "", armvs, "attachments",
+                                         armvs, "attachments_index", rows=3)
+                    if armvs.arm_attachment_entries:
+                        layout.label(text='Deprecated Empty Attachments', icon='INFO')
+                        layout.template_list("SMD_UL_ArmatureItems", "", armvs, "arm_attachment_entries",
+                                             armvs, "arm_attachment_index", rows=3)
                 elif ptype == 'HITBOXES':
                     layout.template_list("SMD_UL_Hitboxes", "", armvs, "hitboxes",
                                          armvs, "hitboxes_index", rows=3)
@@ -1729,6 +1733,8 @@ class SMD_PT_Empty(Properties_Panel):
             col.alert = False
 
         if vs_ob.dmx_attachment:
+            col.label(text='Empty attachments are deprecated', icon='INFO')
+            col.operator('smd.convert_attachments', icon='ARMATURE_DATA')
             col.separator()
             col.label(text="Display Meshes", icon='MESH_DATA')
             row = col.row()

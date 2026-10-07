@@ -87,7 +87,7 @@ def _read_dmx_prefab(ctx, filepath: str, arm, parsed) -> tuple[int, int, int, in
 def _build_dmx_attachments(ctx, skel, arm) -> int:
     """Unlike the model-import path, bones are resolved by name - there is no boneIDs map
     when the armature was not built from this file."""
-    from .build import build_attachment_empty
+    from .build import build_attachment
 
     bone_lower = {b.name.lower(): b.name for b in arm.data.bones}
     coll = bpy.context.scene.collection
@@ -103,7 +103,7 @@ def _build_dmx_attachments(ctx, skel, arm) -> int:
         if not resolved:
             missing.append(dmx_bone)
             continue
-        build_attachment_empty(ctx, coll, arm, att.name, resolved, att.matrix)
+        build_attachment(ctx, coll, arm, att.name, resolved, att.matrix)
         created += 1
     if missing:
         ctx.warning(f"DMX attachments: {len(missing)} skipped, bone(s) not found on "

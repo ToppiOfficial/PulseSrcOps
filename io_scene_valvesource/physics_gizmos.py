@@ -45,24 +45,28 @@ def _frame(position, direction):
     return matrix
 
 
+def _radius_ring_shape(gizmo, tube_radius):
+    vertices = []
+
+    def point(angle, tube_angle):
+        radius = 1 + tube_radius * math.cos(tube_angle)
+        return (radius * math.cos(angle), radius * math.sin(angle),
+                tube_radius * math.sin(tube_angle))
+
+    for i in range(96):
+        a, b = i * math.tau / 96, (i + 1) * math.tau / 96
+        for j in range(12):
+            c, d = j * math.tau / 12, (j + 1) * math.tau / 12
+            ac, bc, bd, ad = point(a, c), point(b, c), point(b, d), point(a, d)
+            vertices.extend((ac, bc, bd, ac, bd, ad))
+    return gizmo.new_custom_shape('TRIS', vertices)
+
+
 class SMD_GT_PhysicsRadiusRing(bpy.types.Gizmo):
     bl_idname = 'SMD_GT_PhysicsRadiusRing'
 
     def setup(self):
-        vertices = []
-
-        def point(angle, tube_angle):
-            radius = 1 + 0.05 * math.cos(tube_angle)
-            return (radius * math.cos(angle), radius * math.sin(angle),
-                    0.05 * math.sin(tube_angle))
-
-        for i in range(96):
-            a, b = i * math.tau / 96, (i + 1) * math.tau / 96
-            for j in range(12):
-                c, d = j * math.tau / 12, (j + 1) * math.tau / 12
-                ac, bc, bd, ad = point(a, c), point(b, c), point(b, d), point(a, d)
-                vertices.extend((ac, bc, bd, ac, bd, ad))
-        self._ring = self.new_custom_shape('TRIS', vertices)
+        self._ring = _radius_ring_shape(self, 0.05)
 
     def draw(self, context):
         self.draw_custom_shape(self._ring)

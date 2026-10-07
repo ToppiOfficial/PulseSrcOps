@@ -47,6 +47,7 @@ from . import datamodel, imports, exports, flex, procbones_sim, updater, icons
 from . import gui as GUI
 from .utils import *
 from .props import *
+from .attachments import CLASSES as attachment_classes
 from .physics_gizmos import (SMD_OT_PhysicsShapeDrag, SMD_GT_PhysicsRadiusRing,
                              SMD_GT_PhysicsEndpointLink, SMD_GT_PhysicsMovePlane,
                              SMD_GT_PhysicsMoveArrow, SMD_GGT_PhysicsShape, SMD_GGT_Hitbox)
@@ -166,6 +167,7 @@ _classes = (
     ArmatureItemEntry,
     PrefabItem,
     AttachmentDisplayMeshItem,
+    AttachmentEntry,
     BoneNamePrefixItem,
     MaterialPathItem,
 
@@ -343,7 +345,7 @@ GUI.SMD_PT_Jigglebones,
 
     # Add-on preferences
     ValveSource_AddonPreferences,
-)
+) + attachment_classes
 
 def _register_translations():
     from . import translations

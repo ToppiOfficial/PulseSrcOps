@@ -1451,8 +1451,10 @@ def prefab_available_types(arm: bpy.types.Object, scene=None) -> list[tuple[str,
             if dme and not e.aim_needs_attachment:
                 continue
             lookat_pairs.add((dn, e.aim_offset))
-    if attachments or lookat_pairs:
-        result.append(('ATTACHMENTS', len(attachments) + len(lookat_pairs)))
+    attachment_names = {e.name for e in getattr(avs, 'attachments', [])}
+    attachment_names.update(e.name for e in attachments)
+    if attachment_names or lookat_pairs:
+        result.append(('ATTACHMENTS', len(attachment_names) + len(lookat_pairs)))
 
     hitboxes = get_hitboxes(arm)
     if hitboxes:

@@ -1,4 +1,5 @@
 import bpy, os, math
+from mathutils import Matrix
 from math import *  # pyright: ignore
 
 from ..utils import *
@@ -286,7 +287,10 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
         return result
 
     def _run_attachments(self, arm, fmt, export_path, context):
-        attachments = get_attachments(arm)
+        from ..attachments import resolve_attachments, legacy_rest_matrix
+        attachments = resolve_attachments(
+            arm, [(e, legacy_rest_matrix(e)) for e in get_attachments(arm)],
+            lambda message: self.report({'WARNING'}, message))
 
         is_qc = (fmt == 'QC') or (self.to_clipboard and State.compiler == Compiler.STUDIOMDL)
         lookat_attachments = self._collect_lookat_attachments(arm) if is_qc else []
@@ -307,17 +311,16 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
     def _attachments_qc(self, arm, attachments, lookat_attachments=()):
         lines = []
-        for empty in attachments:
-            if not empty.parent_bone:
-                continue
+        for empty, world_matrix in attachments:
             bone = arm.data.bones.get(empty.parent_bone)
             if not bone:
+                self.report({'WARNING'}, f"Attachment '{empty.name}' needs a parent bone for QC export. Skipping.")
                 continue
             pose_bone = arm.pose.bones.get(empty.parent_bone)
             if not pose_bone:
                 continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
-            relMat = pmat.inverted() @ empty.matrix_world
+            pmat = arm.matrix_world @ get_bone_matrix(pose_bone, rest_space=True)
+            relMat = pmat.inverted() @ world_matrix
             position = relMat.to_translation()
             rotation = relMat.to_quaternion().to_euler('XYZ')
             lines.append(f'$attachment "{empty.name}" "{get_bone_exportname(bone)}" {position.x:.2f} {position.y:.2f} {position.z:.2f} rotate {math.degrees(rotation.y):.0f} {math.degrees(rotation.z):.0f} {math.degrees(rotation.x):.0f}')
@@ -330,23 +333,20 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
 
     def _attachments_vmdl(self, arm, attachments, export_path):
         nodes = []
-        for empty in attachments:
-            if not empty.parent_bone:
-                continue
+        for empty, world_matrix in attachments:
             bone = arm.data.bones.get(empty.parent_bone)
-            if not bone:
+            if empty.parent_bone and not bone:
                 continue
             pose_bone = arm.pose.bones.get(empty.parent_bone)
-            if not pose_bone:
-                continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
-            relMat = pmat.inverted() @ empty.matrix_world
+            pmat = arm.matrix_world @ (get_bone_matrix(pose_bone, rest_space=True)
+                                       if pose_bone else Matrix.Identity(4))
+            relMat = pmat.inverted() @ world_matrix
             position = relMat.translation
-            rotation = relMat.to_euler('YZX')
+            rotation = relMat.to_euler('XYZ')
             nodes.append(KVNode(
                 _class="Attachment",
                 name=empty.name,
-                parent_bone=_s2_prefab_bonename(bone),
+                parent_bone=_s2_prefab_bonename(bone) if bone else '',
                 relative_origin=KVVector3(position.x, position.y, position.z),
                 relative_angles=KVVector3(math.degrees(rotation.y), math.degrees(rotation.z), math.degrees(rotation.x)),
                 weight=1.0,

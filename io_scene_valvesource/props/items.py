@@ -11,6 +11,7 @@ __all__ = [
     'ProcBoneTriggerInfluence',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
+    'AttachmentEntry',
     'BoneNamePrefixItem',
     'MaterialPathItem',
 ]
@@ -47,6 +48,19 @@ class ValveSource_FloatMapRemap(bpy.types.PropertyGroup):
     group : StringProperty(name="Group name", description=get_id("prop_float_map_group_tip"), default="")
     min : FloatProperty(name="Min", description="Maps to 0.0", default=0.0)
     max : FloatProperty(name="Max", description="Maps to 1.0", default=1.0)
+
+
+class AttachmentEntry(bpy.types.PropertyGroup):
+    name: StringProperty(name='Name', default='attachment')
+    bone_name: StringProperty(name='Bone')
+    location: FloatVectorProperty(name='Location', size=3, subtype='TRANSLATION')
+    rotation: FloatVectorProperty(name='Rotation', size=3, subtype='EULER')
+    preview_object: PointerProperty(type=bpy.types.Object, name='Preview Object',
+                                    poll=lambda self, ob: ob.type == 'MESH')
+    color: FloatVectorProperty(name='Object Color', size=4, subtype='COLOR_GAMMA',
+                               default=(0.3, 0.9, 1.0, 0.45), min=0, max=1)
+    preview_scale: FloatVectorProperty(name='Preview Scale', size=3, default=(1, 1, 1))
+    show_preview: BoolProperty(name='Show Preview', default=True)
 
 
 class AttachmentDisplayMeshItem(bpy.types.PropertyGroup):

@@ -2704,7 +2704,8 @@ class SMD_OT_RefreshAttachmentMesh(Operator):
     @classmethod
     def poll(cls, context):
         ob = context.object
-        return ob is not None and ob.type == 'EMPTY' and ob.vs.dmx_attachment
+        return ob is not None and (ob.type == 'ARMATURE' or
+                                   (ob.type == 'EMPTY' and ob.vs.dmx_attachment))
 
     def execute(self, context):
         from .. import viewport_draw
