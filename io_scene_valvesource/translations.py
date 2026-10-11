@@ -2385,7 +2385,7 @@ _data = {
         'en': "Attachment Mesh Preview",
     },
     'prop_preview_attachment_mesh_tip': {
-        'en': "Draw attachment previews for all attachments, selected objects, or selected pose bones",
+        'en': "Draw the assigned display mesh as a ghost at attachment empties",
     },
     'prop_attachment_display_mesh': {
         'en': "Display Mesh",

@@ -12,7 +12,6 @@ __all__ = [
     'ProcBoneTriggerInfluence',
     'ProcBoneEntry',
     'AttachmentDisplayMeshItem',
-    'AttachmentEntry',
     'BoneNamePrefixItem',
     'MaterialPathItem',
     # mixins

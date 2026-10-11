@@ -246,12 +246,11 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
         name=get_id('prop_preview_attachment_mesh'),
         description=get_id('prop_preview_attachment_mesh_tip'),
         items=[
-            ('ALL',      'All',      'Show all attachment previews in the scene'),
-            ('SELECTED', 'Selected', 'Show previews for selected armatures and attachment empties'),
-            ('POSE',     'Pose',     'Show attachments for selected pose bones (Pose mode only)'),
+            ('ALL',      'All',      'Show ghost mesh for all attachment empties in the scene'),
+            ('SELECTED', 'Selected', 'Show ghost mesh only for selected attachment empties'),
             ('NONE',     'None',     'Hide attachment mesh preview'),
         ],
-        default='ALL',
+        default='SELECTED',
     )
     hitbox_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
     physics_shape_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
