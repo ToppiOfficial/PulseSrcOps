@@ -251,7 +251,7 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
             ('POSE',     'Pose',     'Show attachments for selected pose bones (Pose mode only)'),
             ('NONE',     'None',     'Hide attachment mesh preview'),
         ],
-        default='SELECTED',
+        default='ALL',
     )
     hitbox_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)
     physics_shape_sync_pose : BoolProperty(name=get_id('prop_hitbox_sync_pose'), description=get_id('prop_hitbox_sync_pose_tip'), default=True)

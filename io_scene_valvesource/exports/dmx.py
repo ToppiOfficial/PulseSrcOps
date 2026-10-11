@@ -622,7 +622,20 @@ class DmxWriter:
         materials = self.materials
         bone_elements = self.bone_elements
 
+        joint_names = {elem.name for elem in bone_elements.values()}
+        joint_names.update(elem.name for elem in self.DmeModel_transforms)
+        mesh_names = {b.name for b in self.bake_results if b.object.type != "ARMATURE"}
+        reserved_names = joint_names | mesh_names
+
         for bake in [b for b in self.bake_results if b.object.type != "ARMATURE"]:
+            mesh_name = bake.name
+            if mesh_name in joint_names:
+                mesh_name = bake.name + "_mesh"
+                suffix = 1
+                while mesh_name in reserved_names:
+                    mesh_name = f"{bake.name}_mesh_{suffix}"
+                    suffix += 1
+                reserved_names.add(mesh_name)
             self.root["model"] = self.DmeModel
             ob = bake.object
             assert isinstance(ob.data, bpy.types.Mesh)
@@ -633,13 +646,13 @@ class DmxWriter:
             shape_class = "DmePhysicsShape" if (self.dme_mode and not self.proxy_only
                                                 and _src_mt == 'COLLISION') else "DmeMesh"
             vertex_data = dm.add_element("bind", "DmeVertexData", id=bake.name + "verts")
-            DmeMesh = dm.add_element(bake.name, shape_class, id=bake.name + "mesh")
+            DmeMesh = dm.add_element(mesh_name, shape_class, id=bake.name + "mesh")
             DmeMesh["visible"] = True
             DmeMesh["bindState"] = vertex_data
             DmeMesh["currentState"] = vertex_data
             DmeMesh["baseStates"] = datamodel.make_array([vertex_data], datamodel.Element)
 
-            DmeDag = dm.add_element(bake.name, "DmeDag", id="ob" + bake.name + "dag")
+            DmeDag = dm.add_element(mesh_name, "DmeDag", id="ob" + bake.name + "dag")
             if self.want_jointlist:
                 self.jointList.append(DmeDag)
             DmeDag["shape"] = DmeMesh
@@ -652,11 +665,11 @@ class DmxWriter:
                 self.DmeModel_children.append(DmeDag)
                 trfm_mat = ob.matrix_world
 
-            trfm = self._make_transform(bake.name, trfm_mat, "ob" + bake.name)
+            trfm = self._make_transform(mesh_name, trfm_mat, "ob" + bake.name)
             if self.want_jointtransforms:
                 self.jointTransforms.append(trfm)
             DmeDag["transform"] = trfm
-            self.DmeModel_transforms.append(self._make_transform(bake.name, trfm_mat, "ob_base" + bake.name))
+            self.DmeModel_transforms.append(self._make_transform(mesh_name, trfm_mat, "ob_base" + bake.name))
 
             _limit_mode = getattr(bpy.context.scene.vs, 'vertex_influence_limit_mode', 'AUTO')
             if _src_mt == 'COLLISION':
@@ -1036,7 +1049,7 @@ class DmxWriter:
                             continue
                         corrective_shapes_seen.append(corrective_targets)
 
-                        if bake_flex_mode != 'ADVANCED' and driver_targets and driver_targets != name_targets:
+                        if driver_targets and driver_targets != name_targets:
                             generated = separator.join(driver_targets)
                             print(f"- Renamed shape key '{shape_name}' to '{generated}' to match corrective drivers.")
                             shape_name = generated
@@ -1067,19 +1080,6 @@ class DmxWriter:
                 delta_lengths = [None] * num_verts if cache_deltas else None
                 max_delta = 0
 
-                # Correctives must rebase before the deltas are read, or they export the
-                # full shape movement on top of the targets they are meant to correct.
-                if corrective:
-                    corrective_target_shapes = []
-                    for ct_name in corrective_targets:
-                        ct = bake.shapes.get(ct_name)
-                        if ct:
-                            corrective_target_shapes.append(ct)
-                            for sv in shape.vertices:
-                                sv.co -= ob.data.vertices[sv.index].co - ct.vertices[sv.index].co
-                        else:
-                            self._warning(get_id("exporter_err_missing_corrective_target", format_string=True).format(shape_name, ct_name))
-
                 # Only elements that differ at all can pass the checks below, so the
                 # per-element mathutils code runs on those alone.
                 fast = not corrective and not wrinkle_scale
@@ -1101,6 +1101,18 @@ class DmxWriter:
                                 delta_lengths[ob_vert.index] = dl  # pyright: ignore
                             shape_pos.append(datamodel.Vector3(delta))
                             shape_posIdx.append(ob_vert.index)
+
+                # Positions store the corrective delta; normals need the combined shape.
+                if corrective:
+                    corrective_target_shapes = []
+                    for ct_name in corrective_targets:
+                        ct = bake.shapes.get(ct_name)
+                        if ct:
+                            corrective_target_shapes.append(ct)
+                            for sv in shape.vertices:
+                                sv.co -= ob.data.vertices[sv.index].co - ct.vertices[sv.index].co
+                        else:
+                            self._warning(get_id("exporter_err_missing_corrective_target", format_string=True).format(shape_name, ct_name))
 
                 preserve_basis_normals = bake.src.data.vs.bake_shapekey_as_basis_normals
                 for ob_loop in loops_iter:

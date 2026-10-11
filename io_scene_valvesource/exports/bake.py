@@ -529,7 +529,8 @@ class Baker:
     def _bake_shapes(self, source_ob: bpy.types.Object, result: BakeResult, solidify_fill_rim) -> None:
         should_tri = State.exportFormat == ExportFormat.SMD or source_ob.vs.triangulate
         normalize = source_ob.data.vs.normalize_shapekeys
-        source_ob.show_only_shape_key = not normalize
+        # Isolate the active key so corrective drivers cannot override its bake.
+        source_ob.show_only_shape_key = True
         preserve_basis_normals = source_ob.data.vs.bake_shapekey_as_basis_normals
 
         shapes_to_process = list(enumerate(source_ob.data.shape_keys.key_blocks))[1:]

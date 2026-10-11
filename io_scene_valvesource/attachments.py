@@ -247,12 +247,14 @@ class SMD_PT_Attachments(bpy.types.Panel):
             box.prop_search(entry, 'bone_name', arm.data, 'bones')
             if entry.bone_name and entry.bone_name not in arm.data.bones:
                 box.label(text='Bone not found', icon='ERROR')
-            box.prop(entry, 'location')
-            box.prop(entry, 'rotation')
+            for prop, label in (('location', 'Location'), ('rotation', 'Rotation')):
+                box.label(text=label)
+                row = box.row(align=True)
+                for index, axis in enumerate('XYZ'):
+                    row.prop(entry, prop, index=index, text=axis)
             box.prop(entry, 'preview_object')
             box.prop(entry, 'show_preview')
             box.prop(entry, 'color')
-            box.prop(entry, 'preview_scale')
             box.operator('smd.refresh_attachment_mesh', icon='FILE_REFRESH')
 
 
