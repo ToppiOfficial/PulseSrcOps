@@ -11,15 +11,17 @@ What this module does guarantee is that mesh construction goes through
 build.build_mesh, so SMD and DMX share one bmesh path.
 """
 
+import itertools
 import os
 from dataclasses import dataclass, field
 
 import bpy
+import numpy as np
 from bpy.app.translations import pgettext
-from mathutils import Matrix, Euler, Vector
+from mathutils import Matrix, Euler, Vector, kdtree
 
 from ..utils import (REF, ANIM, PHYS, FLEX, get_id, hasShapes,
-                     removeObject, shape_types, smdBreak, smdContinue)
+                     removeObject, shape_types, smdBreak, smdContinue, BenchMarker)
 from .records import ImportedFace, ImportedLoopLayer, ImportedMesh
 
 
@@ -208,64 +210,22 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
     group_index = {name: i for i, name in enumerate(group_names)}
     normals: list = []
     uvs: list = []
-    vert_map: dict = {}
-    bad_weights = 0
-    count_polys = 0
 
+    lines = []
+    end_line = None
     for line in smd.file:
-        line = line.rstrip("\n")
-        if line and smdBreak(line):
+        if line.rstrip("\n") == "end":
+            end_line = line
             break
-        if smdContinue(line):
-            continue
+        lines.append(line)
 
-        mat_path = line if line else pgettext(get_id("importer_name_nomat", data=True))
-        face_set = _face_set_for(mesh, mat_path)
-
-        vertex_count = 0
-        face_loops: list[int] = []
-        for line in smd.file:
-            if smdBreak(line):
-                break
-            if smdContinue(line):
-                continue
-            values = line.split()
-
-            vertex_count += 1
-            co = tuple(float(v) for v in values[1:4])
-            normals.append(tuple(float(v) for v in values[4:7]))
-            uvs.append((float(values[7]), float(values[8])))
-
-            weights: list = []
-            if len(values) > 10 and values[9] != "0":
-                for i in range(10, 10 + (int(values[9]) * 2), 2):
-                    name = smd.boneIDs.get(int(values[i]))
-                    if name is None or name not in group_index:
-                        bad_weights += 1
-                        continue
-                    weights.append((group_index[name], float(values[i + 1])))
-            else:
-                name = smd.boneIDs.get(int(values[0]))
-                if name is None or name not in group_index:
-                    bad_weights += 1
-                else:
-                    weights.append((group_index[name], 1.0))
-
-            key = (co, tuple(weights))
-            vert_index = vert_map.get(key)
-            if vert_index is None:
-                vert_index = len(mesh.positions)
-                mesh.positions.append(co)
-                mesh.weights.append(weights)
-                vert_map[key] = vert_index
-
-            face_loops.append(len(mesh.position_indices))
-            mesh.position_indices.append(vert_index)
-
-            if vertex_count == 3:
-                mesh.faces.append(ImportedFace(loops=face_loops, face_set=face_set))
-                count_polys += 1
-                break
+    if _is_plain_triangle_block(lines):
+        count_polys, bad_weights = _read_plain_triangles(
+            lines, smd, mesh, group_index, normals, uvs)
+    else:
+        rest = itertools.chain(lines, [end_line] if end_line else [], smd.file)
+        count_polys, bad_weights = _read_triangle_lines(
+            rest, smd, mesh, group_index, normals, uvs)
 
     mesh.loop_layers.append(ImportedLoopLayer(
         name="__bst_normal", kind='NORMAL',
@@ -279,6 +239,137 @@ def read_polys(ctx, smd, group_names: list[str], qc=None) -> ImportedMesh | None
     print(f"- Imported {count_polys} polys")
 
     return mesh
+
+
+def _is_plain_triangle_block(lines) -> bool:
+    """A material line then exactly three vertex lines per face, with no comments or
+    blank vertex lines - the shape every exporter writes."""
+    if len(lines) % 4:
+        return False
+    text = "".join(lines)
+    if text.startswith("//") or "\n//" in text:
+        return False
+    if "\n\n" not in text and not text.startswith("\n"):
+        return True
+    for i, line in enumerate(lines):
+        if line.startswith("//") or (i % 4 and line == "\n"):
+            return False
+    return True
+
+
+def _read_plain_triangles(lines, smd, mesh, group_index, normals, uvs):
+    nomat = pgettext(get_id("importer_name_nomat", data=True))
+    face_sets: dict = {}
+    vert_map: dict = {}
+    # (parent id, weight tokens) -> (weights, bad link count); vertices repeat per face
+    weight_cache: dict = {}
+    bone_ids = smd.boneIDs
+    positions = mesh.positions
+    position_indices = mesh.position_indices
+    faces = mesh.faces
+    bad_weights = 0
+
+    for f in range(0, len(lines), 4):
+        mat_path = lines[f].rstrip("\n") or nomat
+        face_set = face_sets.get(mat_path)
+        if face_set is None:
+            face_set = face_sets[mat_path] = _face_set_for(mesh, mat_path)
+
+        first_loop = len(position_indices)
+        for line in lines[f + 1:f + 4]:
+            values = line.split()
+            co = (float(values[1]), float(values[2]), float(values[3]))
+            normals.append((float(values[4]), float(values[5]), float(values[6])))
+            uvs.append((float(values[7]), float(values[8])))
+
+            wkey = (values[0], tuple(values[9:]))
+            cached = weight_cache.get(wkey)
+            if cached is None:
+                cached = weight_cache[wkey] = _parse_weights(values, bone_ids, group_index)
+            weights, bad = cached
+            bad_weights += bad
+
+            key = (co, weights)
+            vert_index = vert_map.get(key)
+            if vert_index is None:
+                vert_index = vert_map[key] = len(positions)
+                positions.append(co)
+                mesh.weights.append(list(weights))
+            position_indices.append(vert_index)
+
+        faces.append(ImportedFace(loops=[first_loop, first_loop + 1, first_loop + 2], face_set=face_set))
+
+    return len(lines) // 4, bad_weights
+
+
+def _parse_weights(values, bone_ids, group_index):
+    weights = []
+    bad = 0
+    if len(values) > 10 and values[9] != "0":
+        for i in range(10, 10 + (int(values[9]) * 2), 2):
+            name = bone_ids.get(int(values[i]))
+            if name is None or name not in group_index:
+                bad += 1
+                continue
+            weights.append((group_index[name], float(values[i + 1])))
+    else:
+        name = bone_ids.get(int(values[0]))
+        if name is None or name not in group_index:
+            bad += 1
+        else:
+            weights.append((group_index[name], 1.0))
+    return tuple(weights), bad
+
+
+def _read_triangle_lines(lines, smd, mesh, group_index, normals, uvs):
+    vert_map: dict = {}
+    bad_weights = 0
+    count_polys = 0
+
+    for line in lines:
+        line = line.rstrip("\n")
+        if line and smdBreak(line):
+            break
+        if smdContinue(line):
+            continue
+
+        mat_path = line if line else pgettext(get_id("importer_name_nomat", data=True))
+        face_set = _face_set_for(mesh, mat_path)
+
+        vertex_count = 0
+        face_loops: list[int] = []
+        for line in lines:
+            if smdBreak(line):
+                break
+            if smdContinue(line):
+                continue
+            values = line.split()
+
+            vertex_count += 1
+            co = tuple(float(v) for v in values[1:4])
+            normals.append(tuple(float(v) for v in values[4:7]))
+            uvs.append((float(values[7]), float(values[8])))
+
+            weights, bad = _parse_weights(values, smd.boneIDs, group_index)
+            bad_weights += bad
+
+            key = (co, weights)
+            vert_index = vert_map.get(key)
+            if vert_index is None:
+                vert_index = len(mesh.positions)
+                mesh.positions.append(co)
+                mesh.weights.append(list(weights))
+                vert_map[key] = vert_index
+
+            face_loops.append(len(mesh.position_indices))
+            mesh.position_indices.append(vert_index)
+
+            if vertex_count == 3:
+                mesh.faces.append(ImportedFace(loops=face_loops, face_set=face_set))
+                count_polys += 1
+                break
+
+    return count_polys, bad_weights
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +407,7 @@ def read_shapes(ctx, smd) -> None:
 
     smd.vta_ref = None
     base_ids: list[int] = []
-    base_cos: list[float] = []
+    base_cos: list = []
     base_name = None
     pending_name = None
     co_map: dict = {}
@@ -324,55 +415,94 @@ def read_shapes(ctx, smd) -> None:
     touched: set = set()
     making_base_shape = True
     num_shapes = 0
+    axis_mat = smd.axisMat
+    bench = BenchMarker(2)
 
-    for line in smd.file:
-        line = line.rstrip("\n")
-        if smdBreak(line):
-            break
-        if smdContinue(line):
-            continue
-
-        values = line.split()
-
-        if values[0] == "time":
-            shape_name = smd.shapeNames.get(values[1])
+    for header, lines in _read_vta_frames(smd.file):
+        if header is not None:
+            shape_name = smd.shapeNames.get(header[1])
             if base_name is None:
                 base_name = shape_name or "Basis"
             elif making_base_shape:
-                co_map = _match_vta(ctx, smd, targets, base_ids, base_cos)
+                bench.report("base frame")
+                cos = np.concatenate(base_cos) if base_cos else np.empty((0, 3), np.float32)
+                co_map = (_map_vta_by_loop(targets, base_ids, cos)
+                          or _match_vta(ctx, smd, targets, base_ids, cos))
+                bench.report("match")
                 if co_map is None:
                     return
                 making_base_shape = False
             if not making_base_shape:
                 frame_keys = {}
-                pending_name = shape_name or values[1]
+                pending_name = shape_name or header[1]
                 num_shapes += 1
-            continue
 
-        cur_id = int(values[0])
-        vta_co = smd.axisMat @ Vector([float(values[1]), float(values[2]), float(values[3])])
+        ids, cos = _parse_vta_rows(lines, axis_mat)
 
         if making_base_shape:
-            base_ids.append(cur_id)
-            base_cos.extend(vta_co)
+            base_ids += ids
+            base_cos.append(cos)
             continue
 
-        entry = co_map.get(cur_id)
-        if entry is None:
-            continue
-        ob, vert_index = entry
-        key_block = frame_keys.get(ob)
-        if key_block is None:
-            # Created lazily so a frame only adds a shape key to the meshes it moves.
-            if not hasShapes(ob, False):
-                ob.shape_key_add(name=base_name)
-            key_block = ob.shape_key_add(name=pending_name)
-            key_block.value = 0.0
-            frame_keys[ob] = key_block
-            touched.add(ob)
-        key_block.data[vert_index].co = vta_co
+        for cur_id, co in zip(ids, cos.tolist()):
+            entry = co_map.get(cur_id)
+            if entry is None:
+                continue
+            ob, vert_index = entry
+            key_block = frame_keys.get(ob)
+            if key_block is None:
+                # Created lazily so a frame only adds a shape key to the meshes it moves.
+                if not hasShapes(ob, False):
+                    ob.shape_key_add(name=base_name)
+                key_block = ob.shape_key_add(name=pending_name)
+                key_block.value = 0.0
+                frame_keys[ob] = key_block
+                touched.add(ob)
+            key_block.data[vert_index].co = co
 
+    bench.report(f"shapes ({num_shapes})")
     print(f"- Imported {num_shapes} flex shapes across {len(touched)} mesh(es)")
+
+
+def _read_vta_frames(file) -> list:
+    """[(split `time` line or None, [data lines])] up to the end of the block."""
+    frames = [(None, [])]
+    append = frames[-1][1].append
+    # smdBreak / smdContinue inlined; they are per-line calls on 100k+ line blocks
+    for line in file:
+        line = line.rstrip("\n")
+        if not line or line == "end":
+            break
+        if line.startswith("//"):
+            continue
+        if "time" in line:
+            values = line.split()
+            if values[0] == "time":
+                frames.append((values, []))
+                append = frames[-1][1].append
+                continue
+        append(line)
+    return frames
+
+
+def _parse_vta_rows(lines, axis_mat):
+    rows = [line.split() for line in lines]
+    ids = [int(r[0]) for r in rows]
+    cos = np.array([(float(r[1]), float(r[2]), float(r[3])) for r in rows], np.float32).reshape(-1, 3)
+    return ids, _transform_points(axis_mat, cos)
+
+
+def _transform_points(mat, points):
+    # Bit-exact with mathutils `mat @ Vector(p)`: float32 products summed in float64.
+    m = np.array(mat, np.float32)
+    out = np.empty_like(points)
+    for row in range(3):
+        dot = np.zeros(len(points))
+        for col in range(3):
+            dot += m[row, col] * points[:, col]
+        dot += np.float64(m[row, 3])
+        out[:, row] = dot
+    return out
 
 
 def _shape_targets(ctx, smd) -> list:
@@ -392,75 +522,72 @@ def _shape_targets(ctx, smd) -> list:
     return [o for o in bpy.context.selected_objects if o.type in shape_types]
 
 
-def _round_key(co):
-    return (round(co.x, 3), round(co.y, 3), round(co.z, 3))
+def _vertex_cos(me):
+    co = np.empty(len(me.vertices) * 3, np.float32)
+    me.vertices.foreach_get("co", co)
+    return co.reshape(-1, 3)
 
 
-def _vertex_lookup(ob) -> dict:
-    lookup: dict = {}
-    for i, v in enumerate(ob.data.vertices):
-        lookup.setdefault(_round_key(v.co), i)  # first wins, as list.index did
-    return lookup
+def _map_vta_by_loop(targets, ids, cos) -> dict | None:
+    """A VTA exported alongside its SMD lists one base vertex per SMD face corner, in
+    file order, so id i is loop i of the imported mesh. Exact for vertices that share a
+    position, which a nearest-vertex search cannot tell apart."""
+    if len(targets) != 1 or not ids:
+        return None
+    me = targets[0].data
+    if len(me.loops) != len(ids) or ids != list(range(len(ids))):
+        return None
+    loop_verts = np.empty(len(me.loops), np.int32)
+    me.loops.foreach_get("vertex_index", loop_verts)
+    if np.abs(_vertex_cos(me)[loop_verts] - cos).max() >= _MATCH_TOLERANCE:
+        return None  # same corner count, different mesh or edited since import
+    ob = targets[0]
+    return {i: (ob, v) for i, v in enumerate(loop_verts.tolist())}
 
 
 def _match_vta(ctx, smd, targets, ids, cos):
     """Map each base-frame VTA id onto (mesh, vertex index).
 
-    Shrinkwrap NEAREST_VERTEX snaps every point to the closest vertex on its target, so
-    the snap distance says whether the point belongs to that mesh at all. The original
-    shrinkwrapped against a single mesh and accepted any snap, which silently mapped a
-    body vertex onto whichever face vertex happened to be nearest. Taking the smallest
-    snap distance across all candidate meshes gives each vertex its real owner.
+    Each point goes to the nearest vertex across all candidate meshes, so a body vertex
+    is never claimed by whichever face vertex happens to be closest within one mesh.
 
     Returns None when nothing matched, having already reported the error.
     """
     count = len(ids)
-    vd = bpy.data.meshes.new(name="VTA vertices")
-    vd.vertices.add(count)
-    vd.vertices.foreach_set("co", cos)
-    ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
-    (smd.g if smd.g else bpy.context.scene.collection).objects.link(ref)
-    err_group = ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
-
-    origin = [Vector(cos[i * 3:i * 3 + 3]) for i in range(count)]
     best: list = [None] * count
     best_dist = [_MATCH_TOLERANCE] * count
+    points = cos.tolist()
 
     for ob in targets:
-        lookup = _vertex_lookup(ob)
-        ref.matrix_world = ob.matrix_world
-        mod = ref.modifiers.new(name="VTA Shrinkwrap", type='SHRINKWRAP')
-        mod.target = ob
-        mod.wrap_method = 'NEAREST_VERTEX'
-        bpy.context.view_layer.update()
-        snapped = bpy.data.meshes.new_from_object(
-            ref.evaluated_get(bpy.context.evaluated_depsgraph_get()))
-        ref.modifiers.remove(mod)
-
-        for i, v in enumerate(snapped.vertices):
-            dist = (v.co - origin[i]).length
-            if dist >= best_dist[i]:
-                continue
-            index = lookup.get(_round_key(v.co))
-            if index is not None:
+        mesh_cos = _vertex_cos(ob.data).tolist()
+        tree = kdtree.KDTree(len(mesh_cos))
+        for i, co in enumerate(mesh_cos):
+            tree.insert(co, i)
+        tree.balance()
+        find = tree.find
+        for i, co in enumerate(points):
+            _, index, dist = find(co)
+            if index is not None and dist < best_dist[i]:
                 best_dist[i] = dist
                 best[i] = (ob, index)
 
-        bpy.data.meshes.remove(snapped)
-
     unmatched = [i for i in range(count) if best[i] is None]
     if unmatched:
-        ratio = len(unmatched) / count
+        vd = bpy.data.meshes.new(name="VTA vertices")
+        vd.vertices.add(count)
+        vd.vertices.foreach_set("co", cos.ravel())
+        ref = smd.vta_ref = bpy.data.objects.new(name=vd.name, object_data=vd)
+        ref.matrix_world = targets[0].matrix_world
+        (smd.g if smd.g else bpy.context.scene.collection).objects.link(ref)
+        err_group = ref.vertex_groups.new(name=get_id("importer_name_unmatchedvta"))
         err_group.add(unmatched, 1.0, 'REPLACE')
+        ratio = len(unmatched) / count
         message = get_id("importer_err_unmatched_mesh", True).format(
             len(unmatched), int(ratio * 100))
         if ratio == 1:
             ctx.error(message)
             return None
         ctx.warning(message)
-    else:
-        removeObject(ref)
-        smd.vta_ref = None
 
     return {ids[i]: best[i] for i in range(count) if best[i] is not None}
 

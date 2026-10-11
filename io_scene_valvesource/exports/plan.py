@@ -6,8 +6,8 @@ from bpy.types import Collection
 
 from ..utils import *
 from .. import datamodel, ordered_set, flex
-from .records import BakedVertexAnimation, BakeResult, ExportTask, _SplitPart, _MeshPlan
-from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder, MeshSplitBuilder
+from .records import BakedVertexAnimation, BakeResult, ExportTask, _MeshPlan
+from .geometry import LODBuilder, EdgelineBuilder, BackfaceBuilder
 
 
 class ExportPlanner:
@@ -16,7 +16,6 @@ class ExportPlanner:
         self._lod_builder = LODBuilder(reporter)
         self._edgeline_builder = EdgelineBuilder(reporter, merge_fn=self._apply_merge_vertices)
         self._backface_builder = BackfaceBuilder(reporter)
-        self._mesh_split_builder = MeshSplitBuilder(reporter)
         self._owned_objects: list[bpy.types.Object] = []
         self._owned_collections: list[bpy.types.Collection] = []
         self._name_map: dict[int, str] = {}
@@ -144,7 +143,7 @@ class ExportPlanner:
         for_collection: bool,
         ) -> typing.Optional[bpy.types.Object]:
         
-        if not source_ob.vs.use_toon_edgeline:
+        if pulsemodel_vertex_data_enabled() or not source_ob.vs.use_toon_edgeline:
             return None
         if source_ob.vs.export_edgeline_separately:
             return None  # caller handles separately-exported case
@@ -161,7 +160,7 @@ class ExportPlanner:
         return None
 
     def _apply_backface(self, target: bpy.types.Object, export_name: str, post_ok: bool) -> typing.Optional[bpy.types.Object]:
-        if not post_ok or not target.vs.generate_backface:
+        if pulsemodel_vertex_data_enabled() or not post_ok or not target.vs.generate_backface:
             return None
         if not is_mesh_compatible(target) or target.type not in modifier_compatible:
             return None
@@ -179,10 +178,11 @@ class ExportPlanner:
         post_ok  = getattr(ob.vs, 'mesh_type', 'DEFAULT') == 'DEFAULT'
         is_mesh  = is_mesh_compatible(ob) and ob.type in modifier_compatible
 
-        needs_pp = post_ok and is_mesh and (ob.vs.use_mesh_split or ob.vs.use_toon_edgeline or ob.vs.generate_backface)
+        needs_pp = (post_ok and is_mesh and not pulsemodel_vertex_data_enabled()
+                    and (ob.vs.use_toon_edgeline or ob.vs.generate_backface))
 
         lod_source = None
-        if post_ok and is_mesh and ob.vs.generate_lods and ob.vs.lod_count > 0 \
+        if not pulsemodel_compiler_enabled() and post_ok and is_mesh and ob.vs.generate_lods and ob.vs.lod_count > 0 \
                 and not self._is_existing_lod(export_name):
             lod_source = self._make_ob_copy(ob)
             if not hasShapes(ob):
@@ -193,18 +193,6 @@ class ExportPlanner:
             target = self._make_ob_copy(ob)
             self._name_map[target.session_uid] = ob.name
 
-        split_parts: list[_SplitPart] = []
-        if post_ok and is_mesh and ob.vs.use_mesh_split \
-                and not export_name.endswith(("_order", "_edgeline", "_backface")):
-            for so in self._mesh_split_builder.build(target, export_name):
-                self._owned_objects.append(so)
-                State.exportableObjects.add(so.session_uid)
-                n       = so.get("mesh_split_n", 0)
-                so_name = re.sub(r"_lod[1-9]\d*$", "", export_name) + f"_split{n}"
-                so_el   = self._apply_edgeline(so, so_name, ob, for_collection)
-                so_bf   = self._apply_backface(so, so_name, post_ok)
-                split_parts.append(_SplitPart(so, so_name, so_el, so_bf))
-
         base_edgeline = None
         if post_ok and not export_name.endswith("_edgeline"):
             base_edgeline = self._apply_edgeline(target, export_name, ob, for_collection)
@@ -213,7 +201,7 @@ class ExportPlanner:
         if not export_name.endswith("_backface"):
             base_backface = self._apply_backface(target, export_name, post_ok)
 
-        return _MeshPlan(ob, target, lod_source, base_edgeline, base_backface, split_parts)
+        return _MeshPlan(ob, target, lod_source, base_edgeline, base_backface)
 
     # -- collection planning --------------------------------------------------
 
@@ -241,13 +229,6 @@ class ExportPlanner:
         for ob, plan in plans.items():
             effective_objects[ob] = plan.target
             base_obs.append(plan.target)
-            for sp in plan.split_parts:
-                base_obs.append(sp.ob)
-                if sp.edgeline:
-                    base_obs.append(sp.edgeline)
-                    edgeline_copies.append(sp.edgeline)
-                if sp.backface:
-                    base_obs.append(sp.backface)
             if plan.base_edgeline:
                 base_obs.append(plan.base_edgeline)
                 edgeline_copies.append(plan.base_edgeline)
@@ -302,13 +283,6 @@ class ExportPlanner:
                 if el and el is not working_ob:
                     self._owned_objects.append(el)
                     edgeline_obs.append(el)
-            if plan:
-                for sp in plan.split_parts:
-                    if ob.vs.export_edgeline_separately:
-                        sp_el = self._edgeline_builder.build(sp.ob, sp.name)
-                        if sp_el and sp_el is not sp.ob:
-                            self._owned_objects.append(sp_el)
-                            edgeline_obs.append(sp_el)
 
         for lod_idx, lod_obs in lod_buckets.items():
             lod_col = self._make_lod_collection(target_col, lod_idx, lod_obs, col.name)
@@ -396,22 +370,9 @@ class ExportPlanner:
         allowed_uids = {target.session_uid}
         companions   = [x for x in [plan.base_edgeline, plan.base_backface] if x is not None]
 
-        order_tasks: list[ExportTask] = []
-        for sp in plan.split_parts:
-            if ob.vs.export_mesh_split_separately:
-                sp_companions = [x for x in [sp.edgeline, sp.backface] if x is not None]
-                order_tasks.append(ExportTask(sp.ob, sp.name, {sp.ob.session_uid}, sp_companions))
-            else:
-                companions.append(sp.ob)
-                if sp.edgeline:
-                    companions.append(sp.edgeline)
-                if sp.backface:
-                    companions.append(sp.backface)
-
         tasks = [ExportTask(target, export_name, allowed_uids, companions)]
 
         if not is_mesh_compatible(ob) or ob.type not in modifier_compatible:
-            tasks.extend(order_tasks)
             return tasks
 
         if plan.lod_source is not None:
@@ -433,15 +394,7 @@ class ExportPlanner:
                 State.exportableObjects.add(el.session_uid)
                 base = re.sub(r"_lod[1-9]\d*$", "", export_name)
                 tasks.append(ExportTask(el, base + "_edgeline", {el.session_uid}))
-            for sp in plan.split_parts:
-                sp_el = self._edgeline_builder.build(sp.ob, sp.name)
-                if sp_el and sp_el is not sp.ob:
-                    self._owned_objects.append(sp_el)
-                    State.exportableObjects.add(sp_el.session_uid)
-                    el_base = re.sub(r"_lod[1-9]\d*$", "", sp.name)
-                    tasks.append(ExportTask(sp_el, el_base + "_edgeline", {sp_el.session_uid}))
 
-        tasks.extend(order_tasks)
         return tasks
 
     def _armature_export_name(self, id: bpy.types.Object) -> str:

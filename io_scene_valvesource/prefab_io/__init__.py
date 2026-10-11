@@ -12,7 +12,7 @@ export paths can't drift; its ``import_*`` readers invert that same math to
 rebuild ``vs.proc_bones`` entries + slot actions from a DME or VRD source.
 """
 
-from . import jigglebone, hitbox, proceduralbone
+from . import jigglebone, hitbox, proceduralbone, physicsshape
 
 from .jigglebone import (
     import_jigglebones_from_dmx_elements,

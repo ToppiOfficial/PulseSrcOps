@@ -131,7 +131,7 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     dom_elem = dm.add_element("", "DmeCombinationDominationRule",
                                              id=ob.name + rule.dominator_names + rule.suppressed_names + "dom")
                     dom_elem["dominators"] = datamodel.make_array(d_names, str)
-                    dom_elem["supressed"]  = datamodel.make_array(s_names, str)
+                    dom_elem["suppressed"] = datamodel.make_array(s_names, str)
                     dom_array.append(dom_elem)
 
                 # Flex rules - exclude DOMINATION and CORRECTIVE (correctives are pure deltas)

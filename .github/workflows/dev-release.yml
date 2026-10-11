@@ -49,6 +49,7 @@ jobs:
           NOTES=$(printf '> [!WARNING]\n> This is an automated dev build. It may be unstable, contain hidden bugs, or introduce breaking changes. Use at your own risk.\n\n**Commit:** %s\n\n%s' "${COMMIT_URL}" "${COMMIT_MSG}")
           gh release create "dev" \
             "${{ steps.meta.outputs.zip }}" \
+            --target "$GITHUB_SHA" \
             --title "dev" \
             --notes "${NOTES}" \
             --prerelease
