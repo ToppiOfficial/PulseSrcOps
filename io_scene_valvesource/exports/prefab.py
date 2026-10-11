@@ -1,4 +1,5 @@
 import bpy, os, math
+from mathutils import Matrix
 from math import *  # pyright: ignore
 
 from ..utils import *
@@ -308,7 +309,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
     def _attachments_qc(self, arm, attachments, lookat_attachments=()):
         lines = []
         for empty in attachments:
-            if not empty.parent_bone:
+            if empty.parent_type != 'BONE':
                 continue
             bone = arm.data.bones.get(empty.parent_bone)
             if not bone:
@@ -316,7 +317,7 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
             pose_bone = arm.pose.bones.get(empty.parent_bone)
             if not pose_bone:
                 continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
+            pmat = arm.matrix_world @ get_bone_matrix(pose_bone, rest_space=True)
             relMat = pmat.inverted() @ empty.matrix_world
             position = relMat.to_translation()
             rotation = relMat.to_quaternion().to_euler('XYZ')
@@ -331,22 +332,19 @@ class PrefabExporter(bpy.types.Operator, ExportCheck):
     def _attachments_vmdl(self, arm, attachments, export_path):
         nodes = []
         for empty in attachments:
-            if not empty.parent_bone:
+            is_root = empty.parent_type != 'BONE'
+            bone = None if is_root else arm.data.bones.get(empty.parent_bone)
+            pose_bone = None if is_root else arm.pose.bones.get(empty.parent_bone)
+            if not is_root and not (bone and pose_bone):
                 continue
-            bone = arm.data.bones.get(empty.parent_bone)
-            if not bone:
-                continue
-            pose_bone = arm.pose.bones.get(empty.parent_bone)
-            if not pose_bone:
-                continue
-            pmat = get_bone_matrix(pose_bone, rest_space=True)
+            pmat = arm.matrix_world @ (get_bone_matrix(pose_bone, rest_space=True) if pose_bone else Matrix.Identity(4))
             relMat = pmat.inverted() @ empty.matrix_world
             position = relMat.translation
             rotation = relMat.to_euler('YZX')
             nodes.append(KVNode(
                 _class="Attachment",
                 name=empty.name,
-                parent_bone=_s2_prefab_bonename(bone),
+                parent_bone=_s2_prefab_bonename(bone) if bone else '',
                 relative_origin=KVVector3(position.x, position.y, position.z),
                 relative_angles=KVVector3(math.degrees(rotation.y), math.degrees(rotation.z), math.degrees(rotation.x)),
                 weight=1.0,

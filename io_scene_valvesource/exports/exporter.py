@@ -656,8 +656,7 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             for e in bpy.data.objects
             if e.type == "EMPTY"
             and e.parent == self.armature_src
-            and e.parent_type == "BONE"
-            and e.parent_bone in bone_names
+            and (e.parent_type == "OBJECT" or (e.parent_type == "BONE" and e.parent_bone in bone_names))
             and isinstance(getattr(e.vs, "dmx_attachment", None), bool)
             and e.vs.dmx_attachment
         ]
@@ -688,11 +687,15 @@ class SmdExporter(bpy.types.Operator, Logger, ExportCheck):
             return False
         if empty.animation_data and len(empty.animation_data.drivers):
             return False
+        if empty.parent_type != "BONE":
+            return True
         return not self.armature_src.data.bones[empty.parent_bone].use_relative_parent
 
     def _empty_rest_world(self, empty) -> Matrix:
         # Swap the parent bone's posed tail matrix for its rest one, avoiding the two
         # full scene re-evaluations a pose_position toggle costs.
+        if empty.parent_type != "BONE":
+            return empty.matrix_world.copy()
         arm = self.armature_src
         pb = arm.pose.bones[empty.parent_bone]
         tail = Matrix.Translation((0.0, pb.bone.length, 0.0))

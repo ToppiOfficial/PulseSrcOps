@@ -1374,7 +1374,8 @@ def get_attachments(ob : bpy.types.Object | None) -> list[bpy.types.Object | Non
     attchs = []
     for ob in bpy.data.objects:
         if ob.type != 'EMPTY' or ob.parent is None or ob.parent != armature: continue
-        if ob.parent_type != 'BONE' or not ob.parent_bone.strip(): continue
+        if ob.parent_type == 'BONE' and not ob.parent_bone.strip(): continue
+        if ob.parent_type not in {'BONE', 'OBJECT'}: continue
         if not ob.vs.dmx_attachment: continue
         
         attchs.append(ob)
