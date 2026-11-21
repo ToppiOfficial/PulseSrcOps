@@ -3,6 +3,10 @@ name: Create Release
 on:
   workflow_dispatch:
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -35,7 +39,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete "${{ steps.meta.outputs.tag }}" --yes --cleanup-tag 2>/dev/null || true
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            gh release delete "${{ steps.meta.outputs.tag }}" --yes --cleanup-tag
+          fi
 
       - name: Create draft release
         env:

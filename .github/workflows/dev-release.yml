@@ -9,6 +9,10 @@ on:
       - 'make_zip.py'
       - '.github/workflows/dev-release.yml'
 
+concurrency:
+  group: dev-release
+  cancel-in-progress: false
+
 jobs:
   dev-release:
     runs-on: ubuntu-latest
@@ -38,7 +42,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete "dev" --yes --cleanup-tag 2>/dev/null || true
+          if gh release view "dev" >/dev/null 2>&1; then
+            gh release delete "dev" --yes --cleanup-tag
+          fi
 
       - name: Create dev pre-release
         env:
