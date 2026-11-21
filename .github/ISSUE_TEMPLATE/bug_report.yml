@@ -47,8 +47,8 @@ body:
     id: target
     attributes:
       label: Target game / compiler
-      description: Which game preset, and which compiler (studiomdl, PulseMDL, resourcecompiler, modeldoc).
-      placeholder: "Source 1 / PulseMDL"
+      description: Which game preset, and which compiler (studiomdl, PulseModel, resourcecompiler, modeldoc).
+      placeholder: "Source 1 / PulseModel"
 
   - type: dropdown
     id: format

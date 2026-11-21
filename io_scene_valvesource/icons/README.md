@@ -34,7 +34,6 @@ custom id to `icon=` will not work.
 |---|---|---|
 | `source1` | QC import menu entry | Source engine logo, developer.valvesoftware.com |
 | `source2` | VMDL import menu entry | Source 2 logo, developer.valvesoftware.com |
-| `fbx` | FBX import menu entry | Autodesk FBX simplified product icon |
 
 The Source ones were downsampled from the wiki's 2048x2048 originals. Note these
 are Valve Developer Community and Autodesk marks, not original art - fine for a Source modding tool,

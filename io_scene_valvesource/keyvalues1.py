@@ -48,9 +48,13 @@ class Token:
         return not self.quoted and self.text == text
 
 
-def tokenize(text: str, line_comments=LINE_COMMENTS, block_comments: bool = True) -> list[Token]:
+def tokenize(text: str, line_comments=LINE_COMMENTS, block_comments: bool = True,
+             escapes: bool = False) -> list[Token]:
     """Whitespace-separated words, "quoted strings", braces as standalone tokens
     even when jammed against a word, comments stripped.
+
+    A quoted string ends at the next quote unless `escapes` is set: QC paths such as
+    "models\\survivors\\" end in a backslash and must not swallow the closing quote.
 
     A `\\\\` line continuation is emitted as a token so callers that care about
     line structure (QC's $definemacro) can see it.
@@ -92,7 +96,7 @@ def tokenize(text: str, line_comments=LINE_COMMENTS, block_comments: bool = True
             i += 1
             buf = []
             while i < n and text[i] != '"':
-                if text[i] == '\\' and i + 1 < n and text[i + 1] == '"':
+                if escapes and text[i] == '\\' and i + 1 < n and text[i + 1] == '"':
                     buf.append('"')
                     i += 2
                     continue

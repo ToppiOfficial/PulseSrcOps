@@ -131,7 +131,7 @@ class DmxWriteFlexControllers(bpy.types.Operator):
                     dom_elem = dm.add_element("", "DmeCombinationDominationRule",
                                              id=ob.name + rule.dominator_names + rule.suppressed_names + "dom")
                     dom_elem["dominators"] = datamodel.make_array(d_names, str)
-                    dom_elem["supressed"]  = datamodel.make_array(s_names, str)
+                    dom_elem["suppressed"] = datamodel.make_array(s_names, str)
                     dom_array.append(dom_elem)
 
                 # Flex rules - exclude DOMINATION and CORRECTIVE (correctives are pure deltas)
@@ -284,7 +284,8 @@ class AddCorrectiveShapeDrivers(bpy.types.Operator):
     def addDrivers(cls, key, driver_names):
         key.driver_remove("value")
         fcurve = key.driver_add("value")
-        fcurve.modifiers.remove(fcurve.modifiers[0])
+        while fcurve.modifiers:  # older Blender adds a default Generator, 5.2 adds none
+            fcurve.modifiers.remove(fcurve.modifiers[0])
         fcurve.driver.type = 'MIN'
         for driver_key in driver_names:
             var = fcurve.driver.variables.new()
