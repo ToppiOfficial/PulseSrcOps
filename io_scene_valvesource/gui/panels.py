@@ -265,6 +265,11 @@ class SMD_PT_SceneModelOptions(Panel):
             row.label(text=get_id("vertex_influence_limit", True) + ":")
             row.row().prop(scene.vs, "vertex_influence_limit", slider=True)
 
+        if State.exportFormat == ExportFormat.DMX:
+            row = l.row().split(factor=0.33)
+            row.label(text=get_id("vertex_color_space", True) + ":")
+            row.row().prop(scene.vs, "vertex_color_space", expand=True)
+
 
 class SMD_PT_Exportables(Panel):
     bl_label = get_id('exportables_title')

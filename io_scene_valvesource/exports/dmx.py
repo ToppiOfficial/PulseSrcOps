@@ -23,6 +23,13 @@ def _read_ints(collection, attr):
 def _rows(buf, width):
     return np.frombuffer(buf, dtype=np.float32).reshape(-1, width).tolist()
 
+def _linear_to_srgb(rgba):
+    # Alpha stays untouched; rgba is a flat float32 buffer of RGBA corners.
+    px = rgba.reshape(-1, 4).copy()
+    c = np.clip(px[:, :3], 0.0, None)
+    px[:, :3] = np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(c, 1.0 / 2.4) - 0.055)
+    return px.reshape(-1)
+
 def _dedup_pairs(flat):
     # Same first-seen order and indices OrderedSet.add would give, without a Vector2 per loop.
     seen = {}
@@ -905,7 +912,9 @@ class DmxWriter:
         # which can differ by an ulp, so the byte is recovered and re-scaled the BMesh way.
         _byte_scale = np.float32(1.0) / np.float32(255.0)
         _seen_color_dmx = set()
-        for data_type, prop in (('BYTE_COLOR', "color_srgb"), ('FLOAT_COLOR', "color")):
+        _color_space = bpy.context.scene.vs.vertex_color_space
+        _byte_prop = "color" if _color_space == 'LINEAR' else "color_srgb"
+        for data_type, prop in (('BYTE_COLOR', _byte_prop), ('FLOAT_COLOR', "color")):
             for attr in corner_attrs(data_type):
                 _blender_name = attr.name
                 if _blender_name in vertex_maps:
@@ -919,7 +928,10 @@ class DmxWriter:
                 _seen_color_dmx.add(_export_name)
                 rgba = np.frombuffer(_read_floats(attr.data, prop, 4), dtype=np.float32)
                 if data_type == 'BYTE_COLOR':
-                    rgba = np.rint(rgba * 255.0).astype(np.float32) * _byte_scale
+                    if _byte_prop == "color_srgb":
+                        rgba = np.rint(rgba * 255.0).astype(np.float32) * _byte_scale
+                elif _color_space == 'SRGB':
+                    rgba = _linear_to_srgb(rgba)
                 make_vertex_layer(_export_name, rgba.reshape(-1, 4).tolist(), datamodel.Vector4)
 
         for attr in corner_attrs('FLOAT'):

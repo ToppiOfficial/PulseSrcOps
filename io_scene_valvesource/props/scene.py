@@ -218,6 +218,13 @@ class ValveSource_SceneProps(bpy.types.PropertyGroup):
     export_list : CollectionProperty(type=ValveSource_Exportable, options={'SKIP_SAVE', 'HIDDEN'})
     game_path : StringProperty(name=get_id("game_path"), description=get_id("game_path_tip"), subtype='DIR_PATH', update=State.onGamePathChanged)
 
+    vertex_color_space : EnumProperty(name=get_id("vertex_color_space"), description=get_id("vertex_color_space_tip"),
+        items=[
+            ('DEFAULT', get_id("vertex_color_space_default"), get_id("vertex_color_space_default_tip")),
+            ('LINEAR', get_id("vertex_color_space_linear"), get_id("vertex_color_space_linear_tip")),
+            ('SRGB', get_id("vertex_color_space_srgb"), get_id("vertex_color_space_srgb_tip")),
+        ], default='DEFAULT')
+
     weightlink_threshold : FloatProperty(name=get_id("weightlink_threshold"), description=get_id("weightlink_threshold_tip"), max=0.001, min=0.0001, default=0.0001, precision=4)
 
     vertex_influence_limit_mode : EnumProperty(name=get_id("vertex_influence_limit_mode"), items=[('AUTO', 'AUTO', get_id("vertex_influence_limit_mode_auto_tip")), ('MANUAL', 'MANUAL', get_id("vertex_influence_limit_mode_manual_tip"))], default='AUTO')

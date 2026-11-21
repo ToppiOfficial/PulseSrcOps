@@ -2941,6 +2941,38 @@ _data = {
         'en': "Select Source 2 Vertex Map",
         'ja': "Source 2 頂点マップを選択",
     },
+    'vertex_color_space': {
+        'en': "Vertex Colors",
+        'ja': "頂点カラー",
+    },
+    'vertex_color_space_tip': {
+        'en': "Color space of exported DMX vertex colors",
+        'ja': "出力するDMX頂点カラーの色空間",
+    },
+    'vertex_color_space_default': {
+        'en': "Default",
+        'ja': "デフォルト",
+    },
+    'vertex_color_space_default_tip': {
+        'en': "Byte colors export as sRGB and float colors export as stored (linear)",
+        'ja': "バイトカラーはsRGB、浮動小数点カラーは保存値(リニア)で出力",
+    },
+    'vertex_color_space_linear': {
+        'en': "Linear",
+        'ja': "リニア",
+    },
+    'vertex_color_space_linear_tip': {
+        'en': "Export all vertex colors as linear values",
+        'ja': "すべての頂点カラーをリニア値で出力",
+    },
+    'vertex_color_space_srgb': {
+        'en': "sRGB",
+        'ja': "sRGB",
+    },
+    'vertex_color_space_srgb_tip': {
+        'en': "Export all vertex colors as sRGB values",
+        'ja': "すべての頂点カラーをsRGB値で出力",
+    },
     'weightlink_threshold': {
         'en': "Weight Link Cull Threshold",
         'ja': "ウェイト・リンクの間引きのしきい値",

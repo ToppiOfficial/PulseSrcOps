@@ -1236,6 +1236,8 @@ class QcInfo:
         self.imported_smds = []
         self.vars = {}
         self.dir_stack = []
+        self.search_dirs = []  # $addsearchdir, relative to the root QC folder
+        self.rendermeshes = {}  # $rendermesh alias -> source file word
         # Every imported mesh with shape keys; global flex data is applied to all of them.
         self.flex_meshes = []
         # Every imported reference mesh, in import order. A decompiled VTA is indexed

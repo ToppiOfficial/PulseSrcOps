@@ -37,7 +37,15 @@ _SEQUENCE_OPTIONS = {
     'activity': 2, 'transision': 2, 'rtransition': 2,
     'blend': 3,
     'blendlayer': 5,
+    'fps': 1, 'loop': 0, 'autoplay': 0, 'post': 0, 'worldspace': 0, 'worldrelative': 0,
+    'posecycle': 1, 'rootdriver': 1,
 }
+
+# Options whose arguments vary: the rest of that line is never an animation file.
+_SEQUENCE_LINE_OPTIONS = {'event', 'motion', 'walkframe', 'ikrule', 'weightlist', 'subtract',
+                          'numframes', 'frames'}
+
+_MESH_EXTS = ('.smd', '.dmx')
 
 
 def _normalise_path(path: str) -> str:
@@ -105,14 +113,24 @@ class _Reader:
             self.cur.next()
 
     # -- child imports -------------------------------------------------------
+    def resolve_source(self, path_word: str, default_ext: str) -> str:
+        """Current directory first, then each $addsearchdir. QC conventionally omits the
+        extension, so DMX is tried too; a genuine miss returns the DMX path to error on."""
+        qc = self.qc
+        rel_smd = appendExt(_normalise_path(path_word), default_ext)
+        rel_dmx = appendExt(_normalise_path(path_word), "dmx")
+        dirs = [qc.cd()] + [os.path.join(qc.root_filedir, d) for d in qc.search_dirs]
+        for d in dirs:
+            for rel in (rel_smd, rel_dmx):
+                candidate = os.path.join(d, rel)
+                if os.path.exists(candidate):
+                    return candidate
+        return os.path.join(qc.cd(), rel_dmx)
+
     def import_file(self, path_word: str, default_ext: str, smd_type,
                     append: str = 'APPEND', layer: int = 0) -> None:
         qc = self.qc
-        path = os.path.join(qc.cd(), appendExt(_normalise_path(path_word), default_ext))
-        if not os.path.exists(path):
-            # QC conventionally omits the extension; fall back to DMX exactly once,
-            # then import whatever that resolves to so a genuine miss still errors.
-            path = os.path.join(qc.cd(), appendExt(_normalise_path(path_word), "dmx"))
+        path = self.resolve_source(path_word, default_ext)
         if path in qc.imported_smds:
             return
         qc.imported_smds.append(path)
@@ -291,10 +309,30 @@ def _run(r: _Reader) -> None:
             _import_vrd(r, words[0])
             continue
 
+        if kw == "$addsearchdir":
+            words = r.rest_of_line(line_no)
+            if words:
+                qc.search_dirs.append(_normalise_path(words[0]))
+            continue
+
+        if kw == "$rendermesh":
+            words = r.rest_of_line(line_no)
+            if len(words) >= 2:
+                qc.rendermeshes[words[0]] = words[1]
+            cur.skip_block()
+            continue
+
+        if kw == "$modelgroup":
+            _read_modelgroup(r, line_no)
+            continue
+
         if kw in ("$body", "$model"):
             words = r.rest_of_line(line_no)
             if len(words) >= 2:
-                r.import_file(words[1], "smd", REF)
+                # PulseModel's $model can list several $rendermesh aliases after the first
+                aliases = [qc.rendermeshes[w] for w in words[2:] if w in qc.rendermeshes]
+                for ref in [qc.rendermeshes.get(words[1], words[1])] + aliases:
+                    r.import_file(ref, "smd", REF)
             continue
 
         if kw == "$lod":
@@ -417,6 +455,52 @@ def _read_lod(r: _Reader, line_no: int) -> None:
         i += 1
 
 
+def _mesh_refs(qc, words: list[str]) -> list[str]:
+    """Mesh sources in one modelgroup choice: $rendermesh aliases or explicit mesh files.
+    Anything else is the choice's display name."""
+    refs = []
+    for w in words:
+        if w in qc.rendermeshes:
+            refs.append(qc.rendermeshes[w])
+        elif w.lower().endswith(_MESH_EXTS):
+            refs.append(w)
+    return refs
+
+
+def _read_modelgroup(r: _Reader, line_no: int) -> None:
+    """$modelgroup <name> <refs...> | { mesh|studio [name <display>] <refs...> | blank }"""
+    qc = r.qc
+    words = r.rest_of_line(line_no)
+    body = [t for t in r.cur.block()]
+
+    choices: list[list[str]] = []
+    if body:
+        current = None
+        after_name = False
+        for t in body:
+            word = _normalise_word(t.text, qc)
+            if not t.quoted and word in ("mesh", "studio"):
+                current = (t.line, [])
+                choices.append(current[1])
+                after_name = False
+            elif not t.quoted and word == "blank":
+                current = None
+            elif current is None or t.line != current[0]:
+                continue
+            elif after_name:
+                after_name = False
+            elif not t.quoted and word == "name":
+                after_name = True
+            else:
+                current[1].append(word)
+    else:
+        choices.append(words[1:])
+
+    for choice in choices:
+        for ref in _mesh_refs(qc, choice):
+            r.import_file(ref, "smd", REF)
+
+
 def _read_bodygroup(r: _Reader, line_no: int) -> None:
     """$bodygroup <name> { studio <file> | blank ... }"""
     r.rest_of_line(line_no)
@@ -462,6 +546,8 @@ def _read_sequence(r: _Reader, line_no: int, kw: str) -> None:
         i = 0
         while i < len(group):
             word = group[i][0]
+            if word in _SEQUENCE_LINE_OPTIONS:
+                break
             skip = _SEQUENCE_OPTIONS.get(word)
             if skip is not None:
                 i += 1 + skip
